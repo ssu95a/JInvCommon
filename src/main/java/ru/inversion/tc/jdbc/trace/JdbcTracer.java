@@ -4,7 +4,6 @@ import ru.inversion.tc.jdbc.event.EventType;
 import ru.inversion.tc.jdbc.event.JdbcEvent;
 import ru.inversion.tc.jdbc.event.JdbcEventBus;
 import ru.inversion.tc.jdbc.event.JdbcEventListener;
-
 import ru.inversion.utils.lstn.IListenerManConsumer;
 import ru.inversion.utils.lstn.ListenerManFactory;
 
@@ -15,11 +14,30 @@ import java.util.Map;
 /**
  * <h5>JDBC tracing hub.</h5>
  * <p>
- * Получает low-level JdbcEvent из JdbcEventBus,
- * преобразует их в JdbcTraceEvent и доставляет
+ * Получает точные low-level JdbcEvent из JdbcEventBus,
+ * преобразует их в friendly JdbcTraceEvent и доставляет
  * JdbcTraceListener-ам.
  * <p>
- * Также позволяет публиковать trace-события,
+ * Low-level слой:
+ * <ul>
+ * <li>EventType;
+ * <li>EventPhase;
+ * <li>JdbcEvent и его наследники.
+ * </ul>
+ * <p>
+ * Пользовательский trace-слой:
+ * <ul>
+ * <li>SQL;
+ * <li>RESULT;
+ * <li>ERROR;
+ * <li>NOTICE;
+ * <li>DBMS_OUTPUT;
+ * <li>INFO;
+ * <li>WARNING;
+ * <li>TECH.
+ * </ul>
+ * <p>
+ * Также позволяет публиковать custom trace-события,
  * которые не имеют JdbcEvent origin.
  */
 public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoCloseable
@@ -34,13 +52,37 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
    private volatile boolean enabled = true;
 
    /*
-    * Включённые категории trace.
+    * Friendly trace-категории, включённые по умолчанию.
+    *
+    * TECH выключен:
+    * low-level lifecycle не должен шуметь в пользовательской форме.
+    *
+    * DBMS_OUTPUT выключен:
+    * его включение меняет состояние server session и может
+    * создавать большой объём данных.
+    *
+    * Deprecated JDBC выключен:
+    * оставлен только как compatibility umbrella.
     */
-   private final EnumSet<JdbcTraceType> enabledTypes = EnumSet.allOf(JdbcTraceType.class);
+   private final EnumSet<JdbcTraceType> enabledTypes =
+           EnumSet.of(
+             JdbcTraceType.SQL,
+             JdbcTraceType.RESULT,
+             JdbcTraceType.ERROR,
+             JdbcTraceType.INFO,
+             JdbcTraceType.WARNING
+           );
 
+   /*
+    * Дополнительный low-level фильтр.
+    *
+    * По умолчанию JDBC core события разрешены все.
+    * Friendly filtering выполняется отдельно через enabledTypes.
+    */
    private final EnumSet<EventType> enabledJdbcEventTypes = EnumSet.allOf(EventType.class);
 
    private boolean closed;
+
 
    /** */
    public JdbcTracer( JdbcEventBus eventBus )
@@ -56,7 +98,7 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
       eventBus.addListener( JdbcEvent.class, this );
 
       /*
-       * Default trace
+       * Default trace consumer.
        */
       addListener( JdbcTraceLoggerListener.instance() );
    }
@@ -71,24 +113,29 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
       if( event == null )
          return;
 
+      /*
+       * --lti скрывает пользовательский trace.
+       *
+       * Внутренние JDBC events при этом уже были созданы
+       * и могли быть обработаны другими internal listeners.
+       */
       if( event.isTraceIgnored() )
-         return;
+          return;
 
-      trace(JdbcTraceEvent.jdbc(event));
+      trace( JdbcTraceEvent.jdbc(event) );
    }
+
 
    /**
     * Публикация готового trace event.
-    * <p>
-    * Используется, в том числе для событий, которые не имеют JdbcEvent.
     */
    public void trace( JdbcTraceEvent event )
    {
       if( event == null )
           return;
 
-      if( !isTraceEnabled( event ) )
-         return;
+      if( !isTraceEnabled(event) )
+          return;
 
       fire(event);
    }
@@ -112,7 +159,7 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
    public void trace( Object source, JdbcTraceType type, String text, Map<String, Object> properties )
    {
       if( !isTraceEnabled(type) )
-         return;
+          return;
 
       fire( JdbcTraceEvent.custom( source, type, text, properties ) );
    }
@@ -135,7 +182,7 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
    public synchronized void removeListener( JdbcTraceListener listener )
    {
       if( listener == null )
-         return;
+          return;
 
       listeners.removeListener(listener);
    }
@@ -156,23 +203,24 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
 
 
    /**
-    * Включение/выключение отдельной trace category.
+    * Включение или выключение friendly trace-категории.
     */
    public synchronized void setEnabled( JdbcTraceType type, boolean enabled )
    {
       if( type == null )
-          //throw new IllegalArgumentException( "type is null" );
-         return;
+          return;
 
       if( enabled )
-         enabledTypes.add(type);
+          enabledTypes.add(type);
       else
-         enabledTypes.remove(type);
+          enabledTypes.remove(type);
    }
 
 
-   /** */
-   public synchronized boolean isEnabled( JdbcTraceType type  )
+   /**
+    * Включена ли friendly trace-категория.
+    */
+   public synchronized boolean isEnabled( JdbcTraceType type )
    {
       if( type == null )
           return false;
@@ -181,6 +229,9 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
    }
 
 
+   /**
+    * Проверка trace event.
+    */
    private boolean isTraceEnabled( JdbcTraceType type )
    {
       if( !enabled )
@@ -189,24 +240,63 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
       return isEnabled(type);
    }
 
+
    /**
-    * Общий + category-level switch.
+    * Общий + friendly + low-level фильтр.
     */
    private boolean isTraceEnabled( JdbcTraceEvent event )
    {
       if( !enabled )
          return false;
 
-      if( !isEnabled(event.type()) )
-         return false;
-
       JdbcEvent jdbcEvent = event.jdbcEvent();
 
-      return jdbcEvent == null || isJdbcEventEnabled(jdbcEvent.type());
+      /*
+       * Custom trace event:
+       * фильтруется только по friendly category.
+       */
+      if( jdbcEvent == null )
+          return isEnabled(event.type());
+
+      /*
+       * JDBC-origin event:
+       * сначала проверяем точный low-level EventType.
+       */
+      if( !isJdbcEventEnabled(jdbcEvent.type()) )
+          return false;
+
+      /*
+       * Основной friendly filter.
+       */
+      if( isEnabled(event.type()) )
+          return true;
+
+      /*
+       * Compatibility со старым JdbcTraceType.JDBC.
+       *
+       * Раньше JDBC означал обычные JDBC events,
+       * но ERROR, NOTICE и DBMS_OUTPUT уже имели
+       * отдельные категории.
+       */
+      if( !isEnabled(JdbcTraceType.JDBC) )
+         return false;
+
+      switch( event.type() )
+      {
+         case SQL:
+         case RESULT:
+         case TECH:
+            return true;
+
+         default:
+            return false;
+      }
    }
 
 
-   /** включение/выключение jdbc event */
+   /**
+    * Включение или выключение точного low-level JDBC EventType.
+    */
    public synchronized void setJdbcEventEnabled( EventType type, boolean enabled )
    {
       if( type == null )
@@ -219,33 +309,82 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
    }
 
 
-   /** */
+   /**
+    * Разрешён ли точный low-level JDBC EventType.
+    */
    public synchronized boolean isJdbcEventEnabled( EventType type )
    {
       if( type == null )
           return false;
+
       return enabledJdbcEventTypes.contains(type);
    }
 
+
+   /**
+    * Используется server-output infrastructure.
+    * <p>
+    * Метод получает только EventType, поэтому для
+    * STATEMENT_EXECUTE не может различить BEFORE,
+    * AFTER и ERROR.
+    * <p>
+    * Он отвечает на более общий вопрос:
+    * может ли событие такого low-level типа
+    * понадобиться включённым friendly-категориям.
+    */
+   public boolean isJdbcEventTraceEnabled( EventType type )
+   {
+      if( !enabled || type == null )
+          return false;
+
+      if( !isJdbcEventEnabled(type) )
+         return false;
+
+      switch( type )
+      {
+         case NOTICE:
+            return isEnabled( JdbcTraceType.NOTICE );
+         case DBMS_OUTPUT:
+            return isEnabled( JdbcTraceType.DBMS_OUTPUT );
+         case STATEMENT_EXECUTE:
+            /*
+             * Один low-level EventType порождает:
+             *
+             * BEFORE -> SQL
+             * AFTER  -> RESULT
+             * ERROR  -> ERROR
+             */
+            return isEnabled(JdbcTraceType.SQL) || isEnabled(JdbcTraceType.RESULT) || isEnabled(JdbcTraceType.ERROR) || isEnabled(JdbcTraceType.JDBC);
+
+         default:
+            /*
+             * Успешное lifecycle событие -> TECH.
+             * Ошибка lifecycle operation -> ERROR.
+             */
+            return isEnabled(JdbcTraceType.TECH) || isEnabled(JdbcTraceType.ERROR) || isEnabled(JdbcTraceType.JDBC);
+      }
+   }
+
+
    /**
     * Observation-only dispatch.
-    *
+    * <p>
     * Каждый listener изолирован отдельно:
     * один broken listener не мешает остальным.
     */
    private void fire( JdbcTraceEvent event )
    {
       try {
-         listeners.fire( listener -> fireListener( listener, event ) );
+         listeners.fire( listener ->fireListener( listener, event ) );
       }
-      catch( ThreadDeath | VirtualMachineError fatal )
-      {
+      catch( ThreadDeath | VirtualMachineError fatal ) {
          throw fatal;
       }
       catch( Throwable ignored )
       {
          /*
-          * Ошибка listener не должна влиять на JDBC/application.
+          * Ошибка listener не должна влиять
+          * на JDBC/application.
           *
           * TODO diagnostics/logging.
           */
@@ -256,8 +395,7 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
    /** */
    private static void fireListener( JdbcTraceListener listener, JdbcTraceEvent event )
    {
-      try
-      {
+      try {
          listener.onJdbcTrace(event);
       }
       catch( ThreadDeath | VirtualMachineError fatal )
@@ -282,31 +420,10 @@ public final class JdbcTracer implements JdbcEventListener<JdbcEvent>, AutoClose
    public synchronized void close()
    {
       if( closed )
-          return;
+         return;
 
       closed = true;
+
       eventBus.removeListener( JdbcEvent.class, this );
-   }
-
-   /** */
-   public boolean isJdbcEventTraceEnabled( EventType type )
-   {
-      if( !enabled )
-         return false;
-
-      if( !isJdbcEventEnabled(type) )
-         return false;
-
-      switch( type )
-      {
-         case NOTICE:
-            return isEnabled(JdbcTraceType.NOTICE);
-
-         case DBMS_OUTPUT:
-            return isEnabled(JdbcTraceType.DBMS_OUTPUT);
-
-         default:
-            return isEnabled(JdbcTraceType.JDBC);
-      }
    }
 }

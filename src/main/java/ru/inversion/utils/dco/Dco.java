@@ -118,7 +118,7 @@ public class Dco implements IDco {
         }
     }
 
-    private static TransformerFactory transformerFactory( ) {
+    static TransformerFactory transformerFactory( ) {
 
         final TransformerFactory tf = TransformerFactory.newInstance();
 
@@ -257,6 +257,11 @@ public class Dco implements IDco {
                     .createElement( Objects.requireNonNull( rootName, "'rootName' is null") )
         );
     }
+
+   /** Internal XML access. */
+   Element xmlElement() {
+      return element;
+   }
 
     @Override
     public Iterable< IDco > attributes( ) {

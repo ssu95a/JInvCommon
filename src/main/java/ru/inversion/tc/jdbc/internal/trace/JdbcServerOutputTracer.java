@@ -23,6 +23,10 @@ import java.util.function.Predicate;
  */
 public final class JdbcServerOutputTracer implements JdbcEventListener<JdbcStatementEvent>, AutoCloseable
 {
+
+   private static final Consumer<String> EMPTY_OUTPUT_CONSUMER =text -> { };
+
+   /** */
    private final JdbcEventBus eventBus;
 
    /*
@@ -137,45 +141,61 @@ public final class JdbcServerOutputTracer implements JdbcEventListener<JdbcState
    /**
     * PostgreSQL RAISE DEBUG / NOTICE, пришедшие через JDBC SQLWarning chain.
     */
-   private void traceWarnings( JdbcStatementEvent event )
+   private void traceWarnings(
+           JdbcStatementEvent event
+   )
    {
       if( !isEnabled(EventType.NOTICE) )
-          return;
+         return;
 
-      Object source = event.getSource();
+      Object source =
+              event.getSource();
 
       if( !(source instanceof Statement) )
          return;
 
       try
       {
-         SQLWarning warning = ((Statement) source).getWarnings();
+         Statement statement =
+                 (Statement) source;
 
-         StringBuilder text = null;
+         SQLWarning warning =
+                 statement.getWarnings();
 
-         while( warning != null )
-         {
-            String message = warning.getMessage();
-
-            if( !S.isNullOrEmpty(message) )
-            {
-               if( text == null )
-                   text = new StringBuilder(message);
-               else
-                   text.append('\n').append(message);
-            }
-
-            warning = warning.getNextWarning();
-         }
-
+         /*
+          * --lti скрывает пользовательский вывод.
+          *
+          * Warning chain не копируем в дополнительный
+          * StringBuilder и не создаём trace events.
+          */
          if( event.isTraceIgnored() )
             return;
 
-         if( text != null )
-             eventBus.fire( JdbcMessageEvent.notice( source, text.toString() ) );
+         while( warning != null )
+         {
+            String message =
+                    warning.getMessage();
+
+            if( !S.isNullOrEmpty(message) )
+            {
+               eventBus.fire(
+                       JdbcMessageEvent.notice(
+                               source,
+                               message
+                       )
+               );
+            }
+
+            warning =
+                    warning.getNextWarning();
+         }
       }
-      catch( SQLException ignored ) {
-         /* Diagnostics не должны влиять на application JDBC. */
+      catch( SQLException ignored )
+      {
+         /*
+          * Diagnostics не должны влиять
+          * на application JDBC.
+          */
       }
    }
 
@@ -183,31 +203,26 @@ public final class JdbcServerOutputTracer implements JdbcEventListener<JdbcState
    /**
     * Oracle DBMS_OUTPUT / PostgreSQL dbms_output extension.
     */
-   private void traceDbmsOutput(
-           JdbcStatementEvent event
-   )
+   private void traceDbmsOutput( JdbcStatementEvent event )
    {
       if( !isEnabled(EventType.DBMS_OUTPUT) )
-         return;
+          return;
 
       if( !dbmsOutput.isEnabled() )
-         return;
+          return;
 
-      String text =
-              dbmsOutput.read(); // читаем ВСЕГДА
+      final Consumer<String> consumer = event.isTraceIgnored()
+              ?
+              EMPTY_OUTPUT_CONSUMER
+              :
+              text ->
+              {
+                 if( S.isNullOrEmpty(text) )
+                    return;
+                 eventBus.fire( JdbcMessageEvent.dbmsOutput( event.getSource(), text ) );
+              };
 
-      if( event.isTraceIgnored() )
-         return;               // но наружу не отдаём
-
-      if( S.isNullOrEmpty(text) )
-         return;
-
-      eventBus.fire(
-              JdbcMessageEvent.dbmsOutput(
-                      event.getSource(),
-                      text
-              )
-      );
+      dbmsOutput.read(consumer);
    }
 
    /**

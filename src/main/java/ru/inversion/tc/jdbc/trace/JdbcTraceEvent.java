@@ -12,28 +12,41 @@ import java.util.Map;
 
 
 /**
- * <h5>Событие trace.</h5>
+ * <h5>Пользовательское trace-событие.</h5>
+ * <p>
  * Может:
  * <ol>
- * <li>Оборачивать low-level JdbcEvent;
- * <li>Быть самостоятельным trace-событием, не связанным с JDBC объектом.
+ * <li>оборачивать low-level JdbcEvent;
+ * <li>быть самостоятельным trace-событием,
+ *     не связанным с JDBC object.
  * </ol>
- * Для JDBC-origin события данные JdbcEvent не копируются
+ * <p>
+ * Для JDBC-origin события данные JdbcEvent
+ * не копируются.
+ * <p>
+ * JdbcEvent сохраняет точное техническое событие,
+ * JdbcTraceType представляет его friendly-категорию
+ * для пользователя.
  */
 public final class JdbcTraceEvent extends EventObject
 {
    /*
-    * Исходное JDBC событие, null для custom trace events.
+    * Исходное low-level JDBC событие.
+    *
+    * null для custom trace event.
     */
    private final JdbcEvent jdbcEvent;
 
    /*
-    * Категория
+    * Пользовательская категория trace.
     */
    private final JdbcTraceType type;
 
    /*
-    * Текст trace-события.
+    * Текст custom trace-события.
+    *
+    * Для JDBC-origin события обычно null:
+    * данные находятся в jdbcEvent.
     */
    private final String text;
 
@@ -52,7 +65,7 @@ public final class JdbcTraceEvent extends EventObject
 
 
    /** */
-   private JdbcTraceEvent (
+   private JdbcTraceEvent(
       Object source,
       JdbcEvent jdbcEvent,
       JdbcTraceType type,
@@ -60,23 +73,21 @@ public final class JdbcTraceEvent extends EventObject
       Map<String, Object> properties
    )
    {
-      super( source );
-
-      Checks.Require.object( type,"type" );
+      super(source);
+      Checks.Require.object( type, "type" );
 
       this.jdbcEvent = jdbcEvent;
       this.type      = type;
       this.text      = text;
 
       this.timestampNanos = jdbcEvent != null ? jdbcEvent.timestampNanos() : System.nanoTime();
-
-      this.properties= snapshot(properties);
+      this.properties     = snapshot(properties);
    }
 
 
    /**
-    * Исходное JDBC событие.
-    * <p>
+    * Исходное low-level JDBC событие.
+    *
     * @return JdbcEvent или null для custom trace event
     */
    public JdbcEvent jdbcEvent()
@@ -92,14 +103,18 @@ public final class JdbcTraceEvent extends EventObject
    }
 
 
-   /** */
+   /**
+    * Friendly trace-категория.
+    */
    public JdbcTraceType type()
    {
       return type;
    }
 
 
-   /** */
+   /**
+    * Текст custom trace-события.
+    */
    public String text()
    {
       return text;
@@ -127,85 +142,165 @@ public final class JdbcTraceEvent extends EventObject
    public <T> T property( String name )
    {
       if( name == null )
-         return null;
+          return null;
+
       return (T) properties.get(name);
    }
 
 
    /**
-    * Wrap on JDBC event.
+    * Оборачивает low-level JdbcEvent
+    * в пользовательское trace-событие.
     */
    public static JdbcTraceEvent jdbc( JdbcEvent event )
    {
-      return jdbc(event, null);
+      return jdbc( event, null );
    }
 
 
    /**
-    * Wrap on JDBC event, properties ver
+    * Оборачивает low-level JdbcEvent
+    * в пользовательское trace-событие
+    * с дополнительными properties.
     */
-   public static JdbcTraceEvent jdbc( JdbcEvent event, Map<String, Object> properties )
+   public static JdbcTraceEvent jdbc(
+           JdbcEvent event,
+           Map<String, Object> properties
+   )
    {
-      Checks.Require.object( event,"event" );
+      Checks.Require.object(
+              event,
+              "event"
+      );
 
-         JdbcTraceType type;
+      return new JdbcTraceEvent(
+              event.getSource(),
+              event,
+              traceType(event),
+              null,
+              properties
+      );
+   }
 
+
+   /**
+    * Преобразует точное low-level JDBC событие
+    * в пользовательскую trace-категорию.
+    */
+   private static JdbcTraceType traceType(
+           JdbcEvent event
+   )
+   {
+      /*
+       * Ошибка любого JDBC operation полезна пользователю,
+       * даже если исходное событие относится к TECH.
+       */
       if( event.phase() == EventPhase.ERROR )
+         return JdbcTraceType.ERROR;
+
+      switch( event.type() )
       {
-         type = JdbcTraceType.ERROR;
+         case STATEMENT_EXECUTE:
+
+            switch( event.phase() )
+            {
+               case BEFORE:
+                  return JdbcTraceType.SQL;
+
+               case AFTER:
+                  return JdbcTraceType.RESULT;
+
+               default:
+                  return JdbcTraceType.TECH;
+            }
+
+         case NOTICE:
+            return JdbcTraceType.NOTICE;
+
+         case DBMS_OUTPUT:
+            return JdbcTraceType.DBMS_OUTPUT;
+
+         default:
+            /*
+             * CONNECTION_OPEN/CLOSE
+             * STATEMENT_OPEN/CLOSE
+             * RESULT_SET_OPEN/CLOSE
+             * TRANSACTION_*
+             * SAVEPOINT_*
+             *
+             * Это внутренние диагностические события.
+             */
+            return JdbcTraceType.TECH;
       }
-      else
-      {
-         switch (event.type()) {
-
-            case NOTICE:
-               type = JdbcTraceType.NOTICE;
-               break;
-
-            case DBMS_OUTPUT:
-               type = JdbcTraceType.DBMS_OUTPUT;
-               break;
-
-            default:
-               type = JdbcTraceType.JDBC;
-               break;
-         }
-      }
-
-      return new JdbcTraceEvent( event.getSource(), event, type, null, properties );
    }
 
 
    /**
-    * Самостоятельное trace-событие, не имеющее JdbcEvent.
+    * Самостоятельное trace-событие,
+    * не имеющее JdbcEvent.
     */
-   public static JdbcTraceEvent custom( Object source, JdbcTraceType type, String text )
+   public static JdbcTraceEvent custom(
+           Object source,
+           JdbcTraceType type,
+           String text
+   )
    {
-      return custom( source, type, text, null);
+      return custom(
+              source,
+              type,
+              text,
+              null
+      );
    }
 
 
    /**
-    * Самостоятельное trace-событие с properties.
+    * Самостоятельное trace-событие
+    * с дополнительными properties.
     */
-   public static JdbcTraceEvent custom( Object source, JdbcTraceType type, String text, Map<String, Object> properties )
+   public static JdbcTraceEvent custom(
+           Object source,
+           JdbcTraceType type,
+           String text,
+           Map<String, Object> properties
+   )
    {
-      return new JdbcTraceEvent( source, null, type, text, properties );
+      return new JdbcTraceEvent(
+              source,
+              null,
+              type,
+              text,
+              properties
+      );
    }
 
 
-   /** Копия параметров */
-   private static Map<String, Object> snapshot( Map<String, Object> source )
+   /**
+    * Создаёт immutable snapshot properties.
+    */
+   private static Map<String, Object> snapshot(
+           Map<String, Object> source
+   )
    {
       if( source == null || source.isEmpty() )
-          return Collections.emptyMap();
+         return Collections.emptyMap();
 
-      return Collections.unmodifiableMap( new LinkedHashMap<>(source) );
+      return Collections.unmodifiableMap(
+              new LinkedHashMap<>(source)
+      );
    }
 
-   /** Вывод в оут */
-   public void print( Writer writer )
+
+   /**
+    * Форматированный вывод события.
+    */
+   public void print(
+           Writer writer
+   )
    {
-      JdbcTraceEventWriter.write( this, writer );
+      JdbcTraceEventWriter.write(
+              this,
+              writer
+      );
    }
 }

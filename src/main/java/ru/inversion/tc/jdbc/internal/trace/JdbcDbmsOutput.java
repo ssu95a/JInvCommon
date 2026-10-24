@@ -1,5 +1,7 @@
 package ru.inversion.tc.jdbc.internal.trace;
 
+import java.util.function.Consumer;
+
 /**
  * Доступ к server-side DBMS_OUTPUT.
  */
@@ -15,10 +17,11 @@ public interface JdbcDbmsOutput extends AutoCloseable
    boolean isEnabled();
 
    /**
-    * Вычитать весь накопленный output.
+    * Вычитать весь накопленный output, отдавая его порциями.
     */
-   String read();
+   void read( Consumer<String> consumer );
 
+   /** */
    @Override
    default void close()
    {

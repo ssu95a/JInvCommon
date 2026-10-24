@@ -14,11 +14,7 @@ public final class JdbcResultSetEvent extends JdbcEvent
    {
       super( source, type, EventPhase.ON, traceIgnored );
 
-      if( openResultSetCount < 0 )
-         throw new IllegalArgumentException(
-                 "openResultSetCount < 0"
-         );
-      this.openResultSetCount = openResultSetCount;
+      this.openResultSetCount = Checks.Numeric.positiveOrZero( openResultSetCount, "openResultSetCount" );
    }
 
 

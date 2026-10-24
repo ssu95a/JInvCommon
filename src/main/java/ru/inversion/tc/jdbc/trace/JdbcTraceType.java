@@ -2,29 +2,27 @@ package ru.inversion.tc.jdbc.trace;
 
 
 /**
- * Тип trace-события.
+ * Пользовательская категория trace-события.
  * <p>
- * Не дублирует Jdbc EventType:
- * <p>
- * EventType описывает событие JDBC core,
- * JdbcTraceType — категорию события tracing layer.
+ * EventType описывает низкоуровневое событие JDBC core.
+ * JdbcTraceType описывает смысл события для пользователя.
  */
 public enum JdbcTraceType
 {
-   /**
-    * Событие пришло из JDBC event layer.
-    * <p>
-    * Детали находятся в JdbcTraceEvent.jdbcEvent().
-    */
-   JDBC,
+   /** Выполняемый SQL и входные параметры. */
+   SQL,
 
+   /**
+    * Результат выполнения Statement:
+    * duration, OUT parameters и другие execution results.
+    */
+   RESULT,
+
+   /** Ошибка JDBC или прикладного trace-события. */
    ERROR,
 
-   /** Информационное trace-событие. */
+   /** Информационное событие. */
    INFO,
-
-   /** Техническое/диагностическое событие. */
-   TECH,
 
    /** Предупреждение. */
    WARNING,
@@ -33,5 +31,34 @@ public enum JdbcTraceType
    NOTICE,
 
    /** DBMS_OUTPUT или его аналог. */
-   DBMS_OUTPUT
+   DBMS_OUTPUT,
+
+   /**
+    * Низкоуровневая JDBC-телеметрия:
+    * <p>
+    * connection / statement / result-set lifecycle,
+    * transaction, savepoint и прочие внутренние события.
+    */
+   TECH,
+
+   /**
+    * Старый общий тип JDBC trace.
+    * <p>
+    * Оставлен временно для source compatibility.
+    * Новые JDBC-origin события его не используют.
+    */
+   @Deprecated
+   JDBC;
+
+
+   @Override
+   public String toString() {
+      switch ( this ) {
+         case NOTICE:
+            return "raise debug";
+         case DBMS_OUTPUT:
+            return "DBMS_OUTPUT";
+      }
+      return super.toString();
+   }
 }
