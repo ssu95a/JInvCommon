@@ -18,19 +18,14 @@ public class SqlSelectV03Test {
         return new SqlSelect(sql, SqlDialectFactory.ORACLE).prepare();
     }
 
-    @Test public void postgresUescapeClauseLiteralIsNotBound() {
-        PreparedSql result = pg("select U&'d!0061ta' UESCAPE '!' from t where k=12");
-        assertTrue(result.getSql(), result.getSql().contains("UESCAPE '!'"));
-        assertTrue(result.getSql().contains("where k=?"));
-        assertEquals(1, result.getParameters().size());
+    @Test public void postgresUnicodeStringIsRejected() {
+        try { pg("select U&'data' from t"); fail("Expected rejection"); }
+        catch (IllegalArgumentException expected) { assertTrue(expected.getMessage().contains("offset")); }
     }
-
-    @Test public void postgresUescapeWithTrivias() {
-        PreparedSql result = pg("select U&'d!0061ta' UESCAPE /* comment */ '!' from t");
-        assertTrue(result.getSql(), result.getSql().contains("UESCAPE /* comment */ '!'"));
-        assertTrue(result.getParameters().isEmpty());
+    @Test public void postgresEscapeStringIsRejected() {
+        try { pg("select E'data' from t"); fail("Expected rejection"); }
+        catch (IllegalArgumentException expected) { assertTrue(expected.getMessage().contains("offset")); }
     }
-
     @Test public void oracleBinaryFloatAndDoubleSuffixesPreserved() {
         PreparedSql result = ora("select 1f, 1F, 1d, 1D, 1.25f, 1e10d from dual where n=99");
         assertTrue(result.getSql(), result.getSql().contains("select 1f, 1F, 1d, 1D, 1.25f, 1e10d"));
@@ -46,12 +41,10 @@ public class SqlSelectV03Test {
         assertEquals(1, result.getParameters().size());
     }
 
-    @Test public void oracleIntervalPrecisionRemainsUntouched() {
-        PreparedSql result = ora("select interval '123-2' year(3) to month from dual where id=2");
-        assertTrue(result.getSql().contains("year(3) to month"));
-        assertEquals(1, result.getParameters().size());
+    @Test public void oracleIntervalStringWithPunctuationIsRejected() {
+        try { ora("select interval '123-2' year(3) to month from dual"); fail("Expected rejection"); }
+        catch (IllegalArgumentException expected) { assertTrue(expected.getMessage().contains("offset")); }
     }
-
     @Test public void rejectsSemicolonInsidePredicateParentheses() {
         SqlSelect sql = new SqlSelect("select x from t", SqlDialectFactory.POSTGRES);
         try {
@@ -62,12 +55,11 @@ public class SqlSelectV03Test {
         }
     }
 
-    @Test public void quotedSemicolonIsNotStatementSeparator() {
+    @Test public void semicolonInsideStringIsRejected() {
         SqlSelect sql = new SqlSelect("select x from t", SqlDialectFactory.POSTGRES);
-        sql.setPredicates(Arrays.asList("name='a;b'"));
-        assertTrue(sql.buildSql().contains("name='a;b'"));
+        try { sql.setPredicates(Arrays.asList("name='a;b'")); fail("Expected rejection"); }
+        catch (IllegalArgumentException expected) { assertTrue(expected.getMessage().contains("offset")); }
     }
-
     @Test public void preparedSqlAndBuildSqlCachesAreInvalidatedTogether() {
         SqlSelect sql = new SqlSelect("select x from t where y=:y order by 1", SqlDialectFactory.POSTGRES);
         PreparedSql first = sql.prepare();

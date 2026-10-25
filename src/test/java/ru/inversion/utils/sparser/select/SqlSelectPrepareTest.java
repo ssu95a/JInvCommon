@@ -26,6 +26,24 @@ public class SqlSelectPrepareTest {
         }
     }
 
+    private static void rejectsPg(String sql) {
+        try {
+            pg(sql).prepare();
+            fail("Expected unsupported string literal");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("offset"));
+        }
+    }
+
+    private static void rejectsOra(String sql) {
+        try {
+            ora(sql).prepare();
+            fail("Expected unsupported string literal");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("offset"));
+        }
+    }
+
     @Test public void mixedParameterSourcesAndRepeatedNames() {
         PreparedSql p = pg("select * from t where a=? and b=:userId and c=$2 and d='OPEN' and e=:userId and f=15 and g=?").prepare();
         assertEquals("select * from t where a=? and b=? and c=? and d=? and e=? and f=? and g=?", p.getSql());
@@ -37,6 +55,14 @@ public class SqlSelectPrepareTest {
         assertEquals("OPEN", p.getParameters().get(3).getValue());
         assertEquals("userId", p.getParameters().get(4).getName());
         assertEquals(new BigInteger("15"), p.getParameters().get(5).getValue());
+    }
+
+    @Test public void plainLatinCyrillicAndEmptyStringsAreParameterized() {
+        PreparedSql p = pg("select id from t where a='Hello World' and b='Привет мир' and c=''").prepare();
+        assertParameterKinds(p, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL);
+        assertEquals("Hello World", p.getParameters().get(0).getValue());
+        assertEquals("Привет мир", p.getParameters().get(1).getValue());
+        assertEquals("", p.getParameters().get(2).getValue());
     }
 
     @Test public void predicatesAreBeforeSourceWhereAndAreInPhysicalBindingOrder() {
@@ -118,41 +144,29 @@ public class SqlSelectPrepareTest {
         assertEquals("Y", p.getParameters().get(0).getValue());
     }
 
-    @Test public void typedLiteralsRemainAndOtherLiteralsAreParameterized() {
-        PreparedSql p = pg("select id from t where dt >= date '2026-01-01' and tm > time '12:00' and ts > timestamp '2026-01-01 12:00:00' and a > interval '1' day and x=5").prepare();
-        assertTrue(p.getSql(), p.getSql().contains("date '2026-01-01'"));
-        assertTrue(p.getSql(), p.getSql().contains("time '12:00'"));
-        assertTrue(p.getSql(), p.getSql().contains("timestamp '2026-01-01 12:00:00'"));
-        assertTrue(p.getSql(), p.getSql().contains("interval '1' day"));
-        assertParameterKinds(p, Parameter.Kind.LITERAL);
+    @Test public void typedStringLiteralsWithNonTextContentAreRejected() {
+        rejectsPg("select id from t where dt >= date '2026-01-01'");
+        rejectsPg("select id from t where tm > time '12:00'");
+        rejectsPg("select id from t where ts > timestamp '2026-01-01 12:00:00'");
+        rejectsPg("select id from t where a > interval '1' day");
     }
-
-    @Test public void qQuotedAndDollarStringsDecodeCorrectly() {
-        PreparedSql oracle = ora("select q'[a'b]' from dual where x=n'abc''def'").prepare();
-        assertParameterKinds(oracle, Parameter.Kind.LITERAL);
-        assertEquals("a'b", oracle.getParameters().get(0).getValue());
-        assertTrue(oracle.getSql().contains("x=n'abc''def'"));
-        PreparedSql pg = pg("select $$hello$$, $tag$there ' hi$tag$ from t where id=1").prepare();
-        assertParameterKinds(pg, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL);
-        assertEquals("hello", pg.getParameters().get(0).getValue());
-        assertEquals("there ' hi", pg.getParameters().get(1).getValue());
+    @Test public void dialectSpecificStringsAreRejected() {
+        rejectsOra("select q'[abc]' from dual");
+        rejectsOra("select n'hello' from dual");
+        rejectsPg("select $$hello$$ from t");
+        rejectsPg("select $tag$hello$tag$ from t");
     }
-
-    @Test public void postgresNonstandardStringsArePreservedWhenDecoderIsUnsafe() {
-        PreparedSql p = pg("select E'a\\n', U&'d\\0061ta' from t where a='x\\y' and b=5").prepare();
-        assertTrue(p.getSql(), p.getSql().contains("E'a\\n'"));
-        assertTrue(p.getSql(), p.getSql().contains("U&'d\\0061ta'"));
-        assertTrue(p.getSql(), p.getSql().contains("a='x\\y'"));
-        assertParameterKinds(p, Parameter.Kind.LITERAL);
+    @Test public void postgresNonstandardStringsAreRejected() {
+        rejectsPg("select E'hello' from t");
+        rejectsPg("select U&'hello' from t");
+        rejectsPg("select x from t where a='A\\B'");
     }
-
     @Test public void postgresRegexOperatorIsNotLegacyMarker() {
-        PreparedSql p = pg("select id from t where name ~ '^[a-z]+$' and code ~ 'A.*' and id = 12").prepare();
+        PreparedSql p = pg("select id from t where name ~ :pattern and code ~ :codePattern and id = 12").prepare();
         assertTrue(p.getSql(), p.getSql().contains("name ~ ?"));
         assertTrue(p.getSql(), p.getSql().contains("code ~ ?"));
-        assertParameterKinds(p, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL);
+        assertParameterKinds(p, Parameter.Kind.NAMED, Parameter.Kind.NAMED, Parameter.Kind.LITERAL);
     }
-
     @Test public void legacyTildeProtectsExpressionAndIsRemoved() {
         SqlSelect select = ora("select id from t order by 1 limit 100");
         select.setOrderBy("~replace(code, 'a', 'b')~");
@@ -227,14 +241,10 @@ public class SqlSelectPrepareTest {
         assertTrue(p.getSql().contains("limit 5"));
     }
 
-    @Test public void oracleNationalStringsAreNotRewritten() {
-        PreparedSql p = ora("select n'café', nq'[national]' from dual where id=42").prepare();
-        assertTrue(p.getSql().contains("n'café'"));
-        assertTrue(p.getSql().contains("nq'[national]'"));
-        assertParameterKinds(p, Parameter.Kind.LITERAL);
-        assertEquals(new BigInteger("42"), p.getParameters().get(0).getValue());
+    @Test public void oracleNationalStringsAreRejected() {
+        rejectsOra("select n'hello' from dual");
+        rejectsOra("select nq'[national]' from dual");
     }
-
     @Test public void pgJdbcOperatorEscapeIsPreserved() {
         PreparedSql p = pg("select data from t where data ?? 'key' and id = :id").prepare();
         assertTrue(p.getSql().contains("data ?? ?"));
@@ -250,11 +260,10 @@ public class SqlSelectPrepareTest {
         assertEquals(new BigInteger("7"), p.getParameters().get(1).getValue());
     }
 
-    @Test public void prefixedAndPrecisionTypedLiteralsStayVerbatim() {
-        PreparedSql p = pg("select n'hello', b'1010' from t where ts > timestamp(3) '2026-01-01 12:00:00' and x=9").prepare();
-        assertTrue(p.getSql().contains("n'hello'"));
-        assertTrue(p.getSql().contains("b'1010'"));
-        assertTrue(p.getSql().contains("timestamp(3) '2026-01-01 12:00:00'"));
-        assertParameterKinds(p, Parameter.Kind.LITERAL);
+    @Test public void prefixedAndPrecisionTypedStringsAreRejected() {
+        rejectsPg("select n'hello' from t");
+        rejectsPg("select b'AB' from t");
+        rejectsPg("select x from t where ts > timestamp(3) '2026-01-01 12:00:00'");
     }
+
 }

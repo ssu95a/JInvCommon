@@ -17,15 +17,10 @@ public class SqlSelectRegressionTest {
     private static SqlSelect ora(String sql) { return new SqlSelect(sql, new OracleSqlScanner()); }
     private static SqlSelect pg(String sql) { return new SqlSelect(sql, new PostgresSqlScanner()); }
 
-    @Test public void intervalYearAndDayPrecisionAreNotBound() {
-        PreparedSql p = ora("select interval '2-3' year(2) to month, "
-                + "interval '12' day(2) to second(6) from dual where id=7").prepare();
-        assertTrue(p.getSql(), p.getSql().contains("interval '2-3' year(2) to month"));
-        assertTrue(p.getSql(), p.getSql().contains("interval '12' day(2) to second(6)"));
-        assertEquals(1, p.getParameters().size());
-        assertEquals(new BigInteger("7"), p.getParameters().get(0).getValue());
+    @Test public void intervalStringsWithPunctuationAreRejected() {
+        try { ora("select interval '2-3' year(2) to month from dual"); fail("Expected rejection"); }
+        catch (IllegalArgumentException expected) { assertTrue(expected.getMessage().contains("offset")); }
     }
-
     @Test public void dateTimePrecisionFunctionsKeepNumbers() {
         PreparedSql p = pg("select current_timestamp(3), current_time(2), "
                 + "localtime(5), localtimestamp(6) from t where id=9").prepare();
@@ -36,20 +31,14 @@ public class SqlSelectRegressionTest {
         assertEquals(1, p.getParameters().size());
     }
 
-    @Test public void timeZoneTypedLiteralWithPrecisionRemainsUntouched() {
-        PreparedSql p = pg("select timestamp(3) with time zone '2026-10-23 22:30:00+03', "
-                + "time(2) without time zone '12:30' from t where n=8").prepare();
-        assertTrue(p.getSql().contains("timestamp(3) with time zone '2026-10-23 22:30:00+03'"));
-        assertTrue(p.getSql().contains("time(2) without time zone '12:30'"));
-        assertEquals(1, p.getParameters().size());
+    @Test public void timeZoneStringsWithPunctuationAreRejected() {
+        try { pg("select timestamp(3) with time zone '2026-10-23 22:30:00+03' from t"); fail("Expected rejection"); }
+        catch (IllegalArgumentException expected) { assertTrue(expected.getMessage().contains("offset")); }
     }
-
-    @Test public void intervalPrecisionTypedLiteralIsNotSeparated() {
-        PreparedSql p = pg("select interval(4) '2 day' from t where k=10").prepare();
-        assertTrue(p.getSql().contains("interval(4) '2 day'"));
-        assertEquals(1, p.getParameters().size());
+    @Test public void intervalPrecisionStringWithDigitIsRejected() {
+        try { pg("select interval(4) '2 day' from t"); fail("Expected rejection"); }
+        catch (IllegalArgumentException expected) { assertTrue(expected.getMessage().contains("offset")); }
     }
-
     @Test public void legacyMarkersInSelectListBeforeAliasAndFrom() {
         PreparedSql p = ora("select ~replace(name, 'X', 'Y')~ as label, ~coalesce(s, 'N')~ from t where id=:id").prepare();
         assertTrue(p.getSql().contains("select replace(name, 'X', 'Y') as label, coalesce(s, 'N') from"));
@@ -66,12 +55,11 @@ public class SqlSelectRegressionTest {
     }
 
     @Test public void postgresRegexOperatorRemainsOperator() {
-        PreparedSql p = pg("select name from t where name ~ '^[a-z]+$' and x !~ 'x' and code=7").prepare();
+        PreparedSql p = pg("select name from t where name ~ :pattern and x !~ :other and code=7").prepare();
         assertTrue(p.getSql().contains("name ~ ?"));
         assertTrue(p.getSql().contains("x !~ ?"));
         assertEquals(3, p.getParameters().size());
     }
-
     @Test public void explicitParametersSurviveProtectedLegacyExpression() {
         PreparedSql p = ora("select ~case when :p=10 then 'Y' else 'N' end~ AS flag from dual").prepare();
         assertTrue(p.getSql().contains("case when ?=10 then 'Y' else 'N' end AS flag"));
@@ -110,17 +98,19 @@ public class SqlSelectRegressionTest {
                 + "WHERE F.cFormName = ? AND (F.cBlockName IS NULL OR F.cBlockName = ?) "
                 + "AND F.ID IN (SELECT G.IDFilter FROM FRM_FILTER_ODB_GROUP G, "
                 + "ODB_GRP_MEMBER M WHERE G.IDGroup = M.Grp_ID "
-                + "AND M.iUsrID = to_number(SYS_CONTEXT('B21', 'IDUsr')))";
+                + "AND M.iUsrID = to_number(SYS_CONTEXT(:namespace, :contextKey)))";
         PreparedSql p = pg(sql).prepare();
         assertTrue(p.getSql(), p.getSql().contains(
                 "cAutoSetup = ? || ? || user || ? || ?"));
         assertFalse(p.getSql(), p.getSql().contains("~||"));
         assertFalse(p.getSql(), p.getSql().contains("||~"));
-        // 6 source JDBC parameters; literals in SYS_CONTEXT may be bound too.
+        // 6 source JDBC parameters + 2 named SYS_CONTEXT parameters.
         assertEquals(8, p.getParameters().size());
         for (int i = 0; i < 6; i++) {
             assertEquals(Parameter.Kind.POSITIONAL, p.getParameters().get(i).getKind());
         }
+        assertEquals(Parameter.Kind.NAMED, p.getParameters().get(6).getKind());
+        assertEquals(Parameter.Kind.NAMED, p.getParameters().get(7).getKind());
     }
 
     @Test public void postgresLegacyTildeConcatProtectsLiterals() {
@@ -140,12 +130,11 @@ public class SqlSelectRegressionTest {
     }
 
     @Test public void postgresRegexOperatorsAreNotLegacyConcatMarkers() {
-        PreparedSql p = pg("select name from t where name ~ 'a+' and name !~ 'b+' and id=2").prepare();
+        PreparedSql p = pg("select name from t where name ~ :a and name !~ :b and id=2").prepare();
         assertTrue(p.getSql(), p.getSql().contains("name ~ ?"));
         assertTrue(p.getSql(), p.getSql().contains("name !~ ?"));
         assertEquals(3, p.getParameters().size());
     }
-
     @Test public void unmatchedOracleTildeFailsBeforeJdbc() {
         try {
             ora("select * from t where x = 1 ~|| 'text'").prepare();

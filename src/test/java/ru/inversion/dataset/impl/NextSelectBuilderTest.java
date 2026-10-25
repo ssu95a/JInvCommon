@@ -103,15 +103,16 @@ public class NextSelectBuilderTest {
         assertEquals("y", merged.getParameter("name"));
     }
 
-    @Test public void localQuestionMarksIgnoreCommentsAndStrings() {
+    @Test public void questionMarkInsideStringIsRejected() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("txt = '?' and x = ? /* ? */").set(0,77));
-        PreparedSql p = b.prepare();
-        assertTrue(p.getSql().contains("txt = ?"));
-        assertTrue(p.getSql().contains("/* ? */"));
-        assertEquals(77,b.parameters(new Params()).getParameter(0));
+        try {
+            b.prepare();
+            fail("Expected unsupported string literal");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("offset"));
+        }
     }
-
     @Test public void changeOfPredicateInvalidatesPlan() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         PreparedSql before=b.prepare();

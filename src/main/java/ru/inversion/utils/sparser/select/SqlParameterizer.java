@@ -255,10 +255,7 @@ final class SqlParameterizer {
         return -1;
     }
 
-    /**
-     * Неизвестную строковую форму оставляем дословно, без попытки угадать
-     * правила декодирования (особенно E'', U&'', backslash escapes).
-     */
+    /** String tokens reaching this point are plain literals validated by SqlSelect. */
     private static Object literalValue(SqlScanner.Kind kind, String text) {
         if (kind == NUMBER) {
             try {
@@ -274,29 +271,7 @@ final class SqlParameterizer {
                 return null;
             }
         }
-        if (text.length() < 2) return null;
-        if (text.charAt(0) == '\'') {
-            // standard_conforming_strings на PostgreSQL может быть OFF.
-            // Без доступа к серверной настройке обратный слэш неоднозначен.
-            if (text.indexOf('\\') >= 0) return null;
-            return text.substring(1, text.length() - 1).replace("''", "'");
-        }
-        // N'...' и NQ'...' содержат национальные строки Oracle.
-        // Parameter не умеет передавать NCHAR/NVARCHAR2 JDBC type: не меняем тип.
-        if (text.charAt(0) == 'N' || text.charAt(0) == 'n') return null;
-        // Oracle q'/nq' quoting. Внутренние кавычки не экранированы.
-        int quote = text.indexOf('\'');
-        if (quote >= 0 && quote + 1 < text.length() && (text.charAt(0) == 'q'
-                || text.charAt(0) == 'Q' || ((text.charAt(0) == 'n' || text.charAt(0) == 'N')
-                && text.length() > 1 && (text.charAt(1) == 'q' || text.charAt(1) == 'Q')))) {
-            return text.substring(quote + 2, text.length() - 2);
-        }
-        // PostgreSQL dollar-quoted string: $tag$...$tag$ / $$...$$.
-        if (text.charAt(0) == '$') {
-            int end = text.indexOf('$', 1);
-            if (end > 0) return text.substring(end + 1, text.length() - (end + 1));
-        }
-        return null;
+        return text.substring(1, text.length() - 1);
     }
 
     private int nextSignificant(List<SqlScanner.Token> tokens, int from) {
