@@ -1,7 +1,7 @@
 package ru.inversion.utils.sparser.select;
 
 import org.junit.Test;
-import ru.inversion.utils.sparser.SqlDialect;
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 
@@ -12,10 +12,10 @@ import static org.junit.Assert.*;
 /** Regressions for v0.3: dialect gaps and simplified assemble/scan pipeline. */
 public class SqlSelectV03Test {
     private static PreparedSql pg(String sql) {
-        return new SqlSelect(sql, SqlDialect.POSTGRES).prepare();
+        return new SqlSelect(sql, SqlDialectFactory.POSTGRES).prepare();
     }
     private static PreparedSql ora(String sql) {
-        return new SqlSelect(sql, SqlDialect.ORACLE).prepare();
+        return new SqlSelect(sql, SqlDialectFactory.ORACLE).prepare();
     }
 
     @Test public void postgresUescapeClauseLiteralIsNotBound() {
@@ -53,7 +53,7 @@ public class SqlSelectV03Test {
     }
 
     @Test public void rejectsSemicolonInsidePredicateParentheses() {
-        SqlSelect sql = new SqlSelect("select x from t", SqlDialect.POSTGRES);
+        SqlSelect sql = new SqlSelect("select x from t", SqlDialectFactory.POSTGRES);
         try {
             sql.setPredicates(Arrays.asList("(1; 2)"));
             fail("Expected rejection");
@@ -63,13 +63,13 @@ public class SqlSelectV03Test {
     }
 
     @Test public void quotedSemicolonIsNotStatementSeparator() {
-        SqlSelect sql = new SqlSelect("select x from t", SqlDialect.POSTGRES);
+        SqlSelect sql = new SqlSelect("select x from t", SqlDialectFactory.POSTGRES);
         sql.setPredicates(Arrays.asList("name='a;b'"));
         assertTrue(sql.buildSql().contains("name='a;b'"));
     }
 
     @Test public void preparedSqlAndBuildSqlCachesAreInvalidatedTogether() {
-        SqlSelect sql = new SqlSelect("select x from t where y=:y order by 1", SqlDialect.POSTGRES);
+        SqlSelect sql = new SqlSelect("select x from t where y=:y order by 1", SqlDialectFactory.POSTGRES);
         PreparedSql first = sql.prepare();
         assertSame(first, sql.prepare());
         sql.setPredicates(Arrays.asList("z=?", "a=9"));
@@ -81,7 +81,7 @@ public class SqlSelectV03Test {
     }
 
     @Test public void predicateAndOrderByEditsTogether() {
-        SqlSelect sql = new SqlSelect("select x from t where y = :y order by x limit 20", SqlDialect.POSTGRES);
+        SqlSelect sql = new SqlSelect("select x from t where y = :y order by x limit 20", SqlDialectFactory.POSTGRES);
         sql.setPredicates(Arrays.asList("z > 7"));
         sql.setOrderBy("x desc, :sort");
         PreparedSql result = sql.prepare();

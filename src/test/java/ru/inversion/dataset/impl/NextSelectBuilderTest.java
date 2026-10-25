@@ -3,7 +3,7 @@ package ru.inversion.dataset.impl;
 import org.junit.Test;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.ISQLExpression;
-import ru.inversion.utils.sparser.SqlDialect;
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 
@@ -38,7 +38,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void duplicatedNamedParameterWithoutDatasetThrows() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = :id").set("id",10));
         b.addPredicate(new Expr("b = :id").set("id",20));
         try {b.parameters(new Params()); fail("Missing conflict");}
@@ -46,7 +46,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void explicitNullDatasetOverridesBothExpressions() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = :id").set("id", 10));
         b.addPredicate(new Expr("b = :id").set("id", 20));
         Params main = new Params().set("id", null);
@@ -59,7 +59,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void localQuestionMarksBecomeGlobalSequence() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         Expr a = new Expr("a = ?").set(0, 10);
         Expr c = new Expr("b = ?").set(0, 20);
         b.addPredicate(a).addPredicate(c);
@@ -75,7 +75,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void mainQuestionMarkGetsFinalTextualPosition() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t where root = ?", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t where root = ?", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 10));
         PreparedSql p = b.prepare();
         assertEquals(2, p.getParameters().size());
@@ -85,14 +85,14 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void datasetIndexedOverridesLocalExpression() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 10));
         IParameters merged = b.parameters(new Params().set(0,null));
         assertEquals(null, merged.getParameter(0));
     }
 
     @Test public void runtimeValuesAreReadAtExecutionWithoutRecompile() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.ORACLE);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.ORACLE);
         Expr x = new Expr("a = :name").set("name","x");
         b.addPredicate(x);
         PreparedSql first = b.prepare();
@@ -104,7 +104,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void localQuestionMarksIgnoreCommentsAndStrings() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("txt = '?' and x = ? /* ? */").set(0,77));
         PreparedSql p = b.prepare();
         assertTrue(p.getSql().contains("txt = ?"));
@@ -113,7 +113,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void changeOfPredicateInvalidatesPlan() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         PreparedSql before=b.prepare();
         b.addPredicate("a = :x");
         PreparedSql after=b.prepare();
@@ -122,7 +122,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void numberedParameterCanUseExpressionFallback() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = $2").set(1,7));
         PreparedSql p=b.prepare();
         assertEquals(Parameter.Kind.NUMBERED,p.getParameters().get(0).getKind());
@@ -131,21 +131,21 @@ public class NextSelectBuilderTest {
 
     @Test public void reservedNamesInOriginalSqlAreRejected() {
         NextSelectBuilder b = new NextSelectBuilder(
-                "select id from t where x = :__sparser_local_pos_0_0", SqlDialect.POSTGRES);
+                "select id from t where x = :__sparser_local_pos_0_0", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0,11));
         try {b.prepare(); fail("Expected reserved-name error");}
         catch (IllegalArgumentException e) {assertTrue(e.getMessage().contains("Reserved"));}
     }
 
     @Test public void repeatSameExpressionDoesNotConflictWithItself() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         Expr one = new Expr("a = :id").set("id", 99);
         b.addPredicate(one).addPredicate(one);
         assertEquals(99, b.parameters(new Params()).getParameter("id"));
     }
 
     @Test public void generatedLiteralsKeepTheirParameterType() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ? and b = 42").set(0, 100));
         PreparedSql result = b.prepare();
         assertEquals(Parameter.Kind.POSITIONAL, result.getParameters().get(0).getKind());
@@ -154,14 +154,14 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void conflictOnNumberedParameterIsDetected() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = $1").set(0,11));
         b.addPredicate(new Expr("b = $1").set(0,12));
         try { b.parameters(new Params()); fail("Expected conflict"); }
         catch (IllegalStateException e) {assertTrue(e.getMessage().contains("Conflicting"));}
     }
     @Test public void numberedAndLocalPositionalCollisionThrows() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
         try { b.parameters(new Params()); fail("Expected mixed positional conflict"); }
@@ -169,7 +169,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void datasetOverridesMixedPositionalConflictWithNull() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
         IParameters p = b.parameters(new Params().set(0, null));
@@ -177,7 +177,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void orderByExpressionSupportsLocalQuestionMark() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.orderBy(new Expr("case when id = ? then 0 else 1 end").set(0, 99));
         PreparedSql prepared = b.prepare();
         assertEquals(1, prepared.getParameters().size());
@@ -186,7 +186,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void sameExpressionInstanceCanSupplyNamedFromOrderByAndWhere() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         Expr e = new Expr("x = :id").set("id", 17);
         b.addPredicate(e);
         b.orderBy(new Expr("case when id = :id then 0 else 1 end"));
@@ -195,7 +195,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void malformedPredicateDoesNotCorruptCachedPreparedSql() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialect.ORACLE);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.ORACLE);
         PreparedSql initial = b.prepare();
         b.addPredicate("x = 1; delete from t");
         try { b.prepare(); fail("Expected invalid SQL fragment"); }
@@ -206,7 +206,7 @@ public class NextSelectBuilderTest {
 
     @Test public void mixedSourcesFollowFinalSqlTextOrder() {
         NextSelectBuilder b = new NextSelectBuilder(
-                "select id from t where root = ? and code = :code", SqlDialect.POSTGRES);
+                "select id from t where root = ? and code = :code", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ? and state = 'A'").set(0, 10));
         b.addPredicate(new Expr("b = ?").set(0, 20));
         b.orderBy(new Expr("id + ?").set(0, 30));
@@ -228,7 +228,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void changingSortingDropsOldBindings() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t order by :old", SqlDialect.POSTGRES);
+        NextSelectBuilder b = new NextSelectBuilder("select id from t order by :old", SqlDialectFactory.POSTGRES);
         b.orderBy("id DESC");
         PreparedSql p = b.prepare();
         assertEquals(0, p.getParameters().size());
@@ -238,7 +238,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void markComesAfterOriginalSelectItems() {
-        NextSelectBuilder b = new NextSelectBuilder("select x, y from t order by 1", SqlDialect.ORACLE);
+        NextSelectBuilder b = new NextSelectBuilder("select x, y from t order by 1", SqlDialectFactory.ORACLE);
         b.mark("0");
         String sql = b.buildSql().toLowerCase(Locale.ROOT);
         assertTrue(sql.indexOf("x, y") < sql.indexOf("as mark"));

@@ -2,7 +2,7 @@ package ru.inversion.dataset.impl;
 
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.ISQLExpression;
-import ru.inversion.utils.sparser.SqlDialect;
+import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
@@ -46,7 +46,7 @@ public final class NextSelectBuilder {
     public NextSelectBuilder(String sql, SqlDialect dialect) {
         this.sourceSql = Objects.requireNonNull(sql, "sql");
         this.dialect = Objects.requireNonNull(dialect, "dialect");
-        switch (dialect) {
+        switch (dialect.type()) {
             case ORACLE: scanner = new OracleSqlScanner(); break;
             case POSTGRES: scanner = new PostgresSqlScanner(); break;
             default: throw new IllegalArgumentException("Unsupported SQL dialect: " + dialect);

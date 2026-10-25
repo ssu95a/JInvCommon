@@ -6,6 +6,7 @@ import ru.inversion.datacall.maker.CallMaker_WithParametersValue;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.*;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.dataset.parser.ExprInfo;
 import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.JInvDbException;
@@ -542,6 +543,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       // BooleanProperty не уведомляет слушателей при повторной установке true.
       // Зависимый SQL-кеш должен сбрасываться при КАЖДОМ структурном изменении.
       refreshCurrentRowSQL = null;
+      refreshCurrentRowPreparedSql = null;
       needReCreateReader.setValue( true );
    }
 
@@ -1084,12 +1086,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    private NextSelectBuilder createNextSelectBuilder() {
-      ru.inversion.db.dialect.SqlDialect dialect = getTaskContextForUse().dialect();
-      ru.inversion.utils.sparser.SqlDialect sqlDialect =
-              dialect.type() == ru.inversion.db.dialect.SqlDialect.DialectId.POSTGRES
-              ? ru.inversion.utils.sparser.SqlDialect.POSTGRES
-              : ru.inversion.utils.sparser.SqlDialect.ORACLE;
-      NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), sqlDialect);
+      SqlDialect dialect = getTaskContextForUse().dialect();
+      NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
       for (PredicateItem item : predicates.values()) {
          if (item.getExpression() != null) {
             if (!item.getFilterStr().equals(item.getExpression().getSQL()))
@@ -1668,6 +1666,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    private transient String refreshCurrentRowSQL;
+   private transient PreparedSql refreshCurrentRowPreparedSql;
 
    /** {@inheritDoc} */
    public void refreshCurrentRowFromDB( boolean refreshDependentData, Consumer<SQLDataSet> onNoDataFound ) throws DataSetException {
@@ -1698,11 +1697,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                   throw new RuntimeException( Tags.PRODUCT_LABEL + "Error while retrieving the value PK for row class - " + getRowClass().getName(), th );
                }
 
-               idValuesMap.put( p.getColumnInfo().getName(), value );
+               idValuesMap.put( p.getColumnInfo().getName().toUpperCase(Locale.ROOT), value );
             }}
          );
 
-         if( refreshCurrentRowSQL == null )
+         if( refreshCurrentRowPreparedSql == null )
          {
             StringBuilder sb = new StringBuilder( );
 
@@ -1730,24 +1729,28 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             selectBuilder.addPredicat( sb.toString() );
 
-            refreshCurrentRowSQL = selectBuilder.build(); // sb.toString();
+            // Сохраняем структуру legacy SELECT, меняем только JDBC-подготовку.
+            String sql = selectBuilder.build();
+            ru.inversion.db.dialect.SqlDialect dialect = getTaskContextForUse().dialect();
+            ru.inversion.utils.sparser.SqlDialect sqlDialect =
+                    dialect.type() == ru.inversion.db.dialect.SqlDialect.DialectId.POSTGRES
+                    ? ru.inversion.utils.sparser.SqlDialect.POSTGRES
+                    : ru.inversion.utils.sparser.SqlDialect.ORACLE;
+            PreparedSql plan = new SqlSelect(sql, sqlDialect).prepare();
+            refreshCurrentRowSQL = sql;
+            refreshCurrentRowPreparedSql = plan;
          }
-         ISQLDataReader< P > recordReader = null;
 
-         try {
-            recordReader = new JDBCDataReader( getTaskContextForUse().getConnection(), refreshCurrentRowSQL, getRowMapper(), getRowClass(), isSupportMark( ) );
-         }catch( Throwable th ) {
-            throw new DataSetException( Tags.PRODUCT_LABEL + "Error while preparing SQL to read record", th );
-         }
-
-         recordReader.executeQuery (
+         try (JDBCDataReader<P> recordReader = new JDBCDataReader<>(
+                 getTaskContextForUse().getConnection(), refreshCurrentRowPreparedSql,
+                 getRowMapper(), getRowClass(), isSupportMark())) {
+            recordReader.executeQuery (
                  new IParameters( ) {
                     @Override
                     public Object getParameter( String parameterName ) {
-                       Object v = idValuesMap.get(parameterName.toUpperCase());
-                       if( v == null )
-                          v = getParameterValue( parameterName );
-                       return v;
+                       String key = parameterName.toUpperCase(Locale.ROOT);
+                       return idValuesMap.containsKey(key)
+                               ? idValuesMap.get(key) : getParameterValue(parameterName);
                     }
                     @Override
                     public Object getParameter( int parameterIndex ) {
@@ -1755,11 +1758,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                     }
                     @Override
                     public boolean hasParameter( String parameterName ) {
-                       return idValuesMap.containsKey(parameterName.toUpperCase()) == false ? SQLDataSet.this.hasParameter(parameterName) : true;
+                       return idValuesMap.containsKey(parameterName.toUpperCase(Locale.ROOT))
+                               || mainSqlParameters.hasParameter(parameterName);
                     }
                     @Override
                     public boolean hasParameter( int parameterIndex ) {
-                       return SQLDataSet.this.hasParameter(parameterIndex);
+                       return mainSqlParameters.hasParameter(parameterIndex);
                     }
                  }
          );
@@ -1779,6 +1783,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                onNoDataFound.accept(this);
             else
                JInvDbException.throwNoDataFound( refreshCurrentRowSQL, idValuesMap.values() );
+         }
          }
       }
       catch( Throwable th ) {

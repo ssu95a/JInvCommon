@@ -2,7 +2,7 @@ package ru.inversion.dataset;
 
 import org.junit.Test;
 import ru.inversion.dataset.impl.NextSelectBuilder;
-import ru.inversion.utils.sparser.SqlDialect;
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 
 import static org.junit.Assert.*;
@@ -73,7 +73,7 @@ public class SQLDataSetSparserIntegrationTest {
         expr.setParameter("branch", 9);
         int id = ds.setFilter(expr, false, false);
 
-        NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialect.POSTGRES);
+        NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         builder.addPredicate(ds.predicates().get(id).getExpression());
         PreparedSql prepared = builder.prepare();
         assertTrue(prepared.getSql().contains("branch = ?"));
@@ -96,7 +96,7 @@ public class SQLDataSetSparserIntegrationTest {
             @Override public boolean hasParameter(String name) { return "branch".equals(name); }
         });
 
-        NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialect.POSTGRES);
+        NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         builder.addPredicate(ds.predicates().get(id).getExpression());
         assertNull(builder.parameters(values(ds)).getParameter("branch"));
     }
