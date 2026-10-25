@@ -1,6 +1,9 @@
 package ru.inversion.utils.sparser.select;
 
 import ru.inversion.utils.sparser.lexer.SqlScanner;
+import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
+import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
+import ru.inversion.utils.sparser.SqlDialect;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 
@@ -15,26 +18,16 @@ import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.*;
 /**
  * Структурные изменения одного внешнего SELECT без дополнительной SQL-обёртки.
  *
- * Исходный запрос лексируется ровно один раз. Меняются только переданные
- * фрагменты. Готовая строка строится по требованию и кешируется до изменения.
- *
- * prepare() выполняет единую автопараметризацию собранного выражения
- * с использованием ранее распознанных токенов исходного запроса.
+ * Структура исходного SELECT разбирается при создании. Изменённый SQL
+ * и PreparedSql кешируются до следующей структурной правки.
+ * prepare() повторно сканирует собранный SQL только при сбросе кеша.
  */
 public final class SqlSelect {
 
     private final String source;
     private final SqlScanner scanner;
     private final List<SqlScanner.Token> sourceTokens;
-    private final int selectItemsEnd;
-    private final int whereWordEnd;
-    private final int wherePredicateEnd;
-    private final int whereInsertion;
-    private final int orderStart;
-    private final int orderEnd;
-    private final int orderInsertion;
-    private final boolean compound;
-    private final boolean orderSiblings;
+    private final Layout layout;
 
     private List<String> predicates = Collections.emptyList();
     private String orderBy;
@@ -43,20 +36,26 @@ public final class SqlSelect {
     private String builtSql;
     private PreparedSql preparedSql;
 
+    /** Прикладной API: детали выбора lexer скрыты за диалектом. */
+    public SqlSelect(String sql, SqlDialect dialect) {
+        this(sql, createScanner(Objects.requireNonNull(dialect, "dialect")));
+    }
+
+    private static SqlScanner createScanner(SqlDialect dialect) {
+        switch (dialect) {
+            case ORACLE: return new OracleSqlScanner();
+            case POSTGRES: return new PostgresSqlScanner();
+            default: throw new IllegalArgumentException("Unsupported dialect: " + dialect);
+        }
+    }
+
+    /** Совместимость с прежним внутренним API. */
+    @Deprecated
     public SqlSelect(String sql, SqlScanner scanner) {
         source = Objects.requireNonNull(sql, "sql");
         this.scanner = Objects.requireNonNull(scanner, "scanner");
         sourceTokens = scanner.scan(sql);
-        Layout layout = inspect();
-        selectItemsEnd = layout.selectItemsEnd;
-        whereWordEnd = layout.whereWordEnd;
-        wherePredicateEnd = layout.wherePredicateEnd;
-        whereInsertion = layout.whereInsertion;
-        orderStart = layout.orderStart;
-        orderEnd = layout.orderEnd;
-        orderInsertion = layout.orderInsertion;
-        compound = layout.compound;
-        orderSiblings = layout.orderSiblings;
+        this.layout = inspect();
     }
 
     public void setPredicates(List<String> values) {
@@ -77,7 +76,7 @@ public final class SqlSelect {
         String value = optionalFragment(expression);
         if (value != null) {
             requireSimple("ORDER BY replacement");
-            if (orderSiblings) {
+            if (layout.orderSiblings) {
                 throw new UnsupportedOperationException(
                         "Replacing ORDER SIBLINGS BY is not supported");
             }
@@ -92,6 +91,10 @@ public final class SqlSelect {
         String value = optionalFragment(expression);
         if (value != null) {
             requireSimple("SELECT mark");
+            if (layout.markRestriction != null) {
+                throw new UnsupportedOperationException(
+                        "SELECT mark is not supported for " + layout.markRestriction);
+            }
             checkFragment(value);
             if (alias == null) throw new IllegalArgumentException("mark alias is required");
             String actualAlias = alias.trim();
@@ -117,9 +120,6 @@ public final class SqlSelect {
         }
 
         List<Edit> edits = edits();
-        Collections.sort(edits, Comparator.comparingInt((Edit e) -> e.start)
-                .thenComparingInt(e -> e.priority));
-
         StringBuilder result = new StringBuilder(source.length() + 128);
         int copiedUntil = 0;
         for (Edit edit : edits) {
@@ -141,7 +141,9 @@ public final class SqlSelect {
      */
     public PreparedSql prepare() {
         if (preparedSql == null) {
-            preparedSql = SqlParameterizer.prepare(assembledTokens(edits()));
+            String sql = buildSql();
+            preparedSql = SqlParameterizer.prepare(
+                    sql, scanner.scan(sql), scanner instanceof OracleSqlScanner);
         }
         return preparedSql;
     }
@@ -151,74 +153,37 @@ public final class SqlSelect {
         preparedSql = null;
     }
 
-    /** Список изменений используется и в buildSql(), и в prepare(). */
+    /** Структурные изменения исходного SQL. */
     private List<Edit> edits() {
         List<Edit> edits = new ArrayList<>(4);
         if (markExpression != null) {
-            edits.add(new Edit(selectItemsEnd, selectItemsEnd,
+            edits.add(new Edit(layout.selectItemsEnd, layout.selectItemsEnd,
                     ", (" + markExpression + "\n) AS " + markAlias + " ", 0));
         }
 
         if (!predicates.isEmpty()) {
             String joined = joinPredicates();
-            if (whereWordEnd >= 0) {
-                edits.add(new Edit(whereWordEnd, whereWordEnd,
+            if (layout.whereWordEnd >= 0) {
+                edits.add(new Edit(layout.whereWordEnd, layout.whereWordEnd,
                         " (" + joined + ") AND (", 10));
-                edits.add(new Edit(wherePredicateEnd, wherePredicateEnd, ") ", 10));
+                edits.add(new Edit(layout.wherePredicateEnd, layout.wherePredicateEnd, ") ", 10));
             } else {
-                edits.add(new Edit(whereInsertion, whereInsertion,
+                edits.add(new Edit(layout.whereInsertion, layout.whereInsertion,
                         " WHERE (" + joined + ")\n", 10));
             }
         }
 
         if (orderBy != null) {
-            if (orderStart >= 0) {
-                edits.add(new Edit(orderStart, orderEnd, "ORDER BY " + orderBy + "\n", 20));
+            if (layout.orderStart >= 0) {
+                edits.add(new Edit(layout.orderStart, layout.orderEnd, "ORDER BY " + orderBy + "\n", 20));
             } else {
-                edits.add(new Edit(orderInsertion, orderInsertion,
+                edits.add(new Edit(layout.orderInsertion, layout.orderInsertion,
                         " ORDER BY " + orderBy + "\n", 20));
             }
         }
         Collections.sort(edits, Comparator.comparingInt((Edit e) -> e.start)
                 .thenComparingInt(e -> e.priority));
         return edits;
-    }
-
-    /**
-     * Исходные токены НЕ лексируются повторно. Сканируются только замены,
-     * после чего выполняется единый проход по итоговой последовательности.
-     */
-    private List<SqlParameterizer.Lexeme> assembledTokens(List<Edit> edits) {
-        List<SqlParameterizer.Lexeme> result = new ArrayList<>(sourceTokens.size() + 32);
-        int consumed = 0;
-        int tokenIndex = 0;
-        for (Edit edit : edits) {
-            if (edit.start < consumed) throw new IllegalStateException("Overlapping SQL edits");
-            tokenIndex = appendSourceTokens(result, consumed, edit.start, tokenIndex);
-            for (SqlScanner.Token token : scanner.scan(edit.replacement)) {
-                result.add(new SqlParameterizer.Lexeme(edit.replacement, token));
-            }
-            consumed = edit.end;
-        }
-        appendSourceTokens(result, consumed, source.length(), tokenIndex);
-        return result;
-    }
-
-    private int appendSourceTokens(List<SqlParameterizer.Lexeme> result,
-                                   int start, int end, int tokenIndex) {
-        while (tokenIndex < sourceTokens.size()
-                && sourceTokens.get(tokenIndex).getEnd() <= start) {
-            tokenIndex++;
-        }
-        while (tokenIndex < sourceTokens.size()
-                && sourceTokens.get(tokenIndex).getStart() < end) {
-            SqlScanner.Token token = sourceTokens.get(tokenIndex++);
-            if (token.getStart() < start || token.getEnd() > end) {
-                throw new IllegalStateException("Edit is not aligned to token boundary: " + token);
-            }
-            result.add(new SqlParameterizer.Lexeme(source, token));
-        }
-        return tokenIndex;
     }
 
     private String joinPredicates() {
@@ -231,7 +196,7 @@ public final class SqlSelect {
     }
 
     private void requireSimple(String action) {
-        if (compound) {
+        if (layout.compound) {
             throw new UnsupportedOperationException(action
                     + " for UNION/INTERSECT/EXCEPT/MINUS is not supported");
         }
@@ -244,7 +209,7 @@ public final class SqlSelect {
             if (symbol(fragment, token, "(")) depth++;
             else if (symbol(fragment, token, ")")) {
                 if (--depth < 0) throw new IllegalArgumentException("Unbalanced SQL fragment");
-            } else if (depth == 0 && symbol(fragment, token, ";")) {
+            } else if (symbol(fragment, token, ";")) {
                 throw new IllegalArgumentException("SQL fragment contains a semicolon");
             }
         }
@@ -297,10 +262,12 @@ public final class SqlSelect {
             throw new IllegalArgumentException("Unsupported SELECT prefix");
         }
 
-        int from = -1, where = -1, group = -1, order = -1, tail = -1;
+        int where = -1, order = -1, tail = -1;
+        boolean hasGroupBy = false;
         int firstFollowingWhere = statementEndIndex;
         int firstFollowingOrder = statementEndIndex;
         int firstSelectBoundary = statementEndIndex;
+        int firstWhereBoundary = statementEndIndex;
         boolean compoundQuery = false;
         boolean siblings = false;
         depth = 0;
@@ -321,16 +288,16 @@ public final class SqlSelect {
                     wordPair(i, "START", "WITH") ||
                     wordPair(i, "CONNECT", "BY") ||
                     word(i, "MODEL") || tailAt(i);
-            if (word(i, "FROM") && from < 0 && firstSelectBoundary == statementEndIndex) {
-                from = i;
+            if (word(i, "FROM") && firstSelectBoundary == statementEndIndex) {
                 firstSelectBoundary = i;
             }
             if (whereBoundary && firstSelectBoundary == statementEndIndex) firstSelectBoundary = i;
+            if (whereBoundary && firstWhereBoundary == statementEndIndex) firstWhereBoundary = i;
             if (word(i, "WHERE") && where < 0) {
                 where = i;
                 if (firstSelectBoundary == statementEndIndex) firstSelectBoundary = i;
             }
-            if (groupClause && group < 0) group = i;
+            if (groupClause) hasGroupBy = true;
             if (orderClause && order < 0) {
                 order = i;
                 siblings = wordPair3(i, "ORDER", "SIBLINGS", "BY");
@@ -345,6 +312,14 @@ public final class SqlSelect {
         }
 
         int itemsBoundary = firstSelectBoundary;
+        String markRestriction = null;
+        if (hasGroupBy || hasOuterHaving(selectIndex, statementEndIndex)) {
+            markRestriction = "GROUP BY/HAVING";
+        } else if (hasTopLevelDistinct(selectIndex + 1, itemsBoundary)) {
+            markRestriction = "DISTINCT";
+        } else if (hasAggregateProjection(selectIndex + 1, itemsBoundary)) {
+            markRestriction = "aggregate SELECT list";
+        }
         int listLastToken = lastSignificant(selectIndex + 1, itemsBoundary);
         if (listLastToken < 0) throw new IllegalArgumentException("Empty SELECT list");
 
@@ -352,10 +327,13 @@ public final class SqlSelect {
         result.selectItemsEnd = sourceTokens.get(listLastToken).getEnd();
         result.compound = compoundQuery;
         result.orderSiblings = siblings;
+        result.markRestriction = markRestriction;
         result.whereWordEnd = -1;
         result.wherePredicateEnd = -1;
         result.orderStart = -1;
         result.orderEnd = -1;
+        result.whereInsertion = -1;
+        result.orderInsertion = -1;
         int mainContentEnd = lastSignificantEnd(selectIndex + 1, statementEndIndex);
 
         if (where >= 0) {
@@ -366,23 +344,9 @@ public final class SqlSelect {
             result.whereWordEnd = sourceTokens.get(where).getEnd();
             result.wherePredicateEnd = lastSignificantEnd(afterWhere, firstFollowingWhere);
         } else {
-            // WHERE должен появиться перед первым clause, который идёт после WHERE.
-            int boundary = statementEndIndex;
-            depth = 0;
-            for (int i = selectIndex + 1; i < statementEndIndex; i++) {
-                SqlScanner.Token token = sourceTokens.get(i);
-                if (symbol(source, token, "(")) { depth++; continue; }
-                if (symbol(source, token, ")")) { depth--; continue; }
-                if (depth == 0 && (orderClauseAt(i) || wordPair(i, "GROUP", "BY") ||
-                        word(i, "HAVING") || word(i, "WINDOW") ||
-                        word(i, "QUALIFY") || wordPair(i, "START", "WITH") ||
-                        wordPair(i, "CONNECT", "BY") || word(i, "MODEL") || tailAt(i))) {
-                    boundary = i;
-                    break;
-                }
-            }
-            result.whereInsertion = boundary == statementEndIndex
-                    ? mainContentEnd : sourceTokens.get(boundary).getStart();
+            // Граница уже найдена основным проходом по внешним SQL clauses.
+            result.whereInsertion = firstWhereBoundary == statementEndIndex
+                    ? mainContentEnd : sourceTokens.get(firstWhereBoundary).getStart();
         }
         if (order >= 0) {
             int actualEnd = firstFollowingOrder;
@@ -395,6 +359,49 @@ public final class SqlSelect {
                     ? sourceTokens.get(tail).getStart() : mainContentEnd;
         }
         return result;
+    }
+
+    /** Ограничения на mark проверяются до изменения SELECT list. */
+    private boolean hasTopLevelDistinct(int first, int end) {
+        int depth = 0;
+        for (int i = first; i < end; i++) {
+            SqlScanner.Token t = sourceTokens.get(i);
+            if (symbol(source, t, "(")) depth++;
+            else if (symbol(source, t, ")")) depth--;
+            else if (depth == 0 && word(i, "DISTINCT")) return true;
+        }
+        return false;
+    }
+
+    private boolean hasOuterHaving(int first, int end) {
+        int depth = 0;
+        for (int i = first; i < end; i++) {
+            SqlScanner.Token t = sourceTokens.get(i);
+            if (symbol(source, t, "(")) depth++;
+            else if (symbol(source, t, ")")) depth--;
+            else if (depth == 0 && word(i, "HAVING")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Консервативно отклоняем mark при известных агрегатных функциях.
+     * Это не SQL semantic analyzer: неизвестные пользовательские агрегаты
+     * пока остаются UNKNOWN и будут проверяться на корпусе запросов.
+     */
+    private boolean hasAggregateProjection(int first, int end) {
+        for (int i = first; i < end; i++) {
+            if (!(word(i, "COUNT") || word(i, "SUM") || word(i, "AVG")
+                    || word(i, "MIN") || word(i, "MAX")
+                    || word(i, "LISTAGG") || word(i, "STRING_AGG")
+                    || word(i, "JSON_AGG") || word(i, "ARRAY_AGG")
+                    || word(i, "XMLAGG") || word(i, "BOOL_AND")
+                    || word(i, "BOOL_OR") || word(i, "STDDEV")
+                    || word(i, "VARIANCE"))) continue;
+            int next = nextSignificant(i + 1);
+            if (next < end && symbol(source, sourceTokens.get(next), "(")) return true;
+        }
+        return false;
     }
 
     private boolean orderClauseAt(int i) {
@@ -456,25 +463,40 @@ public final class SqlSelect {
         return token.getKind() == SYMBOL && token.text(sql).equals(value);
     }
 
+    /** */
     private static final class Layout {
-        int selectItemsEnd;
+
+       int selectItemsEnd;
+
         int whereWordEnd;
+
         int wherePredicateEnd;
+
         int whereInsertion;
+
         int orderStart;
         int orderEnd;
+
         int orderInsertion;
+
         boolean compound;
         boolean orderSiblings;
+
+        String markRestriction;
     }
 
-    private static final class Edit {
-        final int start;
-        final int end;
-        final String replacement;
-        final int priority;
+   /** */
+   private static final class Edit {
 
-        Edit(int start, int end, String replacement, int priority) {
+      final int start;
+      final int end;
+
+      final String replacement;
+
+      final int priority;
+
+        Edit( int start, int end, String replacement, int priority )
+        {
             this.start = start;
             this.end = end;
             this.replacement = replacement;

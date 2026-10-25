@@ -45,19 +45,17 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
 
     /** */
     @Override
+    @SuppressWarnings("unchecked")
     public Class<P> getRowClass() {
-        return (Class<P>)rowClass;
+        return (Class<P>) rowClass;
     }
 
     /**
-    * Устанавливает тип записи для TreeDataSet.
-    * <p>
-    * @param rowClass
-    *        класс записи
-    *
-    * @throws IllegalStateException
-    *         если происходит изменить тип записи TreeDataSet, с уже загруженными записями
-    */
+     * Меняет тип записи только у пустого DataSet.
+     * Повторная установка того же Class допускается и для непустого DataSet.
+     *
+     * @throws IllegalStateException если тип изменяется при наличии записей
+     */
     public void setRowClass( Class<? extends P> rowClass ) {
 
         if( this.rowClass != rowClass ) {
@@ -65,7 +63,7 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
             if( !isEmpty() )
                 throw new IllegalStateException( Tags.PRODUCT_LABEL + "Can't change the type of record, because it is already loaded other type of entry" );
 
-            this.rowClass = (Class)rowClass;
+            this.rowClass = rowClass;
         }
     }
 
@@ -83,8 +81,9 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
 
     /** {@inheritDoc} */
     @Override
+    @SuppressWarnings("unchecked")
     public <T> T getProperty(String propertyName) {
-        return properties == null ? null : (T)properties.get(propertyName);
+        return properties == null ? null : (T) properties.get(propertyName);
     }
 
     /** {@inheritDoc} */
@@ -107,18 +106,23 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
         return callbackParameters;
     }
 
-    /** */
-    public void setParameter( String name, Object value ) {
-        if( dataSetParameters == null )
+    /** Создаёт внутреннее хранилище только при первой установке параметра. */
+    private ParametersValues parametersForWrite() {
+        if (dataSetParameters == null)
             dataSetParameters = new ParametersValues();
-        this.dataSetParameters.set(name, value);
+        return dataSetParameters;
     }
 
     /** */
-    public void setParameter( int index,  Object value ) {
-        if( dataSetParameters == null )
-            dataSetParameters = new ParametersValues();
-        this.dataSetParameters.set(index, value);
+    @Override
+    public void setParameter(String name, Object value) {
+        parametersForWrite().set(name, value);
+    }
+
+    /** */
+    @Override
+    public void setParameter(int index, Object value) {
+        parametersForWrite().set(index, value);
     }
 
     /** */
@@ -170,65 +174,51 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
     }
 
     /**
-     * Возвращает значение индексированного параметра.
-     * <p>
-     * SQLDataSet различает ситуацию когда параметр установлен в {@code null} и когда параметр отсутствует.
-     * При отсутствии параметра выбрасывается исключение.
+     * Возвращает значение параметра: сначала callback, затем собственные параметры.
+     * Значение {@code null} считается заданным; {@link IParameters#NO_PARAMETER_VALUE}
+     * означает отсутствие значения и допускает fallback.
      *
-     * @param index
-     *        индекс параметра
-     *
-     * @return
-     *        значение параметра
-     *
-     * @throws
-     *          DataSetParameterException если параметр с таким индексом отсутствует
+     * @throws DataSetParameterException если параметр не задан
      */
     public Object getParameterValue( int index ) throws DataSetParameterException {
 
         Object value = NO_PARAMETER_VALUE;
 
-        IParameters cp = getCallbackParameters();
+        IParameters callback = getCallbackParameters();
 
-        if( cp != null && cp.hasParameter(index) )
-            value = cp.getParameter(index);
+        if (callback != null && callback.hasParameter(index))
+            value = callback.getParameter(index);
 
-        if( value == NO_PARAMETER_VALUE && hasParameter(index) )
+        // null считается заданным значением. Только sentinel разрешает fallback.
+        if (value == NO_PARAMETER_VALUE && hasParameter(index))
             value = getParameter(index);
 
-        if( value == NO_PARAMETER_VALUE )
+        if (value == NO_PARAMETER_VALUE)
             DataSetParameterException.throwNoSetParameterValue(index);
 
         return value;
     }
 
     /**
-     * Возвращает значение именованного параметра.
-     * <p>
-     * SQLDataSet различает ситуацию когда параметр установлен в {@code null} и когда параметр отсутствует.
-     * При отсутствии параметра выбрасывается исключение.
+     * Возвращает именованный параметр с тем же приоритетом источников,
+     * что и {@link #getParameterValue(int)}.
      *
-     * @param name
-     *        имя параметра
-     *
-     * @return значение параметра
-     *
-     * @throws
-     *         DataSetParameterException если параметр с таким именем отсутствует
+     * @throws DataSetParameterException если параметр не задан
      */
     public Object getParameterValue( String name ) throws DataSetParameterException {
 
         Object value = NO_PARAMETER_VALUE;
 
-        IParameters cp = getCallbackParameters();
+        IParameters callback = getCallbackParameters();
 
-        if( cp != null && cp.hasParameter(name) )
-            value = cp.getParameter(name);
+        if (callback != null && callback.hasParameter(name))
+            value = callback.getParameter(name);
 
-        if( value == NO_PARAMETER_VALUE && hasParameter(name) )
+        // null считается заданным значением. Только sentinel разрешает fallback.
+        if (value == NO_PARAMETER_VALUE && hasParameter(name))
             value = getParameter(name);
 
-        if( value == NO_PARAMETER_VALUE )
+        if (value == NO_PARAMETER_VALUE)
             DataSetParameterException.throwNoSetParameterValue(name);
 
         return value;

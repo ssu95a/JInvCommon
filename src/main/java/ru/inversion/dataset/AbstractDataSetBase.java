@@ -114,15 +114,14 @@ public abstract class AbstractDataSetBase<P> extends AbstractDSBase<P> implement
 	{
         super( rowClass );
 
-		if( doCopy )
-			this.rows = getDataSetListFactory().createDataSetList( rows );
-		else
-			this.rows = ( rows != null ) ? rows : getDataSetListFactory().createDataSetList();
+        if( doCopy )
+            this.rows = rows == null ? getDataSetListFactory().createDataSetList()
+                    : getDataSetListFactory().createDataSetList(rows);
+        else
+            this.rows = rows != null ? rows : getDataSetListFactory().createDataSetList();
 
-        if( this.rowClass == null ) {
-            if( this.rows != null && !this.rows.isEmpty() )
-				this.rowClass = U.<P,Class>callIfNotNull( U.firstNotNull( rows ), P::getClass );
-        }//end if
+        if( this.rowClass == null && !this.rows.isEmpty() )
+            this.rowClass = U.<P,Class>callIfNotNull(U.firstNotNull(this.rows), P::getClass);
 	}
 
     /** */
@@ -173,42 +172,19 @@ public abstract class AbstractDataSetBase<P> extends AbstractDSBase<P> implement
      *
      * @return удаленную запись, если удаление не произошло то {@code null}
      */
-	@Override
+    @Override
 	public P removeCurrentRow( ) {
+        final int oldIndex = currentRowNum;
+        if( oldIndex < 0 || oldIndex >= rows.size() )
+            return null;
 
-		P oldRow = null;
+        final P oldRow = rows.remove(oldIndex);
+        currentRowNum = rows.isEmpty() ? -1 : Math.min(oldIndex, rows.size() - 1);
+        final P newRow = currentRowNum < 0 ? null : rows.get(currentRowNum);
 
-		if( !rows( ).isEmpty( ) ) {
-
-			int	oldRowNum = getCurrentRowNum( );
-				oldRow	  = rows( ).remove( oldRowNum );
-
-			if( rows().isEmpty( ) )
-				currentRowNum = -1;
-			else
-				currentRowNum = ( oldRowNum == rows().size() ) ? rows().size() - 1 : oldRowNum;
-
-			fireRowEvent( DataSetRowEvent.RowOperationEnum.DELETE, oldRow, null, oldRowNum, 1 );
-
-			if( rows().isEmpty( ) )
-				fireNavigationEvent( oldRow, null, oldRowNum, -1 );
-			else
-			{
-				currentRowNum = -1;
-
-				if( oldRowNum == 0 ) {
-					setCurrentRowNum(0);
-				}
-				else if ( oldRowNum == rows().size() ) {
-					setCurrentRowNum( rows().size() - 1 );
-				}
-				else {
-					setCurrentRowNum( oldRowNum );
-				}
-			}//end else
-		}//end if
-
-		return oldRow;
+        fireRowEvent(DataSetRowEvent.RowOperationEnum.DELETE, oldRow, null, oldIndex, 1);
+        fireNavigationEvent(oldRow, newRow, oldIndex, currentRowNum);
+        return oldRow;
 	}
 
 	/**
@@ -221,16 +197,14 @@ public abstract class AbstractDataSetBase<P> extends AbstractDSBase<P> implement
      *
      * @return старую запись, которая была до обновления, если обновление не произошло то {@code null}
      */
-	@Override
+    @Override
 	public P updateCurrentRow( P newRow ) {
+        final int index = currentRowNum;
+        if( index < 0 || index >= rows.size() )
+            return null;
 
-		P oldRow = null;
-
-		if( !rows().isEmpty() ) {
-			oldRow     = rows().set( getCurrentRowNum( ), newRow );
-			fireRowEvent( DataSetRowEvent.RowOperationEnum.UPDATE, oldRow, newRow, getCurrentRowNum( ), 1 );
-		}
-
+        final P oldRow = rows.set(index, newRow);
+        fireRowEvent(DataSetRowEvent.RowOperationEnum.UPDATE, oldRow, newRow, index, 1);
         return oldRow;
 	}
 
@@ -254,145 +228,115 @@ public abstract class AbstractDataSetBase<P> extends AbstractDSBase<P> implement
      * @param doSetToCurrent
      *        признак - установить одну из вставленных (как правило первую) строк как текущую
      */
-	@Override
+    @Override
 	public void insertRows( List< P > newRows, InsertRowModeEnum insertMode, boolean doSetToCurrent ) {
+        if( newRows == null || newRows.isEmpty() )
+            return;
 
-		if( newRows == null || newRows.isEmpty() )
-			return;
+        final int oldIndex = currentRowNum;
+        final P oldRow = oldIndex >= 0 && oldIndex < rows.size() ? rows.get(oldIndex) : null;
+        final int position;
 
-		int position = -1;
-
-        boolean addToEnd = false;
-
-		if( rows().isEmpty() ) {
-			position = 0;
-		}
-		else
-		{
-			switch( insertMode ) {
-				case FIRST:
-					position = 0;
-				break;
-				case LAST:
-                    addToEnd = true;
-				break;
-				case BEFORE_CURRENT:
-					position = getCurrentRowNum() == 0 ? 0 : getCurrentRowNum();
-				break;
-				case AFTER_CURRENT:
-                {
-					if( getCurrentRowNum() == rows().size() - 1 )
-                        addToEnd = true;
-                    else
-                        position = Math.min( getCurrentRowNum() + 1, rows().size() - 1 );
-                }
-				break;
-			}
-		}
-
-        if( addToEnd ) {
-
-            position = getCurrentRowNum() + 1;
-
-            rows().addAll(newRows);
+        if( rows.isEmpty() ) {
+            position = 0;
         }
         else {
-
-            if( position == -1 )
-                position = 0;
-
-            rows().addAll( position, newRows );
+            switch( insertMode ) {
+                case FIRST:
+                    position = 0;
+                    break;
+                case LAST:
+                    position = rows.size();
+                    break;
+                case BEFORE_CURRENT:
+                    position = oldIndex >= 0 ? oldIndex : 0;
+                    break;
+                case AFTER_CURRENT:
+                    position = oldIndex >= 0 ? oldIndex + 1 : 0;
+                    break;
+                default:
+                    throw new IllegalArgumentException("Unknown insert mode: " + insertMode);
+            }
         }
 
-		fireRowEvent ( DataSetRowEvent.RowOperationEnum.INSERT, null, newRows.get(0), position, newRows.size() );
+        rows.addAll(position, newRows);
 
-		if( doSetToCurrent && position != -1 ) {
-            this.currentRowNum = -1;
-			setCurrentRowNum( position );
-        }
+        if( doSetToCurrent )
+            currentRowNum = position;
+        else if( oldIndex >= 0 && position <= oldIndex )
+            currentRowNum = oldIndex + newRows.size();
+
+        fireRowEvent(DataSetRowEvent.RowOperationEnum.INSERT, null, newRows.get(0), position, newRows.size());
+
+        if( doSetToCurrent && (oldIndex != position || oldRow != rows.get(position)) )
+            fireNavigationEvent(oldRow, rows.get(position), oldIndex, position);
 	}
 
-	/** {@inheritDoc} */
+    /** {@inheritDoc} */
     @Override
-    public <A> int removeRows( BiPredicate< P, A > predicat, A arg2 ) {
-
-        if( predicat == null || isEmpty() )
+    public <A> int removeRows( BiPredicate<P, A> predicat, A arg2 ) {
+        if( predicat == null || rows.isEmpty() )
             return 0;
 
-		final int totalCount = rows().size();
-
+        // Вычисляем набор удаляемых позиций до первого изменения коллекции.
+        final int size = rows.size();
+        final boolean[] remove = new boolean[size];
         int removeCount = 0;
-		int firstDeletedRowNum = -1;
+        for( int i = 0; i < size; i++ ) {
+            if( predicat.test(rows.get(i), arg2) ) {
+                remove[i] = true;
+                removeCount++;
+            }
+        }
 
-		int index = 0;
+        if( removeCount == 0 )
+            return 0;
+        if( removeCount == size ) {
+            clear();
+            return removeCount;
+        }
 
-		P rowForDelete = null;
+        final int oldIndex = currentRowNum;
+        final P oldRow = oldIndex >= 0 && oldIndex < size ? rows.get(oldIndex) : null;
+        int selectedIndex = -1;
+        if( oldIndex >= 0 && oldIndex < size ) {
+            if( !remove[oldIndex] ) {
+                selectedIndex = oldIndex;
+            }
+            else {
+                // Если текущая строка удалена, выбираем следующую, иначе предыдущую.
+                for( int i = oldIndex + 1; i < size && selectedIndex < 0; i++ )
+                    if( !remove[i] ) selectedIndex = i;
+                for( int i = oldIndex - 1; i >= 0 && selectedIndex < 0; i-- )
+                    if( !remove[i] ) selectedIndex = i;
+            }
+        }
 
-		List< P > remover = new ArrayList<>();
+        // Удаляем непрерывными диапазонами с конца, не используя equals().
+        // События DELETE содержат действительные индексы и размеры диапазонов.
+        currentRowNum = selectedIndex;
+        for( int end = size - 1; end >= 0; ) {
+            if( !remove[end] ) {
+                end--;
+                continue;
+            }
+            int start = end;
+            while( start > 0 && remove[start - 1] )
+                start--;
 
-		for(Iterator< P > iter = rows().iterator(); iter.hasNext(); index ++ )
-		{
-			rowForDelete = iter.next();
+            final int count = end - start + 1;
+            final P removedRow = count == 1 ? rows.get(start) : null;
+            rows.subList(start, end + 1).clear();
+            if( currentRowNum > end )
+                currentRowNum -= count;
+            fireRowEvent(DataSetRowEvent.RowOperationEnum.DELETE, removedRow, null, start, count);
+            end = start - 1;
+        }
 
-			if( predicat.test( rowForDelete, arg2) ) {
-				if( firstDeletedRowNum == -1 )
-					firstDeletedRowNum = index;
-				//break;
-
-				remover.add(rowForDelete);
-			}
-		}
-
-		if( firstDeletedRowNum != -1 )
-		{
-			// если все удаляем
-			if( remover.size() == rows().size() )
-			{
-				removeCount = totalCount;
-				clear( );
-			}
-			else
-			{
-				rows.removeAll( remover );
-
-				removeCount = totalCount - rows.size();
-
-				if( this.currentRowNum >= rows().size() )
-				{
-					this.currentRowNum = -1;
-					setCurrentRowNum( rows().size() - 1 );
-				}
-				else
-				{
-					if( this.currentRowNum >= firstDeletedRowNum )
-					{
-						firstDeletedRowNum = this.currentRowNum;
-						this.currentRowNum = -1;
-						setCurrentRowNum( firstDeletedRowNum );
-					}
-				}
-
-				if( removeCount == 1 )
-					fireRowEvent( DataSetRowEvent.RowOperationEnum.DELETE, rowForDelete, null, firstDeletedRowNum, 1 );
-				else
-					fireRowEvent( DataSetRowEvent.RowOperationEnum.DELETE, null, null, firstDeletedRowNum, removeCount );
-				/*
-				if( this.currentRowNum >= rows().size() )
-				{
-					this.currentRowNum = -1;
-					setCurrentRowNum( rows().size() - 1 );
-				}
-				else
-				{
-					firstDeletedRowNum = this.currentRowNum;
-					this.currentRowNum = -1;
-					setCurrentRowNum( firstDeletedRowNum );
-				}
-				*/
-			}
-		}
-
-		return removeCount;
+        final P newRow = currentRowNum < 0 ? null : rows.get(currentRowNum);
+        if( oldIndex >= 0 && (oldIndex != currentRowNum || oldRow != newRow) )
+            fireNavigationEvent(oldRow, newRow, oldIndex, currentRowNum);
+        return removeCount;
     }
 
     /*
@@ -792,14 +736,58 @@ public abstract class AbstractDataSetBase<P> extends AbstractDSBase<P> implement
 	}
 
     /**
-     * Сортирует строки внутри DataSet.
+     * Сортирует строки внутри DataSet, сохраняя текущую запись.
      * <p>
+     * Если текущая запись сместилась, формируется событие навигации с прежним
+     * и новым индексами. Сама запись при этом не меняется.
+     *
      * @param comparator
-     *        объект сравнения для ф-ции сортировки.
+     *        объект сравнения; {@code null} означает отсутствие сортировки
      */
     public void sort( Comparator< P > comparator ) {
-        if( comparator != null )
-            rows().sort(comparator);
+        if( comparator == null )
+            return;
+
+        final List<P> items = rows();
+        final int oldIndex = currentRowNum;
+
+        if( oldIndex < 0 || oldIndex >= items.size() ) {
+            items.sort(comparator);
+            return;
+        }
+
+        final P currentRow = items.get(oldIndex);
+
+        // Одна и та же ссылка может присутствовать в списке несколько раз.
+        // List.sort() стабилен: сохраняем номер вхождения этой ссылки.
+        int occurrence = 0;
+        for( int i = 0; i <= oldIndex; i++ ) {
+            if( items.get(i) == currentRow )
+                occurrence++;
+        }
+
+        int newIndex = -1;
+
+        try {
+
+            items.sort(comparator);
+        }
+        finally {
+            // Даже если comparator бросил исключение, курсор должен указывать
+            // на выбранный экземпляр (List.sort может частично переставить строки).
+            int found = 0;
+
+            for( int i = 0; i < items.size(); i++ ) {
+                if( items.get(i) == currentRow && ++found == occurrence ) {
+                    newIndex = i;
+                    break;
+                }
+            }
+            currentRowNum = newIndex;
+        }
+
+        if( newIndex != oldIndex )
+            fireNavigationEvent(currentRow, newIndex < 0 ? null : currentRow, oldIndex, newIndex);
     }
 
 	/** {@inheritDoc} */

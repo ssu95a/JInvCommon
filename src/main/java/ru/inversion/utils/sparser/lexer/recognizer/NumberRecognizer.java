@@ -25,6 +25,17 @@ final class NumberRecognizer implements TokenRecognizer {
 
         int radixEnd = postgres ? postgresRadixEnd(sql, at) : at;
         int end = radixEnd > at ? radixEnd : decimalEnd(sql, at, postgres);
+        if (!postgres && end < sql.length()) {
+            // Oracle BINARY_FLOAT/BINARY_DOUBLE literal suffix, including 1e10d.
+            char suffix = sql.charAt(end);
+            if (suffix == 'f' || suffix == 'F' || suffix == 'd' || suffix == 'D') {
+                int next = end + 1;
+                if (next == sql.length() || !(Character.isLetterOrDigit(sql.charAt(next))
+                        || sql.charAt(next) == '_' || sql.charAt(next) == '$')) {
+                    end++;
+                }
+            }
+        }
         return new SqlScanner.Token(NUMBER, at, end);
     }
 

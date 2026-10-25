@@ -5,9 +5,11 @@ import ru.inversion.utils.sparser.lexer.TokenRecognizer;
 
 /** Небольшие общие операции с символами. Не содержит SQL-семантики. */
 final class ScanChars {
+
     private ScanChars() { }
 
-    static boolean follows(String sql, int at, char next) {
+    static boolean follows( String sql, int at, char next )
+    {
         return at + 1 < sql.length() && sql.charAt(at + 1) == next;
     }
 
@@ -15,10 +17,12 @@ final class ScanChars {
         return ch >= '0' && ch <= '9';
     }
 
+    /** */
     static boolean identifierStart(char ch) {
         return Character.isLetter(ch) || ch == '_';
     }
 
+    /** */
     static boolean identifierPart(char ch) {
         return Character.isLetterOrDigit(ch) || ch == '_' || ch == '$' || ch == '#';
     }
@@ -31,7 +35,7 @@ final class ScanChars {
     static boolean atWordBoundary(String sql, int at) {
         return at == 0 || !identifierPart(sql.charAt(at - 1));
     }
-
+   /** */
     static int quotedEnd(String sql, int quoteAt, char quote,
                          boolean backslashEscapes, int tokenStart) {
         for (int i = quoteAt + 1; i < sql.length(); i++) {

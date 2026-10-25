@@ -5,6 +5,7 @@ import ru.inversion.datacall.CallPrepareContext;
 import ru.inversion.datacall.maker.CallMaker_WithParametersValue;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.*;
+import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.ExprInfo;
 import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.JInvDbException;
@@ -123,6 +124,29 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * Поставщик данных из SQL источника данных.
     */
    protected ISQLDataReader<P> dataReader;
+
+   /** Актуальный resolver значений, связанный с текущим PreparedSql. */
+   private IParameters preparedReaderParameters;
+
+   /** Живое представление параметров DataSet. Явный null имеет приоритет. */
+   private final IParameters mainSqlParameters = new IParameters() {
+      @Override public Object getParameter(String name) {
+         return SQLDataSet.this.getParameterValue(name);
+      }
+      @Override public Object getParameter(int index) {
+         return SQLDataSet.this.getParameterValue(index);
+      }
+      @Override public boolean hasParameter(String name) {
+         IParameters callback = SQLDataSet.this.getCallbackParameters();
+         return (callback != null && callback.hasParameter(name))
+                 || SQLDataSet.this.hasParameter(name);
+      }
+      @Override public boolean hasParameter(int index) {
+         IParameters callback = SQLDataSet.this.getCallbackParameters();
+         return (callback != null && callback.hasParameter(index))
+                 || SQLDataSet.this.hasParameter(index);
+      }
+   };
 
    /**
     * Размер страницы данных.
@@ -814,6 +838,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /** */
    protected SelectBuilder getSelectBuilder( ) {
+      for (PredicateItem item : predicates.values()) {
+         if (item.getExpression() != null)
+            throw new IllegalStateException(
+                    "Legacy SelectBuilder cannot bind ISQLExpression parameters");
+      }
 
       final String qa = getQueryAlias();
 
@@ -1010,6 +1039,43 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return execute_count;
    }
 
+   /**
+    * Подготовка нового пути только для обычного SQL SELECT.
+    * Legacy builders по-прежнему обслуживают @Table, mark, optimizer hint
+    * и специальные режимы XXIDataSet.
+    */
+   private boolean supportsNextSelectBuilder() {
+      return getRowClass() != null
+              && !isDefSqlByTable()
+              && !isSupportMark()
+              && S.isNullOrEmpty(getOptimizerHint())
+              && S.isNullOrEmpty(getQueryAlias())
+              && S.isNullOrEmpty(getAfterOrderBy())
+              && getLimitRows() == 0
+              && getOffsetRows() == 0;
+   }
+
+   private NextSelectBuilder createNextSelectBuilder() {
+      ru.inversion.db.dialect.SqlDialect dialect = getTaskContextForUse().dialect();
+      ru.inversion.utils.sparser.SqlDialect sqlDialect =
+              dialect.type() == ru.inversion.db.dialect.SqlDialect.DialectId.POSTGRES
+              ? ru.inversion.utils.sparser.SqlDialect.POSTGRES
+              : ru.inversion.utils.sparser.SqlDialect.ORACLE;
+      NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), sqlDialect);
+      for (PredicateItem item : predicates.values()) {
+         if (item.getExpression() != null) {
+            if (!item.getFilterStr().equals(item.getExpression().getSQL()))
+               throw new IllegalStateException(
+                       "ISQLExpression SQL changed after filter registration");
+            builder.addPredicate(item.getExpression());
+         } else {
+            builder.addPredicate(item.getFilterStr());
+         }
+      }
+      builder.orderBy(getOrderBy());
+      return builder;
+   }
+
    /** {@inheritDoc} */
    @Override
    public synchronized void executeQuery( boolean fetchAllRows ) throws DataSetException {
@@ -1031,25 +1097,38 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             if( dataReader == null || needReCreateReader.getValue() )
             {
-               IRowMapper< P > rowMapper = getRowMapper();
+               if (dataReader != null) {
+                  dataReader.close();
+                  dataReader = null;
+               }
+               preparedReaderParameters = null;
+               IRowMapper<P> rowMapper = getRowMapper();
 
-               dataReader = new JDBCDataReader( getTaskContextForUse().getConnection(), prepareCompletedSql( SHOW ), rowMapper, getRowClass(), isSupportMark() );
-
-               needReCreateReader.setValue( false );
+               if (supportsNextSelectBuilder()) {
+                  NextSelectBuilder builder = createNextSelectBuilder();
+                  PreparedSql sql = builder.prepare();
+                  IParameters values = builder.parameters(mainSqlParameters);
+                  dataReader = new JDBCDataReader<>(
+                          getTaskContextForUse().getConnection(), sql,
+                          rowMapper, getRowClass(), false);
+                  preparedReaderParameters = values;
+               } else {
+                  // Не допускаем потерю собственных параметров ISQLExpression
+                  // при переходе на старый строковый JDBCDataReader.
+                  for (PredicateItem item : predicates.values()) {
+                     if (item.getExpression() != null)
+                        throw new UnsupportedOperationException(
+                           "ISQLExpression predicates in legacy SQL mode are not yet supported");
+                  }
+                  dataReader = new JDBCDataReader<>(
+                          getTaskContextForUse().getConnection(),
+                          prepareCompletedSql(SHOW), rowMapper, getRowClass(), isSupportMark());
+               }
+               needReCreateReader.setValue(false);
             }
 
-            dataReader.executeQuery (
-                    new IParameters( ) {
-                       @Override
-                       public Object getParameter( String parameterName ) {
-                          return getParameterValue( parameterName );
-                       }
-                       @Override
-                       public Object getParameter( int parameterIndex ) {
-                          return getParameterValue( parameterIndex );
-                       }
-                    }
-            );
+            dataReader.executeQuery(
+                    preparedReaderParameters == null ? mainSqlParameters : preparedReaderParameters);
          }
          catch( Throwable th ) {
 
@@ -1261,20 +1340,25 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** {@inheritDoc} */
    @Override
    public int setFilter( ISQLExpression sqlExpression, boolean fixed, boolean append ) throws DataSetException {
-
-      if( sqlExpression == null || sqlExpression.getSQL() == null )
+      if (sqlExpression == null || S.isNullOrEmpty(sqlExpression.getSQL()))
          return 0;
 
-      try {
+      String sql = sqlExpression.getSQL();
+      // Старый setFilter(String) переносит ORDER BY в другое поле,
+      // поэтому с параметризованным ISQLExpression такую трансформацию
+      // до выделения отдельного SQL-aware split делать нельзя.
+      if (orderByPattern.matcher(removeNestedParentheses(sql)).find())
+         throw new DataSetException(
+                 "Embedded ORDER BY in ISQLExpression filter is not supported");
 
-         SQLParser sp = new SQLParser( sqlExpression.getSQL()  );
-         String optimizeSql = sp.prepareSqlWithParametersValue( sqlExpression );
-
-         return setFilter( optimizeSql, fixed, append );
-
-      } catch( Throwable th ) {
-         throw new DataSetException( Tags.PRODUCT_LABEL + "setFilter, SQLExpression version", th );
+      int id = setFilter(sql, fixed, append);
+      if (id > 0) {
+         PredicateItem previous = predicates.get(id);
+         if (previous == null)
+            throw new IllegalStateException("Filter was not registered: " + id);
+         predicates.put(id, new PredicateItem(sqlExpression, previous.getType()));
       }
+      return id;
    }
 
    /** {@inheritDoc} */

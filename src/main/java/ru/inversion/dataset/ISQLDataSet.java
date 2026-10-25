@@ -139,13 +139,26 @@ public interface ISQLDataSet<P> extends IDataSet<P>, ISQLExpression {
     class PredicateItem {
         final private String filterStr;
         final private PredicateTypeEnum type;
+        final private ISQLExpression expression;
         private boolean pre;
         /** */
-        public PredicateItem( String filterStr,  PredicateTypeEnum type )
+        public PredicateItem( String filterStr, PredicateTypeEnum type )
         {
             this.filterStr = filterStr;
-            this.type      = type;
-            this.pre       = true;
+            this.type = type;
+            this.expression = null;
+            this.pre = true;
+        }
+        /** SQL фиксируется при регистрации; значения expression читаются перед execute. */
+        public PredicateItem( ISQLExpression expression, PredicateTypeEnum type )
+        {
+            this.expression = java.util.Objects.requireNonNull(expression, "expression");
+            this.filterStr = java.util.Objects.requireNonNull(expression.getSQL(), "expression.sql");
+            this.type = type;
+            this.pre = true;
+        }
+        public ISQLExpression getExpression() {
+            return expression;
         }
         /** */
         public PredicateTypeEnum getType() {

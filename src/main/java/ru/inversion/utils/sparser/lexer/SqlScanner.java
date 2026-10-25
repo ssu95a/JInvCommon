@@ -32,18 +32,22 @@ public abstract class SqlScanner {
     }
 
     public static final class Token {
+
         private final Kind kind;
-        private final int start;
-        private final int end;
+
+        private final int  start;
+        private final int  end;
 
         // Конструирование токенов доступно только внутри пакета сканнера.
-        public Token(Kind kind, int start, int end) {
+        public Token( Kind kind, int start, int end )
+        {
             this.kind = Objects.requireNonNull(kind, "kind");
-            if (start < 0 || end <= start) {
+
+            if( start < 0 || end <= start )
                 throw new IllegalArgumentException("Invalid token range: " + start + ".." + end);
-            }
+
             this.start = start;
-            this.end = end;
+            this.end   = end;
         }
 
         public Kind getKind() { return kind; }
@@ -56,9 +60,7 @@ public abstract class SqlScanner {
         }
 
         public boolean isWord(String source, String expected) {
-            return kind == Kind.WORD
-                    && end - start == expected.length()
-                    && source.regionMatches(true, start, expected, 0, expected.length());
+            return kind == Kind.WORD && end - start == expected.length() && source.regionMatches(true, start, expected, 0, expected.length());
         }
 
         @Override
@@ -82,19 +84,25 @@ public abstract class SqlScanner {
     }
 
     public final List<Token> scan(String sql) {
-        Objects.requireNonNull(sql, "sql");
+
+       Objects.requireNonNull(sql, "sql");
+
         List<Token> result = new ArrayList<>();
+
         int offset = 0;
 
-        while (offset < sql.length()) {
+        while( offset < sql.length() )
+        {
             Token token = recognize(sql, offset);
-            if (token == null) {
-                token = new Token(Kind.SYMBOL, offset, offset + 1);
-            } else if (token.getStart() != offset || token.getEnd() > sql.length()) {
-                throw new IllegalStateException("Recognizer returned invalid token at " + offset
-                        + ": " + token);
-            }
+
+            if( token == null)
+                token = new Token( Kind.SYMBOL, offset, offset + 1 );
+
+            else if (token.getStart() != offset || token.getEnd() > sql.length() )
+                throw new IllegalStateException("Recognizer returned invalid token at " + offset + ": " + token);
+
             result.add(token);
+
             offset = token.getEnd();
         }
         return Collections.unmodifiableList(result);

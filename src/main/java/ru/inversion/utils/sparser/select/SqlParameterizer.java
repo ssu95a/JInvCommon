@@ -9,49 +9,44 @@ import java.math.BigInteger;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.*;
 
 /**
- * Единая параметризация СОБРАННОЙ последовательности токенов.
- * Не выполняет повторное сканирование неизменной основы SELECT.
+ * Единая параметризация уже собранной SQL-строки.
  * Не получает значения пользовательских параметров: это обязанность DataSet.
  */
 final class SqlParameterizer {
-    private SqlParameterizer() { }
+    private final String source;
+    private final List<SqlScanner.Token> tokens;
+    private final boolean oracle;
 
-    /** Ссылка на исходный текст токена; не копирует текст большого SELECT. */
-    static final class Lexeme {
-        final String source;
-        final SqlScanner.Token token;
-
-        Lexeme(String source, SqlScanner.Token token) {
-            this.source = source;
-            this.token = token;
-        }
-
-        SqlScanner.Kind kind() { return token.getKind(); }
-        String text() { return token.text(source); }
-        boolean word(String expected) { return token.isWord(source, expected); }
-        boolean symbol(String expected) {
-            return (kind() == SYMBOL || kind() == OPERATOR) && text().equals(expected);
-        }
+    private SqlParameterizer(String source, List<SqlScanner.Token> tokens, boolean oracle) {
+        this.source = Objects.requireNonNull(source, "source");
+        this.tokens = Objects.requireNonNull(tokens, "tokens");
+        this.oracle = oracle;
     }
 
-    static PreparedSql prepare(List<Lexeme> tokens) {
+    static PreparedSql prepare(String source, List<SqlScanner.Token> tokens, boolean oracle) {
+        return new SqlParameterizer(source, tokens, oracle).compile();
+    }
+
+    private PreparedSql compile() {
         StringBuilder sql = new StringBuilder();
         List<Parameter> parameters = new ArrayList<>();
         ArrayDeque<Integer> castScopes = new ArrayDeque<>();
         ArrayDeque<Integer> orderScopes = new ArrayDeque<>();
         boolean[] legacyMarkers = legacyMarkers(tokens);
+        boolean[] legacyConcatMarkers = legacyConcatMarkers(tokens);
         boolean enabled = true;
         boolean legacyOff = false;
         int depth = 0;
 
         for (int i = 0; i < tokens.size(); i++) {
-            Lexeme current = tokens.get(i);
-            SqlScanner.Kind kind = current.kind();
-            String text = current.text();
+            SqlScanner.Token current = tokens.get(i);
+            SqlScanner.Kind kind = current.getKind();
+            String text = current.text(source);
 
             // Директивы — обычные SQL-комментарии для драйвера, но управляющие
             // маркеры для нашей автопараметризации.
@@ -62,8 +57,15 @@ final class SqlParameterizer {
                 legacyOff = !legacyOff;
                 continue; // парные legacy-разделители не попадают в JDBC SQL
             }
+            if (legacyConcatMarkers[i]) {
+                // PostgreSQL lexer объединяет ~|| и ||~ в один OPERATOR.
+                // Только для подтверждённой пары оставляем || и убираем ~.
+                sql.append("||");
+                legacyOff = !legacyOff;
+                continue;
+            }
 
-            if (current.symbol(")")) {
+            if (symbol(current, ")")) {
                 while (!castScopes.isEmpty() && castScopes.peek() == depth) castScopes.pop();
                 while (!orderScopes.isEmpty() && orderScopes.peek() >= depth) orderScopes.pop();
                 depth--;
@@ -74,15 +76,15 @@ final class SqlParameterizer {
                 orderScopes.pop();
             }
 
-            if (current.word("ORDER") && isOrderStart(tokens, i)) {
+            if (word(current, "ORDER") && isOrderStart(tokens, i)) {
                 orderScopes.push(depth);
             }
-            if (current.symbol("(")) {
+            if (symbol(current, "(")) {
                 depth++;
                 int previous = previousSignificant(tokens, i - 1);
-                if ((previous >= 0 && tokens.get(previous).word("CAST"))
+                if ((previous >= 0 && word(tokens.get(previous), "CAST"))
                         || isPostgresTypeModifier(tokens, previous)
-                        || isTimeTypeName(tokens, previous)) {
+                        || isTypePrecisionName(tokens, previous)) {
                     castScopes.push(depth);
                 }
             }
@@ -131,80 +133,126 @@ final class SqlParameterizer {
         }
     }
 
-    private static boolean isOrderStart(List<Lexeme> tokens, int i) {
+    private boolean isOrderStart(List<SqlScanner.Token> tokens, int i) {
         int next = nextSignificant(tokens, i + 1);
-        if (next < tokens.size() && tokens.get(next).word("BY")) return true;
-        return next < tokens.size() && tokens.get(next).word("SIBLINGS")
+        if (next < tokens.size() && word(tokens.get(next), "BY")) return true;
+        return next < tokens.size() && word(tokens.get(next), "SIBLINGS")
                 && wordAt(tokens, nextSignificant(tokens, next + 1), "BY");
     }
 
-    private static boolean isOrderTerminator(List<Lexeme> tokens, int i) {
-        Lexeme t = tokens.get(i);
-        return t.symbol(";") || t.word("LIMIT") || t.word("OFFSET")
-                || t.word("FETCH") || t.word("UNION") || t.word("INTERSECT")
-                || t.word("EXCEPT") || t.word("MINUS")
-                || (t.word("FOR") && (wordAt(tokens, nextSignificant(tokens, i + 1), "UPDATE")
+    private boolean isOrderTerminator(List<SqlScanner.Token> tokens, int i) {
+        SqlScanner.Token t = tokens.get(i);
+        return symbol(t, ";") || word(t, "LIMIT") || word(t, "OFFSET")
+                || word(t, "FETCH") || word(t, "UNION") || word(t, "INTERSECT")
+                || word(t, "EXCEPT") || word(t, "MINUS")
+                || (word(t, "FOR") && (wordAt(tokens, nextSignificant(tokens, i + 1), "UPDATE")
                 || wordAt(tokens, nextSignificant(tokens, i + 1), "SHARE")
                 || wordAt(tokens, nextSignificant(tokens, i + 1), "KEY")
                 || wordAt(tokens, nextSignificant(tokens, i + 1), "NO")));
     }
 
     /**
-     * Защита чисел внутри ::numeric(10, 2) и ::schema.numeric(10, 2).
-     * Без неё подстановка ? меняет грамматику PostgreSQL type modifier.
+     * Защита чисел в модификаторах PostgreSQL-типа: ::numeric(10, 2),
+     * ::schema.numeric(10, 2), ::character varying(32), ::bit varying(16).
+     * Без неё подстановка ? меняет SQL type syntax.
      */
-    private static boolean isPostgresTypeModifier(List<Lexeme> tokens, int typeName) {
+    private boolean isPostgresTypeModifier(List<SqlScanner.Token> tokens, int typeName) {
         if (typeName < 0 || !isIdentifier(tokens.get(typeName))) return false;
         int p = previousSignificant(tokens, typeName - 1);
-        while (p >= 0 && tokens.get(p).symbol(".")) {
+        while (p >= 0 && symbol(tokens.get(p), ".")) {
             p = previousSignificant(tokens, p - 1);
             if (p < 0 || !isIdentifier(tokens.get(p))) return false;
             p = previousSignificant(tokens, p - 1);
         }
-        return p >= 0 && tokens.get(p).symbol("::");
+        if (p >= 0 && symbol(tokens.get(p), "::")) return true;
+        // PostgreSQL: ::character varying(32), ::bit varying(16),
+        // ::double precision(...). Перед :: находится первое слово типа.
+        if (p >= 0 && (word(tokens.get(typeName), "VARYING")
+                || word(tokens.get(typeName), "PRECISION"))) {
+            int preceding = p;
+            if ((word(tokens.get(typeName), "VARYING")
+                    && (wordAt(tokens, preceding, "CHARACTER") || wordAt(tokens, preceding, "BIT")))
+                    || (word(tokens.get(typeName), "PRECISION")
+                    && wordAt(tokens, preceding, "DOUBLE"))) {
+                int cast = previousSignificant(tokens, preceding - 1);
+                return cast >= 0 && symbol(tokens.get(cast), "::");
+            }
+        }
+        return false;
     }
 
-    private static boolean isTimeTypeName(List<Lexeme> tokens, int i) {
+    /**
+     * Числа внутри модификаторов точности не являются значениями SQL-выражения.
+     * Это намеренно консервативное правило: неизвестная функция YEAR(2025)
+     * может остаться непараметризованной (false negative), но SQL не испортится.
+     */
+    private boolean isTypePrecisionName(List<SqlScanner.Token> tokens, int i) {
         return wordAt(tokens, i, "TIME") || wordAt(tokens, i, "TIMESTAMP")
-                || wordAt(tokens, i, "INTERVAL");
+                || wordAt(tokens, i, "INTERVAL")
+                || wordAt(tokens, i, "CURRENT_TIME")
+                || wordAt(tokens, i, "CURRENT_TIMESTAMP")
+                || wordAt(tokens, i, "LOCALTIME")
+                || wordAt(tokens, i, "LOCALTIMESTAMP")
+                || wordAt(tokens, i, "YEAR") || wordAt(tokens, i, "MONTH")
+                || wordAt(tokens, i, "DAY") || wordAt(tokens, i, "HOUR")
+                || wordAt(tokens, i, "MINUTE") || wordAt(tokens, i, "SECOND");
     }
 
-    private static boolean isIdentifier(Lexeme lexeme) {
-        return lexeme.kind() == WORD || lexeme.kind() == QUOTED_IDENTIFIER;
+    private boolean isIdentifier(SqlScanner.Token lexeme) {
+        return lexeme.getKind() == WORD || lexeme.getKind() == QUOTED_IDENTIFIER;
     }
 
-    private static boolean typedLiteral(List<Lexeme> tokens, int i) {
+    private boolean typedLiteral(List<SqlScanner.Token> tokens, int i) {
         int previous = previousSignificant(tokens, i - 1);
         if (previous < 0) return false;
-        Lexeme p = tokens.get(previous);
-        if (p.word("DATE") || p.word("TIME") || p.word("TIMESTAMP") || p.word("INTERVAL")) {
+        SqlScanner.Token p = tokens.get(previous);
+        if (word(p, "DATE") || word(p, "TIME") || word(p, "TIMESTAMP")
+                || word(p, "INTERVAL") || word(p, "UESCAPE")) {
             return true;
         }
         // PostgreSQL B'1010' / X'FF' и другие префиксные литералы без пробела.
-        if ((p.word("B") || p.word("X") || p.word("N"))
-                && p.token.getEnd() == tokens.get(i).token.getStart()
-                && p.source == tokens.get(i).source) return true;
+        if ((word(p, "B") || word(p, "X") || word(p, "N"))
+                && p.getEnd() == tokens.get(i).getStart()) return true;
         // TIME [WITH|WITHOUT] TIME ZONE '...'; TIMESTAMP ...
-        if (p.symbol(")")) {
-            int balance = 0;
-            for (int j = previous; j >= 0; j--) {
-                if (tokens.get(j).symbol(")")) balance++;
-                else if (tokens.get(j).symbol("(")) {
-                    if (--balance == 0) {
-                        return isTimeTypeName(tokens, previousSignificant(tokens, j - 1));
-                    }
-                }
-            }
+        if (symbol(p, ")")) {
+            return isDateTimeTypeBefore(tokens, previous) || isIntervalTypeBefore(tokens, previous);
         }
-        if (p.word("ZONE")) {
+        if (word(p, "ZONE")) {
             int timeWord = previousSignificant(tokens, previous - 1);
             int qualifier = previousSignificant(tokens, timeWord - 1);
-            int type = previousSignificant(tokens, qualifier - 1);
+            int typeEnd = previousSignificant(tokens, qualifier - 1);
             return wordAt(tokens, timeWord, "TIME")
                     && (wordAt(tokens, qualifier, "WITH") || wordAt(tokens, qualifier, "WITHOUT"))
-                    && (wordAt(tokens, type, "TIME") || wordAt(tokens, type, "TIMESTAMP"));
+                    && isDateTimeTypeBefore(tokens, typeEnd);
         }
         return false;
+    }
+
+    /** TIME / TIMESTAMP, с необязательной точностью (3) перед WITH TIME ZONE. */
+    private boolean isDateTimeTypeBefore(List<SqlScanner.Token> tokens, int last) {
+        if (wordAt(tokens, last, "TIME") || wordAt(tokens, last, "TIMESTAMP")) {
+            return true;
+        }
+        if (last < 0 || !symbol(tokens.get(last), ")")) return false;
+        int opening = matchingOpeningParen(tokens, last);
+        if (opening < 0) return false;
+        int name = previousSignificant(tokens, opening - 1);
+        return wordAt(tokens, name, "TIME") || wordAt(tokens, name, "TIMESTAMP");
+    }
+
+    private boolean isIntervalTypeBefore(List<SqlScanner.Token> tokens, int last) {
+        if (last < 0 || !symbol(tokens.get(last), ")")) return false;
+        int opening = matchingOpeningParen(tokens, last);
+        return opening >= 0 && wordAt(tokens, previousSignificant(tokens, opening - 1), "INTERVAL");
+    }
+
+    private int matchingOpeningParen(List<SqlScanner.Token> tokens, int close) {
+        int depth = 0;
+        for (int i = close; i >= 0; i--) {
+            if (symbol(tokens.get(i), ")")) depth++;
+            else if (symbol(tokens.get(i), "(") && --depth == 0) return i;
+        }
+        return -1;
     }
 
     /**
@@ -251,20 +299,20 @@ final class SqlParameterizer {
         return null;
     }
 
-    private static int nextSignificant(List<Lexeme> tokens, int from) {
+    private int nextSignificant(List<SqlScanner.Token> tokens, int from) {
         int i = from;
-        while (i < tokens.size() && isTrivia(tokens.get(i).kind())) i++;
+        while (i < tokens.size() && isTrivia(tokens.get(i).getKind())) i++;
         return i;
     }
 
-    private static int previousSignificant(List<Lexeme> tokens, int from) {
+    private int previousSignificant(List<SqlScanner.Token> tokens, int from) {
         int i = from;
-        while (i >= 0 && isTrivia(tokens.get(i).kind())) i--;
+        while (i >= 0 && isTrivia(tokens.get(i).getKind())) i--;
         return i;
     }
 
-    private static boolean wordAt(List<Lexeme> tokens, int i, String word) {
-        return i >= 0 && i < tokens.size() && tokens.get(i).word(word);
+    private boolean wordAt(List<SqlScanner.Token> tokens, int i, String word) {
+        return i >= 0 && i < tokens.size() && word(tokens.get(i), word);
     }
 
     private static boolean isTrivia(SqlScanner.Kind kind) {
@@ -273,45 +321,108 @@ final class SqlParameterizer {
     }
 
     /**
-     * ~...~ — только при явном начале фрагмента. Это предотвращает разрушение
-     * регулярных выражений PostgreSQL вида "column ~ 'pattern'".
-     * Одиночный ~ и обычные SQL-операторы не изменяются.
+     * Парные legacy ~...~. Один линейный проход, без поиска закрывающего
+     * маркера до конца SQL для каждого кандидата.
+     *
+     * В PostgreSQL одиночный ~ может быть оператором: маркер принимается
+     * только в ожидаемых позициях открытия/закрытия выражения.
      */
-    private static boolean[] legacyMarkers(List<Lexeme> tokens) {
+    private boolean[] legacyMarkers(List<SqlScanner.Token> tokens) {
         boolean[] markers = new boolean[tokens.size()];
+        int opening = -1;
+
+        // В Oracle одиночный ~ не является SQL-оператором. Поэтому любой
+        // самостоятельный ~ вне строк/комментариев — граница legacy-защиты.
+        // Не привязываемся к соседним токенам: после литералов и JDBC '?'
+        // разделители встречаются в реальных concat-выражениях.
+        if (oracle) {
+            for (int i = 0; i < tokens.size(); i++) {
+                if (!tilde(tokens.get(i))) continue;
+                markers[i] = true;
+                if (opening < 0) opening = i;
+                else opening = -1;
+            }
+            if (opening >= 0) {
+                throw new IllegalArgumentException(
+                        "Unpaired Oracle legacy ~ marker at offset "
+                        + tokens.get(opening).getStart());
+            }
+            return markers;
+        }
+
+        // PostgreSQL: ~ и !~ — действительные операторы, поэтому
+        // существующую контекстную эвристику сохраняем без изменений.
         for (int i = 0; i < tokens.size(); i++) {
-            if (!tilde(tokens.get(i)) || !legacyOpening(tokens, i)) continue;
-            for (int j = i + 1; j < tokens.size(); j++) {
-                if (tilde(tokens.get(j)) && legacyClosing(tokens, j)) {
-                    markers[i] = markers[j] = true;
-                    i = j;
-                    break;
-                }
+            if (!tilde(tokens.get(i))) continue;
+            if (opening >= 0 && legacyClosing(tokens, i)) {
+                markers[opening] = true;
+                markers[i] = true;
+                opening = -1;
+            } else if (opening < 0 && legacyOpening(tokens, i)) {
+                opening = i;
+            }
+        }
+        // Unmatched opening is left verbatim: it may be a PostgreSQL operator.
+        return markers;
+    }
+
+    /**
+     * PostgreSQL: специальный legacy-шаблон ~|| ... ||~.
+     * Scanner правильно распознаёт их как цельные операторы, поэтому обычный
+     * поиск отдельного ~ не срабатывает. Обрабатываем только парные маркеры.
+     * Одиночные ~|| и ||~ могут быть пользовательскими PG-операторами:
+     * оставляем их без изменений.
+     */
+    private boolean[] legacyConcatMarkers(List<SqlScanner.Token> tokens) {
+        boolean[] markers = new boolean[tokens.size()];
+        if (oracle) return markers;
+
+        int opening = -1;
+        for (int i = 0; i < tokens.size(); i++) {
+            SqlScanner.Token token = tokens.get(i);
+            if (symbol(token, "~||")) {
+                if (opening < 0) opening = i;
+            } else if (symbol(token, "||~") && opening >= 0) {
+                markers[opening] = true;
+                markers[i] = true;
+                opening = -1;
             }
         }
         return markers;
     }
 
-    private static boolean tilde(Lexeme token) {
-        return token.symbol("~");
+    private boolean tilde(SqlScanner.Token token) {
+        return symbol(token, "~");
     }
 
-    private static boolean legacyOpening(List<Lexeme> tokens, int i) {
+    private boolean legacyOpening(List<SqlScanner.Token> tokens, int i) {
         int previous = previousSignificant(tokens, i - 1);
         if (previous < 0) return true;
-        Lexeme p = tokens.get(previous);
-        return p.symbol("(") || p.symbol(",") || p.symbol("=")
-                || p.word("BY") || p.word("WHERE") || p.word("AND")
-                || p.word("OR") || p.word("SELECT") || p.word("HAVING");
+        SqlScanner.Token p = tokens.get(previous);
+        return symbol(p, "(") || symbol(p, ",") || symbol(p, "=")
+                || word(p, "BY") || word(p, "WHERE") || word(p, "AND")
+                || word(p, "OR") || word(p, "SELECT") || word(p, "HAVING");
     }
 
-    private static boolean legacyClosing(List<Lexeme> tokens, int i) {
+    private boolean legacyClosing(List<SqlScanner.Token> tokens, int i) {
         int next = nextSignificant(tokens, i + 1);
         if (next == tokens.size()) return true;
-        Lexeme n = tokens.get(next);
-        return n.symbol(")") || n.symbol(",") || n.symbol(";")
-                || n.word("LIMIT") || n.word("OFFSET") || n.word("FETCH")
-                || n.word("AND") || n.word("OR") || n.word("ORDER")
-                || n.word("GROUP") || n.word("WHERE");
+        SqlScanner.Token n = tokens.get(next);
+        return symbol(n, ")") || symbol(n, ",") || symbol(n, ";")
+                || word(n, "AS") || word(n, "FROM")
+                || word(n, "ASC") || word(n, "DESC") || word(n, "NULLS")
+                || word(n, "COLLATE")
+                || word(n, "LIMIT") || word(n, "OFFSET") || word(n, "FETCH")
+                || word(n, "AND") || word(n, "OR") || word(n, "ORDER")
+                || word(n, "GROUP") || word(n, "WHERE");
     }
+    private boolean word(SqlScanner.Token token, String expected) {
+        return token.isWord(source, expected);
+    }
+
+    private boolean symbol(SqlScanner.Token token, String expected) {
+        SqlScanner.Kind kind = token.getKind();
+        return (kind == SYMBOL || kind == OPERATOR) && token.text(source).equals(expected);
+    }
+
 }
