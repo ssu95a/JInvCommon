@@ -105,7 +105,7 @@ final class SqlParameterizer {
                 case STRING:
                 case NUMBER:
                     if (enabled && !legacyOff && castScopes.isEmpty()
-                            && orderScopes.isEmpty() && !typedLiteral(tokens, i)) {
+                            && orderScopes.isEmpty()) {
                         Object literal = literalValue(kind, text);
                         if (literal != null) {
                             sql.append('?');
@@ -200,59 +200,6 @@ final class SqlParameterizer {
 
     private boolean isIdentifier(SqlScanner.Token lexeme) {
         return lexeme.getKind() == WORD || lexeme.getKind() == QUOTED_IDENTIFIER;
-    }
-
-    private boolean typedLiteral(List<SqlScanner.Token> tokens, int i) {
-        int previous = previousSignificant(tokens, i - 1);
-        if (previous < 0) return false;
-        SqlScanner.Token p = tokens.get(previous);
-        if (word(p, "DATE") || word(p, "TIME") || word(p, "TIMESTAMP")
-                || word(p, "INTERVAL") || word(p, "UESCAPE")) {
-            return true;
-        }
-        // PostgreSQL B'1010' / X'FF' и другие префиксные литералы без пробела.
-        if ((word(p, "B") || word(p, "X") || word(p, "N"))
-                && p.getEnd() == tokens.get(i).getStart()) return true;
-        // TIME [WITH|WITHOUT] TIME ZONE '...'; TIMESTAMP ...
-        if (symbol(p, ")")) {
-            return isDateTimeTypeBefore(tokens, previous) || isIntervalTypeBefore(tokens, previous);
-        }
-        if (word(p, "ZONE")) {
-            int timeWord = previousSignificant(tokens, previous - 1);
-            int qualifier = previousSignificant(tokens, timeWord - 1);
-            int typeEnd = previousSignificant(tokens, qualifier - 1);
-            return wordAt(tokens, timeWord, "TIME")
-                    && (wordAt(tokens, qualifier, "WITH") || wordAt(tokens, qualifier, "WITHOUT"))
-                    && isDateTimeTypeBefore(tokens, typeEnd);
-        }
-        return false;
-    }
-
-    /** TIME / TIMESTAMP, с необязательной точностью (3) перед WITH TIME ZONE. */
-    private boolean isDateTimeTypeBefore(List<SqlScanner.Token> tokens, int last) {
-        if (wordAt(tokens, last, "TIME") || wordAt(tokens, last, "TIMESTAMP")) {
-            return true;
-        }
-        if (last < 0 || !symbol(tokens.get(last), ")")) return false;
-        int opening = matchingOpeningParen(tokens, last);
-        if (opening < 0) return false;
-        int name = previousSignificant(tokens, opening - 1);
-        return wordAt(tokens, name, "TIME") || wordAt(tokens, name, "TIMESTAMP");
-    }
-
-    private boolean isIntervalTypeBefore(List<SqlScanner.Token> tokens, int last) {
-        if (last < 0 || !symbol(tokens.get(last), ")")) return false;
-        int opening = matchingOpeningParen(tokens, last);
-        return opening >= 0 && wordAt(tokens, previousSignificant(tokens, opening - 1), "INTERVAL");
-    }
-
-    private int matchingOpeningParen(List<SqlScanner.Token> tokens, int close) {
-        int depth = 0;
-        for (int i = close; i >= 0; i--) {
-            if (symbol(tokens.get(i), ")")) depth++;
-            else if (symbol(tokens.get(i), "(") && --depth == 0) return i;
-        }
-        return -1;
     }
 
     /** String tokens reaching this point are plain literals validated by SqlSelect. */
