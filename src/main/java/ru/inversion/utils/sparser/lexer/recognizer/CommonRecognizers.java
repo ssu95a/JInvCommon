@@ -77,7 +77,7 @@ final class CommonRecognizers {
 
     /** Структурная пунктуация, которую scanner умеет пропускать безопасно. */
     static final class Symbol implements TokenRecognizer {
-        private static final String SYMBOLS = "()[],.;";
+        private static final String SYMBOLS = "()[],.;~";
 
         @Override
         public SqlScanner.Token recognize(String sql, int at) {
