@@ -212,12 +212,29 @@ public class SqlScannerTest {
     }
 
     @Test
-    public void oracleDoesNotRecognizePostgresNumberedParameters() {
-        String sql = "select $1, $tag$abc$tag$ from dual";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertEquals(0, count(tokens, NUMBERED_PARAMETER));
-        assertEquals(0, count(tokens, STRING));
-        assertEquals(sql, recreate(sql, tokens));
+    public void oracleRejectsPostgresNumberedParameterSyntax() {
+        rejects(ORACLE, "select $1 from dual");
+    }
+
+    @Test
+    public void knownStructuralSymbolsAreExplicitTokens() {
+        String sql = "select (a.b), arr[1];";
+        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
+            List<SqlScanner.Token> tokens = scanner.scan(sql);
+            for (String symbol : Arrays.asList("(", ")", ".", ",", "[", "]", ";")) {
+                assertTrue("Expected SYMBOL: " + symbol,
+                        containsText(sql, tokens, SYMBOL, symbol));
+            }
+            assertEquals(sql, recreate(sql, tokens));
+        }
+    }
+
+    @Test
+    public void unknownCharacterIsRejected() {
+        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
+            rejects(scanner, "select a \\ b from t");
+            rejects(scanner, "select {a} from t");
+        }
     }
 
     @Test

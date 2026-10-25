@@ -95,10 +95,12 @@ public abstract class SqlScanner {
         {
             Token token = recognize(sql, offset);
 
-            if( token == null)
-                token = new Token( Kind.SYMBOL, offset, offset + 1 );
+            if( token == null )
+                throw new IllegalArgumentException(
+                        "Unsupported SQL syntax at offset " + offset
+                        + ": '" + sql.charAt(offset) + "'");
 
-            else if (token.getStart() != offset || token.getEnd() > sql.length() )
+            if (token.getStart() != offset || token.getEnd() > sql.length() )
                 throw new IllegalStateException("Recognizer returned invalid token at " + offset + ": " + token);
 
             result.add(token);

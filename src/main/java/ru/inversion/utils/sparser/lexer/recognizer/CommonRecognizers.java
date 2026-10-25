@@ -75,6 +75,18 @@ final class CommonRecognizers {
         }
     }
 
+    /** Структурная пунктуация, которую scanner умеет пропускать безопасно. */
+    static final class Symbol implements TokenRecognizer {
+        private static final String SYMBOLS = "()[],.;";
+
+        @Override
+        public SqlScanner.Token recognize(String sql, int at) {
+            return SYMBOLS.indexOf(sql.charAt(at)) >= 0
+                    ? new SqlScanner.Token(SYMBOL, at, at + 1)
+                    : null;
+        }
+    }
+
     /** Только явные JDBC-параметры: ? и :name. */
     private static boolean identifierPart(char ch, boolean oracle) {
         return ScanChars.identifierPart(ch) && (oracle || ch != '#');

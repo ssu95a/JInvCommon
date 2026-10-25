@@ -22,7 +22,8 @@ public final class RecognizerSets {
                 new OperatorRecognizer(false),
                 new CommonRecognizers.Parameter(true),
                 new NumberRecognizer(false),
-                new CommonRecognizers.Word(true)
+                new CommonRecognizers.Word(true),
+                new CommonRecognizers.Symbol()
         );
     }
 
@@ -42,7 +43,8 @@ public final class RecognizerSets {
                 new OperatorRecognizer(true),
                 new CommonRecognizers.Parameter(false),
                 new NumberRecognizer(true),
-                new CommonRecognizers.Word(false)
+                new CommonRecognizers.Word(false),
+                new CommonRecognizers.Symbol()
         );
     }
 }
