@@ -1731,12 +1731,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             // Сохраняем структуру legacy SELECT, меняем только JDBC-подготовку.
             String sql = selectBuilder.build();
-            ru.inversion.db.dialect.SqlDialect dialect = getTaskContextForUse().dialect();
-            ru.inversion.utils.sparser.SqlDialect sqlDialect =
-                    dialect.type() == ru.inversion.db.dialect.SqlDialect.DialectId.POSTGRES
-                    ? ru.inversion.utils.sparser.SqlDialect.POSTGRES
-                    : ru.inversion.utils.sparser.SqlDialect.ORACLE;
-            PreparedSql plan = new SqlSelect(sql, sqlDialect).prepare();
+            SqlDialect dialect = getTaskContextForUse().dialect();
+            PreparedSql plan = new SqlSelect(sql, dialect).prepare();
             refreshCurrentRowSQL = sql;
             refreshCurrentRowPreparedSql = plan;
          }
