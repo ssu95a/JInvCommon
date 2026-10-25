@@ -105,6 +105,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    protected String        nativeQueryName;
 
+   /** Имя native query было вычислено автоматически, а не задано явно. */
+   private boolean nativeQueryNameAutoDetected;
+
    /**
     * Коллекция предикатов
     */
@@ -269,9 +272,13 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** {@inheritDoc}  */
    @Override
    public void setRowClass( Class rowClass ) {
-      //isDefSqlByTable = null;
-      exprInfo        = null;
-      super.setRowClass(rowClass);
+      if (getRowClass() != rowClass) {
+         // Сначала проверяем инвариант базового DataSet: нельзя менять тип при загруженных строках.
+         super.setRowClass(rowClass);
+         clearAutoDetectedNativeQueryName();
+         exprInfo = null;
+         needReCreateReader();
+      }
    }
 
    /**
@@ -449,12 +456,13 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if( S.isNullOrEmpty( newNativeQueryName )  )
          newNativeQueryName = null;
 
+      // После явного вызова setter имя больше не считается автоматически выбранным,
+      // в том числе когда оно совпадает с текущим.
+      nativeQueryNameAutoDetected = false;
       if( !Objects.equals( newNativeQueryName, this.nativeQueryName ) )
       {
          this.nativeQueryName = newNativeQueryName;
-
-         //isDefSqlByTable = null;
-
+         exprInfo = null;
          needReCreateReader( );
       }
    }
@@ -531,7 +539,18 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * (для внутреннего использования)
     */
    protected void needReCreateReader() {
+      // BooleanProperty не уведомляет слушателей при повторной установке true.
+      // Зависимый SQL-кеш должен сбрасываться при КАЖДОМ структурном изменении.
+      refreshCurrentRowSQL = null;
       needReCreateReader.setValue( true );
+   }
+
+   /** Удаляем только автоматически определённое имя; явно заданное сохраняем. */
+   private void clearAutoDetectedNativeQueryName() {
+      if (nativeQueryNameAutoDetected) {
+         nativeQueryName = null;
+         nativeQueryNameAutoDetected = false;
+      }
    }
 
    /**
@@ -542,7 +561,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * @see TaskContext
     */
    public void setTaskContext( TaskContext taskContext ) {
-      this.taskContext = taskContext;
+      if (this.taskContext != taskContext) {
+         this.taskContext = taskContext;
+         clearAutoDetectedNativeQueryName();
+         exprInfo = null;
+         needReCreateReader();
+      }
    }
 
    /**
@@ -813,10 +837,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          if( this.strSQL == null && rowClass != null )
          {
 
-            if( XXIDsDao.getNativeQuery(taskContext, rowClass, null ) != null )
+            if( XXIDsDao.getNativeQuery(taskContext, rowClass, null ) != null ) {
                nativeQueryName = QUERY_UNNAMED;
-            else if( rowClass.isAnnotationPresent( Table.class ) )
+               nativeQueryNameAutoDetected = true;
+            }
+            else if( rowClass.isAnnotationPresent( Table.class ) ) {
                nativeQueryName = QUERY_TABLE;
+               nativeQueryNameAutoDetected = true;
+            }
                 /*
                 boolean isDefSqlByTable = rowClass.isAnnotationPresent( Table.class )
                                   &&
@@ -1129,24 +1157,32 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             dataReader.executeQuery(
                     preparedReaderParameters == null ? mainSqlParameters : preparedReaderParameters);
+
+            clear( );
+            swappingData( fetchAllRows );
+
+            // Предикаты подтверждаются только после успешной загрузки первой страницы.
+            predicates.values().stream().filter(PredicateItem::isPre).forEach(PredicateItem::makeFinal);
          }
          catch( Throwable th ) {
+            // При ошибке исполнения ИЛИ чтения первой страницы pre-предикаты откатываются.
+            predicates.entrySet().removeIf(entry -> entry.getValue().isPre());
+            needReCreateReader();
 
-            //filters.entrySet().removeIf( (t) -> t.getValue().isPre() );
-            predicates.entrySet().removeIf( (t) -> t.getValue().isPre() );
-
-            needReCreateReader( );
-
+            // Не оставляем открытый курсор/PreparedStatement после неудачной загрузки.
+            ISQLDataReader<P> failedReader = dataReader;
+            dataReader = null;
+            preparedReaderParameters = null;
+            if (failedReader != null) {
+               try {
+                  failedReader.close();
+               } catch (Throwable closeError) {
+                  if (th != closeError)
+                     th.addSuppressed(closeError);
+               }
+            }
             throw th;
          }
-
-         // Переводит все предварительные фильтры в окончательные
-         //filters.values( ).stream( ).filter( (f)->f.isPre( ) ).forEach( FltrItem::makeFinal );
-         predicates.values( ).stream( ).filter( (f)->f.isPre( ) ).forEach( PredicateItem::makeFinal );
-
-         clear( );
-
-         swappingData( fetchAllRows );
 
          if( getLoadedRowCount() > 0 )
             setCurrentRowNum( 0 );
@@ -1217,6 +1253,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    @Override
    public void setSQL( String strSQL ) {
       this.strSQL = strSQL;
+      clearAutoDetectedNativeQueryName();
+      exprInfo = null;  // Старый SQLParser/SelectBuilder не должен использовать анализ предыдущего SQL.
       needReCreateReader();
    }
 
@@ -1878,7 +1916,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       for( IFilterItem fi : filterList ) {
 
          if( fi.getProxyFor() != null ) {
-            fi = fi.getProxyFor();
+             fi = fi.getProxyFor();
          }
 
          String column = fi.getColumn();
