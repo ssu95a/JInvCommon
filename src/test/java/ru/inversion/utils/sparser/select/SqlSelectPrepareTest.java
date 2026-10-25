@@ -90,14 +90,47 @@ public class SqlSelectPrepareTest {
         assertEquals(new BigInteger("30"), p.getParameters().get(2).getValue());
     }
 
-    @Test public void castSuppressesLiteralsButNotExplicitParameters() {
-        PreparedSql p = ora("select cast(:x as number(10,2)), cast(case when a=:a then 'YES' else 'NO' end as varchar2(100)) from t where id=9").prepare();
+    @Test public void castParameterizesValuesButKeepsTypeModifiers() {
+        PreparedSql p = ora(
+                "select cast(:x as number(10,2)), "
+                + "cast(case when a=:a then 'YES' else 'NO' end as varchar2(100)) "
+                + "from t where id=9").prepare();
+
         assertTrue(p.getSql(), p.getSql().contains("number(10,2)"));
-        assertTrue(p.getSql(), p.getSql().contains("'YES' else 'NO'"));
+        assertTrue(p.getSql(), p.getSql().contains("then ? else ?"));
         assertTrue(p.getSql(), p.getSql().contains("varchar2(100)"));
         assertTrue(p.getSql(), p.getSql().contains("where id=?"));
-        assertParameterKinds(p, Parameter.Kind.NAMED, Parameter.Kind.NAMED, Parameter.Kind.LITERAL);
-        assertEquals(new BigInteger("9"), p.getParameters().get(2).getValue());
+
+        assertParameterKinds(p,
+                Parameter.Kind.NAMED,
+                Parameter.Kind.NAMED,
+                Parameter.Kind.LITERAL,
+                Parameter.Kind.LITERAL,
+                Parameter.Kind.LITERAL);
+
+        assertEquals("YES", p.getParameters().get(2).getValue());
+        assertEquals("NO", p.getParameters().get(3).getValue());
+        assertEquals(new BigInteger("9"), p.getParameters().get(4).getValue());
+    }
+    @Test public void postgresCastValuesAreBoundButLengthsRemainTypeSyntax() {
+        PreparedSql p = pg(
+                "select cast(42 as numeric(10,2)), "
+                + "cast('Hello' as varchar(32)), "
+                + "x::numeric(12,5) from t where id=7").prepare();
+
+        assertTrue(p.getSql(), p.getSql().contains("cast(? as numeric(10,2))"));
+        assertTrue(p.getSql(), p.getSql().contains("cast(? as varchar(32))"));
+        assertTrue(p.getSql(), p.getSql().contains("x::numeric(12,5)"));
+        assertTrue(p.getSql(), p.getSql().contains("where id=?"));
+
+        assertParameterKinds(p,
+                Parameter.Kind.LITERAL,
+                Parameter.Kind.LITERAL,
+                Parameter.Kind.LITERAL);
+
+        assertEquals(new BigInteger("42"), p.getParameters().get(0).getValue());
+        assertEquals("Hello", p.getParameters().get(1).getValue());
+        assertEquals(new BigInteger("7"), p.getParameters().get(2).getValue());
     }
 
     @Test public void nestedOrderScopeDoesNotSwallowOuterWhereAndLimit() {

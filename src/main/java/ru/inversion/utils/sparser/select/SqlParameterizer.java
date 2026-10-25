@@ -35,7 +35,7 @@ final class SqlParameterizer {
     private PreparedSql compile() {
         StringBuilder sql = new StringBuilder();
         List<Parameter> parameters = new ArrayList<>();
-        ArrayDeque<Integer> castScopes = new ArrayDeque<>();
+        ArrayDeque<Integer> typeScopes = new ArrayDeque<>();
         ArrayDeque<Integer> orderScopes = new ArrayDeque<>();
         boolean[] legacyMarkers = legacyMarkers(tokens);
         boolean[] legacyConcatMarkers = legacyConcatMarkers(tokens);
@@ -66,7 +66,7 @@ final class SqlParameterizer {
             }
 
             if (symbol(current, ")")) {
-                while (!castScopes.isEmpty() && castScopes.peek() == depth) castScopes.pop();
+                while (!typeScopes.isEmpty() && typeScopes.peek() == depth) typeScopes.pop();
                 while (!orderScopes.isEmpty() && orderScopes.peek() >= depth) orderScopes.pop();
                 depth--;
             }
@@ -82,10 +82,9 @@ final class SqlParameterizer {
             if (symbol(current, "(")) {
                 depth++;
                 int previous = previousSignificant(tokens, i - 1);
-                if ((previous >= 0 && word(tokens.get(previous), "CAST"))
-                        || isPostgresTypeModifier(tokens, previous)
+                if (isTypeModifier(tokens, previous)
                         || isTypePrecisionName(tokens, previous)) {
-                    castScopes.push(depth);
+                    typeScopes.push(depth);
                 }
             }
 
@@ -104,7 +103,7 @@ final class SqlParameterizer {
                     break;
                 case STRING:
                 case NUMBER:
-                    if (enabled && !legacyOff && castScopes.isEmpty()
+                    if (enabled && !legacyOff && typeScopes.isEmpty()
                             && orderScopes.isEmpty()) {
                         Object literal = literalValue(kind, text);
                         if (literal != null) {
@@ -152,32 +151,48 @@ final class SqlParameterizer {
     }
 
     /**
-     * Защита чисел в модификаторах PostgreSQL-типа: ::numeric(10, 2),
-     * ::schema.numeric(10, 2), ::character varying(32), ::bit varying(16).
-     * Без неё подстановка ? меняет SQL type syntax.
+     * Защита чисел только внутри модификатора SQL-типа:
+     * CAST(... AS numeric(10,2)), ::numeric(10,2),
+     * character varying(32), bit varying(16), double precision(...).
+     *
+     * Само выражение CAST(...) намеренно НЕ защищается: его значения
+     * должны параметризоваться как обычные SQL-литералы.
      */
-    private boolean isPostgresTypeModifier(List<SqlScanner.Token> tokens, int typeName) {
+    private boolean isTypeModifier(List<SqlScanner.Token> tokens, int typeName) {
         if (typeName < 0 || !isIdentifier(tokens.get(typeName))) return false;
+
         int p = previousSignificant(tokens, typeName - 1);
+
+        // schema.type(...)
         while (p >= 0 && symbol(tokens.get(p), ".")) {
             p = previousSignificant(tokens, p - 1);
             if (p < 0 || !isIdentifier(tokens.get(p))) return false;
             p = previousSignificant(tokens, p - 1);
         }
-        if (p >= 0 && symbol(tokens.get(p), "::")) return true;
-        // PostgreSQL: ::character varying(32), ::bit varying(16),
-        // ::double precision(...). Перед :: находится первое слово типа.
+
+        if (p >= 0 && (symbol(tokens.get(p), "::") || word(tokens.get(p), "AS"))) {
+            return true;
+        }
+
+        // character varying(...), bit varying(...), double precision(...)
         if (p >= 0 && (word(tokens.get(typeName), "VARYING")
                 || word(tokens.get(typeName), "PRECISION"))) {
             int preceding = p;
-            if ((word(tokens.get(typeName), "VARYING")
-                    && (wordAt(tokens, preceding, "CHARACTER") || wordAt(tokens, preceding, "BIT")))
+            boolean multiWordType =
+                    (word(tokens.get(typeName), "VARYING")
+                            && (wordAt(tokens, preceding, "CHARACTER")
+                            || wordAt(tokens, preceding, "BIT")))
                     || (word(tokens.get(typeName), "PRECISION")
-                    && wordAt(tokens, preceding, "DOUBLE"))) {
-                int cast = previousSignificant(tokens, preceding - 1);
-                return cast >= 0 && symbol(tokens.get(cast), "::");
+                            && wordAt(tokens, preceding, "DOUBLE"));
+
+            if (multiWordType) {
+                int prefix = previousSignificant(tokens, preceding - 1);
+                return prefix >= 0
+                        && (symbol(tokens.get(prefix), "::")
+                        || word(tokens.get(prefix), "AS"));
             }
         }
+
         return false;
     }
 
