@@ -1693,6 +1693,62 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
 
+   /**
+    * Формирует диагностическое представление POJO.
+    */
+   public static <P> String getPojoString( final P currentRow ) {
+
+      if( currentRow == null )
+         return S.EMPTY_STRING;
+
+      Class<P> rowClass = (Class<P>) currentRow.getClass();
+
+      final StringBuilder sb = new StringBuilder();
+
+      Collection<? extends IEntityProperty<P,?>> values =
+              EntityMetadataFactory.getEntityMetaData(rowClass).getPropertiesMap().values();
+
+      Map<String,Object> valuesMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+
+      int maxNameLength  = 0;
+      int maxValueLength = 0;
+
+      for( IEntityProperty<P,?> ep : values )
+      {
+         Object v = ep.invokeGetter(currentRow);
+
+         valuesMap.put( ep.getPropertyName(), v );
+
+         if( ep.getPropertyName().length() > maxNameLength )
+            maxNameLength = ep.getPropertyName().length();
+         if( S.isString(v) && ((String)v).length() > maxValueLength )
+            maxValueLength = ((String)v).length();
+      }
+
+      final int n = maxNameLength + 1;
+      if( maxValueLength > 150 )
+         maxValueLength = 150;
+
+      final String line = S.space( maxNameLength + maxValueLength + 3, '-' );
+
+      sb.append('\n');
+      sb.append(line);
+      sb.append('\n').append( S.rPad("Property", n) ).append(": Value\n");
+      sb.append(line).append('\n');
+
+      valuesMap.forEach((s, o) ->
+              sb.append( S.rPad(s, n) )
+                .append(": ")
+                .append( S.nvl(o).replace('\n', ' ') )
+                .append('\n'));
+
+      sb.append(line).append('\n');
+
+      return sb.toString();
+   }
+
+   private transient int totalRowCount = -1;
+
    @Override
    public int getTotalRowCount( ) {
       return totalRowCount;
