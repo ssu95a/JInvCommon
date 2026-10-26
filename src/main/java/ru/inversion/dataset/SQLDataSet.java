@@ -1138,16 +1138,21 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                           rowMapper, getRowClass(), false);
                   preparedReaderParameters = values;
                } else {
-                  // Не допускаем потерю собственных параметров ISQLExpression
-                  // при переходе на старый строковый JDBCDataReader.
+                  // Legacy builder пока не умеет передавать собственные
+                  // параметры ISQLExpression в общий resolver.
                   for (PredicateItem item : predicates.values()) {
                      if (item.getExpression() != null)
                         throw new UnsupportedOperationException(
                            "ISQLExpression predicates in legacy SQL mode are not yet supported");
                   }
+
+                  String sql = prepareCompletedSql( SHOW );
+                  PreparedSql preparedSql =
+                          new SqlSelect( sql, getTaskContextForUse().dialect() ).prepare();
+
                   dataReader = new JDBCDataReader<>(
                           getTaskContextForUse().getConnection(),
-                          prepareCompletedSql(SHOW), rowMapper, getRowClass(), isSupportMark());
+                          preparedSql, rowMapper, getRowClass(), isSupportMark());
                }
                needReCreateReader.setValue(false);
             }
