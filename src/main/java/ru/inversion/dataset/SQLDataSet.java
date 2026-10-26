@@ -1009,6 +1009,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          }
       }
       builder.orderBy(getOrderBy());
+
+      if (isSupportMark()) {
+         String mark = getMarkSQLPart();
+         builder.mark(mark == null ? "0" : mark);
+      }
+
       return builder;
    }
 

@@ -13,8 +13,6 @@ import ru.inversion.db.rs.RSUtils;
 import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.utils.lstn.IListenerManConsumer;
 import ru.inversion.utils.lstn.IListenerManEvent;
 import ru.inversion.utils.lstn.ListenerManFactory;
@@ -290,20 +288,6 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
     }
 
     /**
-     * Mark SELECT пока остаётся на legacy builder: старые mark-выражения
-     * зависят от его alias/from semantics. Обычный XXIDataSet уже идёт
-     * через тот же PreparedSql pipeline, что и SQLDataSet.
-     */
-    @Override
-    protected PreparedSql prepareDataQuery() throws DataSetException {
-        if( !isSupportMark() )
-            return super.prepareDataQuery();
-
-        String sql = prepareCompletedSql( PrepareSQLModeEnum.SHOW );
-        return new SqlSelect( sql, getTaskContextForUse().dialect() ).prepare();
-    }
-
-    /**
      * {@inheritDoc }
      * <p>
      * Расширяет базовый метод, добавляет возможность генерации SQL для пометки всех записей.
@@ -427,6 +411,13 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
     /** {@inheritDoc } */
     @Override
+    public boolean hasParameter( String name )
+    {
+        return "jinv_marker_id".equals( name ) || super.hasParameter(name);
+    }
+
+    /** {@inheritDoc } */
+    @Override
     public Object getParameterValue( String name )
     {
         return "jinv_marker_id".equals( name ) ? getMarkerID( ) : super.getParameterValue(name);
@@ -443,11 +434,9 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         {
             if ( markDescriptor.getMarkMode() == MRK )
             {
-                SelectBuilder ssb = getSelectBuilder();
-
                 StringBuilder sb = new StringBuilder();
                 sb.append( "nvl( (select 1 from dual where exists ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id" )
-                  .append( " and a$.RMRKROWID = ").append( ssb.getFromObj() ).append( "." )
+                  .append( " and a$.RMRKROWID = " )
                   .append( markDescriptor.getMarkKeyColumns()[0] )
                   .append( ")),0) ");
 
