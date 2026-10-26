@@ -13,6 +13,8 @@ import ru.inversion.db.rs.RSUtils;
 import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
+import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.utils.lstn.IListenerManConsumer;
 import ru.inversion.utils.lstn.IListenerManEvent;
 import ru.inversion.utils.lstn.ListenerManFactory;
@@ -285,6 +287,20 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             getTaskContextForUse().rollback();
             throw new DataSetException( Tags.PRODUCT_LABEL + "checkForFullScan", th );
         }
+    }
+
+    /**
+     * Mark SELECT пока остаётся на legacy builder: старые mark-выражения
+     * зависят от его alias/from semantics. Обычный XXIDataSet уже идёт
+     * через тот же PreparedSql pipeline, что и SQLDataSet.
+     */
+    @Override
+    protected PreparedSql prepareDataQuery() throws DataSetException {
+        if( !isSupportMark() )
+            return super.prepareDataQuery();
+
+        String sql = prepareCompletedSql( PrepareSQLModeEnum.SHOW );
+        return new SqlSelect( sql, getTaskContextForUse().dialect() ).prepare();
     }
 
     /**

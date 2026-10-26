@@ -798,15 +798,17 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    private String internalGetSQL( ) {
 
+      String sql = getSQL( );
+
+      if( sql != null )
+         return sql;
+
       Class<? extends P > clazz = getRowClass();
 
       if( clazz == null )
          return null;
 
-      String sql = getSQL( );
-
-      if( sql == null ) {
-
+      {
          Table table = clazz.getAnnotation(Table.class);
 
          if( table != null && !S.isNullOrEmpty(table.name()) ) {
@@ -1068,22 +1070,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return execute_count;
    }
 
-   /**
-    * Подготовка нового пути только для обычного SQL SELECT.
-    * Legacy builders по-прежнему обслуживают @Table, mark, optimizer hint
-    * и специальные режимы XXIDataSet.
-    */
-   private boolean supportsNextSelectBuilder() {
-      return getRowClass() != null
-              && !isDefSqlByTable()
-              && !isSupportMark()
-              && S.isNullOrEmpty(getOptimizerHint())
-              && S.isNullOrEmpty(getQueryAlias())
-              && S.isNullOrEmpty(getAfterOrderBy())
-              && getLimitRows() == 0
-              && getOffsetRows() == 0;
-   }
-
    private NextSelectBuilder createNextSelectBuilder() {
       SqlDialect dialect = getTaskContextForUse().dialect();
       NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
@@ -1099,6 +1085,27 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
       builder.orderBy(getOrderBy());
       return builder;
+   }
+
+   /**
+    * Единственный путь подготовки SELECT для обычного SQLDataSet.
+    * Legacy SelectBuilder здесь больше не участвует.
+    */
+   protected PreparedSql prepareDataQuery() throws DataSetException {
+      if (S.isNotNullOrEmpty(getOptimizerHint()))
+         throw new UnsupportedOperationException(
+                 "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
+      if (S.isNotNullOrEmpty(getQueryAlias()))
+         throw new UnsupportedOperationException(
+                 "queryAlias is not supported by the PreparedSql pipeline");
+      if (S.isNotNullOrEmpty(getAfterOrderBy()) || getLimitRows() != 0 || getOffsetRows() != 0)
+         throw new UnsupportedOperationException(
+                 "Legacy afterOrderBy/limitRows/offsetRows modifiers are not supported");
+
+      NextSelectBuilder builder = createNextSelectBuilder();
+      PreparedSql sql = builder.prepare();
+      preparedReaderParameters = builder.parameters(mainSqlParameters);
+      return sql;
    }
 
    /** {@inheritDoc} */
@@ -1127,33 +1134,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                   dataReader = null;
                }
                preparedReaderParameters = null;
-               IRowMapper<P> rowMapper = getRowMapper();
+               PreparedSql sql = prepareDataQuery();
 
-               if (supportsNextSelectBuilder()) {
-                  NextSelectBuilder builder = createNextSelectBuilder();
-                  PreparedSql sql = builder.prepare();
-                  IParameters values = builder.parameters(mainSqlParameters);
-                  dataReader = new JDBCDataReader<>(
-                          getTaskContextForUse().getConnection(), sql,
-                          rowMapper, getRowClass(), false);
-                  preparedReaderParameters = values;
-               } else {
-                  // Legacy builder пока не умеет передавать собственные
-                  // параметры ISQLExpression в общий resolver.
-                  for (PredicateItem item : predicates.values()) {
-                     if (item.getExpression() != null)
-                        throw new UnsupportedOperationException(
-                           "ISQLExpression predicates in legacy SQL mode are not yet supported");
-                  }
+               dataReader = new JDBCDataReader<>(
+                       getTaskContextForUse().getConnection(),
+                       sql, getRowMapper(), getRowClass(), isSupportMark());
 
-                  String sql = prepareCompletedSql( SHOW );
-                  PreparedSql preparedSql =
-                          new SqlSelect( sql, getTaskContextForUse().dialect() ).prepare();
-
-                  dataReader = new JDBCDataReader<>(
-                          getTaskContextForUse().getConnection(),
-                          preparedSql, rowMapper, getRowClass(), isSupportMark());
-               }
                needReCreateReader.setValue(false);
             }
 
