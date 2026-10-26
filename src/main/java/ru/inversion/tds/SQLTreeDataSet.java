@@ -11,6 +11,8 @@ import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
+import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.select.SqlSelect;
 
 import javax.persistence.NamedNativeQuery;
 import javax.persistence.Table;
@@ -612,7 +614,18 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
             final JDBCDataReader<P> recordReader;
 
             try {
-                recordReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), refreshSql, getRowMapper(), getRowClass(), isEnableMark() );
+                PreparedSql preparedSql = new SqlSelect(
+                        refreshSql,
+                        getTaskContextForUse().dialect()
+                ).prepare();
+
+                recordReader = new JDBCDataReader<>(
+                        getTaskContextForUse().getConnection(),
+                        preparedSql,
+                        getRowMapper(),
+                        getRowClass(),
+                        isEnableMark()
+                );
             }
             catch( Throwable th ) {
                 throw new TreeDataSetException( Tags.PRODUCT_LABEL + "Error while preparing SQL statement to read record", th );
@@ -811,8 +824,17 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
 
             final IRowMapper<P> rowMapper = getRowMapper();
             final String sql = prepareCompleteSql();
+            final PreparedSql preparedSql = new SqlSelect(
+                    sql,
+                    getTaskContextForUse().dialect()
+            ).prepare();
 
-            try( final JDBCDataReader<P> dataReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), sql, rowMapper, getRowClass(), isEnableMark() ))
+            try( final JDBCDataReader<P> dataReader = new JDBCDataReader<>(
+                    getTaskContextForUse().getConnection(),
+                    preparedSql,
+                    rowMapper,
+                    getRowClass(),
+                    isEnableMark() ))
             {
                 dataReader.executeQuery( getParameters() );
 
