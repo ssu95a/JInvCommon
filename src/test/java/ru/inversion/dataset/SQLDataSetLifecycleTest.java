@@ -1,9 +1,6 @@
 package ru.inversion.dataset;
 
 import org.junit.jupiter.api.Test;
-import ru.inversion.dataset.parser.SQLParser;
-
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -236,16 +233,14 @@ class SQLDataSetLifecycleTest {
     }
 
     @Test
-    void replacingSqlInvalidatesLegacySqlAnalysis() throws Exception {
+    void replacingSqlInvalidatesReader() {
         TestDataSet ds = new TestDataSet();
-        Field cache = SQLDataSet.class.getDeclaredField("exprInfo");
-        cache.setAccessible(true);
-        cache.set(ds, new SQLParser("select id from items").analyze());
-        assertNotNull(cache.get(ds));
+        Reader reader = new Reader();
+        ds.useReader(reader);
+        assertFalse(ds.readerNeedsRecreation());
 
         ds.setSQL("select code from items");
 
-        assertNull(cache.get(ds));
         assertTrue(ds.readerNeedsRecreation());
     }
 }
