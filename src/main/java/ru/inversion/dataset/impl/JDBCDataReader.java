@@ -2,7 +2,6 @@ package ru.inversion.dataset.impl;
 
 import ru.inversion.dataset.*;
 import ru.inversion.dataset.mark.IMarkable;
-import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.utils.Jt2St;
@@ -18,8 +17,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  *
@@ -60,20 +57,6 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     private final Class<T> rowClass;
     private final String actualSql;
     private final PreparedSql preparedSql;
-    private final List<Object> parameters = new ArrayList<>();
-
-    /** */
-    public JDBCDataReader(Connection connection, String strSQL, IRowMapper<T> rowMapper, Class<T> rowClass, boolean enableMark ) {
-        if( !U.containsNotNull( rowMapper, rowClass ) )
-            throw new IllegalArgumentException( Tags.PRODUCT_LABEL + "'rowMapper' and 'rowClass' both null!" );
-
-        this.connection = connection;
-        this.rowMapper = rowMapper;
-        this.enableMark = enableMark;
-        this.rowClass = rowClass;
-        this.actualSql = prepareActualSql( strSQL );
-        this.preparedSql = null;
-    }
 
     /** Prepared SQL produced by sparser; values are resolved for every execution. */
     public JDBCDataReader(Connection connection, PreparedSql preparedSql,
@@ -133,38 +116,15 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     }
 
     /** */
-    protected String prepareActualSql( String strSQL ) {
-        SQLParser sqlParser = new SQLParser( strSQL );
-        return sqlParser.prepareActualSqlEx( parameters );
-    }
-
-    /** */
-    @SuppressWarnings("unchecked")
     @Override
     public synchronized void executeQuery( IParameters callbackParameters ) throws DataSetException {
         try {
             doClose();
             rowCounter = 0;
-            final List<Object> pv = new ArrayList<>(preparedSql == null
-                    ? parameters.size() : preparedSql.getParameters().size());
+            final List<Object> pv = resolvePreparedParameters(callbackParameters);
 
             try {
                 statement = connection.prepareStatement( actualSql );
-                if (preparedSql != null) {
-                    pv.addAll(resolvePreparedParameters(callbackParameters));
-                } else {
-                    Object v;
-                    for (Object o : parameters) {
-                        if (o instanceof Function) {
-                            v = ((Function) o).apply(callbackParameters);
-                        } else if (o instanceof Supplier) {
-                            v = ((Supplier) o).get();
-                        } else {
-                            v = o;
-                        }
-                        pv.add(Jt2St.convert(v));
-                    }
-                }
 
                 int nIndex = 1;
                 for( Object o : pv )
