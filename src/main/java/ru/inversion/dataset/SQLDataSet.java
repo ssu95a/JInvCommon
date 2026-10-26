@@ -995,10 +995,13 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return execute_count;
    }
 
-   private NextSelectBuilder createNextSelectBuilder() {
+   private NextSelectBuilder createNextSelectBuilder( boolean ignoreFilters ) {
       SqlDialect dialect = getTaskContextForUse().dialect();
       NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
       for (PredicateItem item : predicates.values()) {
+         if (ignoreFilters && item.isFilter())
+            continue;
+
          if (item.getExpression() != null) {
             if (!item.getFilterStr().equals(item.getExpression().getSQL()))
                throw new IllegalStateException(
@@ -1029,7 +1032,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if (S.isNotNullOrEmpty(getQueryAlias()))
          throw new UnsupportedOperationException(
                  "queryAlias is not supported by the PreparedSql pipeline");
-      NextSelectBuilder builder = createNextSelectBuilder();
+      NextSelectBuilder builder = createNextSelectBuilder( false );
       PreparedSql sql = builder.prepare();
       preparedReaderParameters = builder.parameters(mainSqlParameters);
       return sql;
@@ -2044,8 +2047,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    @Override
    public Iterator< P > createRSIterator( boolean ignoreFilters ) throws DataSetException {
 
-      String sql = prepareCompletedSql( SHOW, ignoreFilters );
-      PreparedSql preparedSql = new SqlSelect( sql, getTaskContextForUse().dialect() ).prepare();
+      NextSelectBuilder builder = createNextSelectBuilder( ignoreFilters );
+      PreparedSql preparedSql = builder.prepare();
+      IParameters parameters = builder.parameters( mainSqlParameters );
 
       JDBCDataReader<P> reader = new JDBCDataReader<>(
               getTaskContextForUse().getConnection(),
@@ -2054,7 +2058,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
               null,
               false
       );
-      reader.executeQuery( mainSqlParameters );
+      reader.executeQuery( parameters );
 
       return IDataReader.iterator( reader, 50 );
    }
