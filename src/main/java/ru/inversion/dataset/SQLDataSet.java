@@ -5,7 +5,11 @@ import ru.inversion.datacall.CallPrepareContext;
 import ru.inversion.datacall.maker.CallMaker_WithParametersValue;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.*;
+import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
+import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
+import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.JInvDbException;
@@ -1160,24 +1164,83 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public String getCompletedSQL( ) {
 
       try {
+         NextSelectBuilder builder = createNextSelectBuilder(false);
+         PreparedSql preparedSql = builder.prepare();
+         IParameters parameters = builder.parameters(mainSqlParameters);
 
-         final IParameters p = new IParameters( ) {
-            @Override
-            public Object getParameter( String parameterName ) {
-               return getParameterValue( parameterName );
-            }
-            @Override
-            public Object getParameter( int parameterIndex ) {
-               return getParameterValue( parameterIndex );
-            }
-         };
+         SqlScanner scanner;
+         switch( getTaskContextForUse().dialect().type() ) {
+            case ORACLE:
+               scanner = new OracleSqlScanner();
+               break;
+            case POSTGRES:
+               scanner = new PostgresSqlScanner();
+               break;
+            default:
+               throw new IllegalStateException(
+                       "Unsupported SQL dialect: " + getTaskContextForUse().dialect());
+         }
 
-         SQLParser s = new SQLParser( createNextSelectBuilder(false).buildSql() );
-         return s.prepareSqlWithParametersValue(p);
+         return renderPreparedSql(preparedSql, parameters, scanner);
       }
       catch( Exception ex ) {
-         throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on getCompletedSQL" );
+         throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on getCompletedSQL", ex );
       }
+   }
+
+   static String renderPreparedSql(
+           PreparedSql preparedSql,
+           IParameters parameters,
+           SqlScanner scanner
+   ) {
+      String sql = preparedSql.getSql();
+      List<Parameter> parameterList = preparedSql.getParameters();
+
+      StringBuilder result = new StringBuilder(sql.length() + 64);
+      int copiedUntil = 0;
+      int parameterIndex = 0;
+      int positionalIndex = 0;
+
+      for( SqlScanner.Token token : scanner.scan(sql) ) {
+         if( token.getKind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
+            continue;
+
+         if( parameterIndex >= parameterList.size() )
+            throw new IllegalStateException(
+                    "PreparedSql has more JDBC placeholders than parameters");
+
+         Parameter parameter = parameterList.get(parameterIndex++);
+         Object value;
+
+         switch( parameter.getKind() ) {
+            case POSITIONAL:
+               value = parameters.getParameter(positionalIndex++);
+               break;
+            case NAMED:
+               value = parameters.getParameter(parameter.getName());
+               break;
+            case NUMBERED:
+               value = parameters.getParameter(parameter.getNumber() - 1);
+               break;
+            case LITERAL:
+               value = parameter.getValue();
+               break;
+            default:
+               throw new IllegalStateException(
+                       "Unknown parameter kind: " + parameter.getKind());
+         }
+
+         result.append(sql, copiedUntil, token.getStart());
+         result.append(SQLParser.value2Str(value));
+         copiedUntil = token.getEnd();
+      }
+
+      if( parameterIndex != parameterList.size() )
+         throw new IllegalStateException(
+                 "PreparedSql has fewer JDBC placeholders than parameters");
+
+      result.append(sql, copiedUntil, sql.length());
+      return result.toString();
    }
 
    private transient String refreshCurrentRowSQL;

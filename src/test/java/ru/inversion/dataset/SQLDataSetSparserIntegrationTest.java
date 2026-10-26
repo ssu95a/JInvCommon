@@ -3,7 +3,12 @@ package ru.inversion.dataset;
 import org.junit.Test;
 import ru.inversion.dataset.impl.NextSelectBuilder;
 import ru.inversion.db.dialect.SqlDialectFactory;
+import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
+
+import java.math.BigInteger;
+import java.util.Arrays;
 
 import static org.junit.Assert.*;
 
@@ -99,6 +104,38 @@ public class SQLDataSetSparserIntegrationTest {
         NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         builder.addPredicate(ds.predicates().get(id).getExpression());
         assertNull(builder.parameters(values(ds)).getParameter("branch"));
+    }
+
+    @Test
+    public void completedSqlRenderingUsesPreparedParameterPlan() {
+        PreparedSql prepared = new PreparedSql(
+                "select '?' as literal_text, ? from client where owner_id = ? and amount = ?",
+                Arrays.asList(
+                        Parameter.literal("ACTIVE"),
+                        Parameter.named("owner"),
+                        Parameter.literal(new BigInteger("10"))
+                )
+        );
+
+        IParameters parameters = new ParametersByName() {
+            @Override public Object getParameter(String name) {
+                return "owner".equals(name) ? 17 : null;
+            }
+            @Override public boolean hasParameter(String name) {
+                return "owner".equals(name);
+            }
+        };
+
+        String sql = SQLDataSet.renderPreparedSql(
+                prepared,
+                parameters,
+                new PostgresSqlScanner()
+        );
+
+        assertEquals(
+                "select '?' as literal_text,  'ACTIVE'  from client where owner_id = 17 and amount = 10",
+                sql
+        );
     }
 
     private static IParameters values(SQLDataSet<?> ds) {
