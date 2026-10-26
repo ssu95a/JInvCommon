@@ -12,7 +12,6 @@ import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.db.entity.ColumnSQLDefinition;
-import ru.inversion.db.rs.RSUtils;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.meta.IEntityProperty;
 import ru.inversion.parser.statement.LangEnum;
@@ -2127,21 +2126,19 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    @Override
    public Iterator< P > createRSIterator( boolean ignoreFilters ) throws DataSetException {
 
-      return RSUtils.<P>createIterator (
+      String sql = prepareCompletedSql( SHOW, ignoreFilters );
+      PreparedSql preparedSql = new SqlSelect( sql, getTaskContextForUse().dialect() ).prepare();
+
+      JDBCDataReader<P> reader = new JDBCDataReader<>(
               getTaskContextForUse().getConnection(),
+              preparedSql,
               getRowMapperForUse(),
-              prepareCompletedSql( SHOW, ignoreFilters ),
-              new IParameters() {
-                 @Override
-                 public Object getParameter( String parameterName ) {
-                    return getParameterValue( parameterName );
-                 }
-                 @Override
-                 public Object getParameter( int parameterIndex ) {
-                    return getParameterValue( parameterIndex );
-                 }
-              }
+              null,
+              false
       );
+      reader.executeQuery( mainSqlParameters );
+
+      return IDataReader.iterator( reader, 50 );
    }
 
    /*
