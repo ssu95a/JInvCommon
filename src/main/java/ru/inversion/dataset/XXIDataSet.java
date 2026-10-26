@@ -3,7 +3,6 @@ package ru.inversion.dataset;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.JDBCDataReader;
 import ru.inversion.dataset.impl.NextSelectBuilder;
-import ru.inversion.dataset.impl.SelectBuilder;
 import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.dataset.impl.XXIDsMarkerDao;
 import ru.inversion.dataset.mark.IMarkable;
