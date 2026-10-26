@@ -4,8 +4,7 @@ import ru.inversion.datacall.AbstractCallMakerBase;
 import ru.inversion.datacall.CallPrepareContext;
 import ru.inversion.parser.token.Token;
 import ru.inversion.utils.TriConsumer;
-
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import ru.inversion.utils.sparser.SqlValueFormatter;
 
 public class CallMaker_Query extends AbstractCallMakerBase {
 
@@ -47,7 +46,7 @@ public class CallMaker_Query extends AbstractCallMakerBase {
                         c.append("/* ").append(nCounter).append(", :").append( t.getValue() ).append(" */ ");
                 }
                 else
-                    c.append( value2Str( t.getValue() ) ).sp();
+                    c.append( SqlValueFormatter.format( t.getValue() ) ).sp();
             break;
             default :
                 c.append( t );
