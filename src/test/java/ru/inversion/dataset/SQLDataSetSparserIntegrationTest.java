@@ -5,6 +5,7 @@ import ru.inversion.dataset.impl.NextSelectBuilder;
 import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
 import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
 
 import java.math.BigInteger;
@@ -134,6 +135,27 @@ public class SQLDataSetSparserIntegrationTest {
 
         assertEquals(
                 "select '?' as literal_text,  'ACTIVE'  from client where owner_id = 17 and amount = 10",
+                sql
+        );
+    }
+
+    @Test
+    public void explainRenderingReplacesOnlyJdbcPlaceholders() {
+        PreparedSql prepared = new PreparedSql(
+                "select '?' as literal_text, ? from client where owner_id = ?",
+                Arrays.asList(
+                        Parameter.literal("ACTIVE"),
+                        Parameter.named("owner")
+                )
+        );
+
+        String sql = XXIDataSet.renderExplainPlanSql(
+                prepared,
+                new OracleSqlScanner()
+        );
+
+        assertEquals(
+                "select '?' as literal_text, :p1  from client where owner_id = :p2 ",
                 sql
         );
     }

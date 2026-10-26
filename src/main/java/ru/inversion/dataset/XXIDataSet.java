@@ -8,12 +8,14 @@ import ru.inversion.dataset.impl.XXIDsMarkerDao;
 import ru.inversion.dataset.mark.IMarkable;
 import ru.inversion.dataset.mark.MarkDescriptor;
 import ru.inversion.dataset.mark.MarkModeEnum;
-import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
+import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
+import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.utils.lstn.IListenerManConsumer;
 import ru.inversion.utils.lstn.IListenerManEvent;
@@ -241,32 +243,27 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         try {
 
-            String strSql = createNextSelectBuilder(false).buildSql();
-
-            SQLParser sp = new SQLParser( strSql );
+            NextSelectBuilder builder = createNextSelectBuilder(false);
+            PreparedSql preparedSql = builder.prepare();
+            IParameters parameters = builder.parameters(mainSqlParameters);
 
             final TaskContext tc = getTaskContextForUse();
-            final String   stmnt = "{? = call jf_pkg_util.Is_TrnFullScan(?,?)}";
+            final String stmnt = "{? = call jf_pkg_util.Is_TrnFullScan(?,?)}";
 
+            final String strSql;
             if( tc.isOracle() )
             {
-                //stmnt = "begin ? := sys.diutil.bool_to_int( OPERLIST.Is_TrnFullScan( ?, ? ) ); end;";
-                strSql= sp.prepareExplainPlanSql( );
+                strSql = renderExplainPlanSql(
+                        preparedSql,
+                        new OracleSqlScanner()
+                );
             }
             else
             {
-                //stmnt = "{? = call jf_pkg_util.Is_TrnFullScan(?,?)}";
-                strSql= sp.prepareSqlWithParametersValue (
-                    new IParameters( ) {
-                      @Override
-                      public Object getParameter( String parameterName ) {
-                          return getParameterValue( parameterName );
-                      }
-                      @Override
-                      public Object getParameter( int parameterIndex ) {
-                          return getParameterValue( parameterIndex );
-                      }
-                  }
+                strSql = SQLDataSet.renderPreparedSql(
+                        preparedSql,
+                        parameters,
+                        new PostgresSqlScanner()
                 );
             }
 
@@ -287,6 +284,37 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         }
     }
 
+
+    static String renderExplainPlanSql(
+            PreparedSql preparedSql,
+            SqlScanner scanner
+    ) {
+        String sql = preparedSql.getSql();
+        StringBuilder result = new StringBuilder(sql.length() + 32);
+
+        int copiedUntil = 0;
+        int parameterIndex = 0;
+
+        for( SqlScanner.Token token : scanner.scan(sql) ) {
+            if( token.getKind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
+                continue;
+
+            if( parameterIndex >= preparedSql.getParameters().size() )
+                throw new IllegalStateException(
+                        "PreparedSql has more JDBC placeholders than parameters");
+
+            result.append(sql, copiedUntil, token.getStart());
+            result.append(":p").append(++parameterIndex).append(' ');
+            copiedUntil = token.getEnd();
+        }
+
+        if( parameterIndex != preparedSql.getParameters().size() )
+            throw new IllegalStateException(
+                    "PreparedSql has fewer JDBC placeholders than parameters");
+
+        result.append(sql, copiedUntil, sql.length());
+        return result.toString();
+    }
 
     private NextSelectBuilder createMarkSourceBuilder() {
         NextSelectBuilder builder = createNextSelectBuilder( false );
