@@ -7,7 +7,6 @@ import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.*;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.sparser.select.SqlSelect;
-import ru.inversion.dataset.parser.ExprInfo;
 import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.db.dialect.SqlDialect;
@@ -255,7 +254,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          // Сначала проверяем инвариант базового DataSet: нельзя менять тип при загруженных строках.
          super.setRowClass(rowClass);
          clearAutoDetectedNativeQueryName();
-         exprInfo = null;
          needReCreateReader();
       }
    }
@@ -441,7 +439,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if( !Objects.equals( newNativeQueryName, this.nativeQueryName ) )
       {
          this.nativeQueryName = newNativeQueryName;
-         exprInfo = null;
          needReCreateReader( );
       }
    }
@@ -490,7 +487,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if (this.taskContext != taskContext) {
          this.taskContext = taskContext;
          clearAutoDetectedNativeQueryName();
-         exprInfo = null;
          needReCreateReader();
       }
    }
@@ -750,86 +746,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    /**
-    * Признак что SQL будет генериться из аннотации @Table и аннотаций @Column над геттерами.
-    */
-   //private Boolean  isDefSqlByTable = null;
-   private ExprInfo exprInfo        = null;
-
-   /** */
-   protected boolean isDefSqlByTable( ) {
-
-      if( nativeQueryName == null ) {
-
-         Class rowClass = getRowClass( );
-
-         if( this.strSQL == null && rowClass != null )
-         {
-
-            if( XXIDsDao.getNativeQuery(taskContext, rowClass, null ) != null ) {
-               nativeQueryName = QUERY_UNNAMED;
-               nativeQueryNameAutoDetected = true;
-            }
-            else if( rowClass.isAnnotationPresent( Table.class ) ) {
-               nativeQueryName = QUERY_TABLE;
-               nativeQueryNameAutoDetected = true;
-            }
-                /*
-                boolean isDefSqlByTable = rowClass.isAnnotationPresent( Table.class )
-                                  &&
-                                    !rowClass.isAnnotationPresent( NamedNativeQuery.class  )
-                                  &&
-                                  XXIDsDao.getNativeQuery(taskContext, rowClass, null ) == null
-                                  &&
-                                  ( !rowClass.isAnnotationPresent( NamedNativeQueries.class)
-                                     ||
-                                     this.nativeQueryName == null
-                                  );
-                */
-         }
-         else
-            return false;
-      }
-      return nativeQueryName == QUERY_TABLE;
-   }
-
-   /** */
-   protected SelectBuilder getSelectBuilder( ) {
-      for (PredicateItem item : predicates.values()) {
-         if (item.getExpression() != null)
-            throw new IllegalStateException(
-                    "Legacy SelectBuilder cannot bind ISQLExpression parameters");
-      }
-
-      final String qa = getQueryAlias();
-
-      SelectBuilder returnBuilder = null;
-
-      if( isDefSqlByTable() ) {
-         returnBuilder = new EntitySelectBuilder( getRowClass(), taskContext );
-      }
-      else
-      {
-
-         String sqlText = internalGetSQL();
-
-         if( exprInfo == null ) {
-            SQLParser sp  = new SQLParser( sqlText );
-            exprInfo  = sp.analyze( );
-         }
-
-         if( exprInfo.isMysterious() )
-            returnBuilder = new SQLSelectBuilder( sqlText );
-         else
-            returnBuilder = new SimpleSelectBuilder( sqlText, exprInfo );
-      }
-
-      if( S.isNotNullOrEmpty( qa ) )
-         returnBuilder.queryAlias(qa);
-
-      return returnBuilder;
-   }
-
-   /**
     * Готовит SQL выражение в строковом виде для получения и обработки строк данных DataSet.
     * <p>
     * @param prepareMode
@@ -846,37 +762,19 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    private String prepareCompletedSql( PrepareSQLModeEnum prepareMode, boolean ignoreFilters ) throws DataSetException {
 
-      SelectBuilder sb = getSelectBuilder();
+      if( prepareMode != SHOW )
+         throw new UnsupportedOperationException(
+                 "Prepare SQL mode is not supported by the PreparedSql pipeline: " + prepareMode );
 
-      sb.additionalTags( prepareMode == SHOW_WITH_TAGS );
+      if( S.isNotNullOrEmpty(getOptimizerHint()) )
+         throw new UnsupportedOperationException(
+                 "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
 
-      sb.hint ( getOptimizerHint());
+      if( S.isNotNullOrEmpty(getQueryAlias()) )
+         throw new UnsupportedOperationException(
+                 "queryAlias is not supported by the PreparedSql pipeline");
 
-      String sqlMark = isSupportMark( ) ? getMarkSQLPart( ) : null;
-
-      if( sqlMark != null )
-         sb.mark( sqlMark );
-      else
-      if( isSupportMark( ) )
-         sb.mark(" 0 ");
-
-        /*
-        sb.addPredicat( autoFilter          )
-          .addPredicat( getWherePredicat( ) );
-
-        if( !ignoreFilters )
-            sb.addPredicat( filters.values().stream().map( (f)->f.getFilterStr() ).collect( Collectors.toList() ) );
-        */
-
-      Predicate<PredicateItem> p = item -> !ignoreFilters || !item.isFilter();
-
-      if( !predicates.isEmpty() )
-         predicates.values().stream().filter(p).map(i->i.getFilterStr()).forEach( s->sb.addPredicat(s) );
-
-      if( prepareMode == SHOW )
-         sb.orderBy( getOrderBy( ) );
-
-      return sb.build( );
+      return createNextSelectBuilder( ignoreFilters ).buildSql();
    }
 
 
@@ -1172,7 +1070,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public void setSQL( String strSQL ) {
       this.strSQL = strSQL;
       clearAutoDetectedNativeQueryName();
-      exprInfo = null;  // Старый SQLParser/SelectBuilder не должен использовать анализ предыдущего SQL.
       needReCreateReader();
    }
 
