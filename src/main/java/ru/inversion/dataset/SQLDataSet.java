@@ -1557,10 +1557,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       try {
 
-         final int filterId = g_filterIDSequence.incrementAndGet();
-         final SQLExpression filterExpression = new SQLExpression();
-         int valueParameterIndex = 0;
-
          StringBuilder sb = new StringBuilder( );
 
          for( IFilterItem fi : filterList ) {
@@ -1659,46 +1655,17 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                {
                   //if( fi.getType() == String.class || ( value.getClass() == String.class && ((String)value).indexOf('%') != -1 ) )
                   //if( value.getClass() == String.class && S.contains( (String)value, '%', '_' ) )
-                  final String parameterName =
-                          "__jinv_filter_" + filterId + "_" + valueParameterIndex++;
-
-                  filterExpression.setParameter( parameterName, value );
-
                   if( value.getClass() == String.class && S.contains( (String)value, '%', ( fi.isIgnore95LikeSym() ? (char)255 : '_' ) ) )
-                     sb.append('(').append( column ).append(" LIKE :").append( parameterName ).append(')');
+                     sb.append('(').append( column ).append(" LIKE ").append( SQLParser.value2Str(value) ).append(')');
                   else
                   {
-                     sb.append('(').append( column ).append(" = :" ).append( parameterName ).append(')');
+                     sb.append('(').append( column ).append(" = " ).append( SQLParser.value2Str(value) ).append(')');
                   }
                }
             }
          }//end for
 
-         if( S.isNullOrEmpty(sb.toString()) )
-            return 0;
-
-         filterExpression.setSQL( sb.toString() );
-
-         if( fixed )
-         {
-            if( !append )
-               predicates.entrySet().removeIf( t -> t.getValue().isFixed() );
-         }
-         else
-         {
-            if( !append )
-               predicates.entrySet().removeIf( t -> t.getValue().isTemporary() );
-         }
-
-         predicates.put(
-                 filterId,
-                 new PredicateItem(
-                         filterExpression,
-                         fixed ? PredicateTypeEnum.FIXED_FILTER : PredicateTypeEnum.TEMPORARY_FILTER
-                 )
-         );
-
-         return filterId;
+         return setFilter( sb.toString(), fixed, append );
 
       } catch( Throwable th ) {
          throw new DataSetException( Tags.PRODUCT_LABEL + "setFilter, 'List<IFilterItem>' version", th );
