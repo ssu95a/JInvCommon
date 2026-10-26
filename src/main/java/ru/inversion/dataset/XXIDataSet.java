@@ -13,6 +13,7 @@ import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
+import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.lstn.IListenerManConsumer;
 import ru.inversion.utils.lstn.IListenerManEvent;
@@ -26,8 +27,6 @@ import java.util.function.Predicate;
 
 import static ru.inversion.dataset.DataSetEvent.DataSetEventType.EXECUTE;
 import static ru.inversion.dataset.DataSetMarkEvent.MarkActionEnum.*;
-import static ru.inversion.dataset.ISQLDataSet.PrepareSQLModeEnum.MARK_CLEAR;
-import static ru.inversion.dataset.ISQLDataSet.PrepareSQLModeEnum.MARK_INSERT;
 import static ru.inversion.dataset.mark.MarkModeEnum.*;
 
 /**
@@ -288,113 +287,101 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         }
     }
 
-    /**
-     * {@inheritDoc }
-     * <p>
-     * Расширяет базовый метод, добавляет возможность генерации SQL для пометки всех записей.
-     */
-    @Override
-    protected String prepareCompletedSql( PrepareSQLModeEnum prepareMode ) throws DataSetException {
 
-        if( U.in( prepareMode, MARK_INSERT, MARK_CLEAR ) ) {
+    private NextSelectBuilder createMarkSourceBuilder() {
+        if( S.isNotNullOrEmpty(getOptimizerHint()) )
+            throw new UnsupportedOperationException(
+                    "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
+        if( S.isNotNullOrEmpty(getQueryAlias()) )
+            throw new UnsupportedOperationException(
+                    "queryAlias is not supported by the PreparedSql pipeline");
 
-            if( isSupportMark() )
-            {
-                if( prepareMode == MARK_INSERT )
-                {
-                    final StringBuilder sb = new StringBuilder("insert into ") ;
+        NextSelectBuilder builder = createNextSelectBuilder( false );
+        builder.mark( null );
+        builder.orderBy( (String)null );
+        return builder;
+    }
 
-                    String minusSql = null;
+    private PreparedSql prepareMarkInsertSql( PreparedSql source ) {
+        String[] key = markDescriptor.getMarkKeyColumns();
+        StringBuilder sql = new StringBuilder("insert into ");
 
-                    switch( markDescriptor.getMarkMode() ) {
-                        case MRK:
-                            sb.append("v_jf_mrk( imrkmarkerid, RMRKROWID ) select :jinv_marker_id, ").append( markDescriptor.getMarkKeyColumns()[0] );
-                            //minusSql = "\nMINUS\nselect imrkmarkerid, RMRKROWID from v_jf_mrk where imrkmarkerid = :jinv_marker_id";
-                            minusSql = "\nwhere " + markDescriptor.getMarkKeyColumns()[0] + " not in ( select RMRKROWID from v_jf_mrk where imrkmarkerid = :jinv_marker_id )";
-                            break;
-                        case MRK_ID:
-                            sb.append("v_jf_mrk_id( Idmarker, IDROW ) select :jinv_marker_id, ").append( markDescriptor.getMarkKeyColumns()[0] );
-                            minusSql = "\nwhere " + markDescriptor.getMarkKeyColumns()[0] + " not in ( select IDROW from v_jf_mrk_id where Idmarker = :jinv_marker_id )";
-                            //minusSql = "\nMINUS\nselect Idmarker, IDROW from v_jf_mrk_id where Idmarker = :jinv_marker_id";
-                            break;
-                        case MRK_ID2:
-                            sb.append("v_jf_mrk_id2( Idmarker, IDROW, IDAROW ) select :jinv_marker_id, ")
-                              .append(markDescriptor.getMarkKeyColumns()[0])
-                              .append(", ")
-                              .append(markDescriptor.getMarkKeyColumns()[1]);
-                            minusSql = "\nwhere ( " + markDescriptor.getMarkKeyColumns()[0] + ", " +  markDescriptor.getMarkKeyColumns()[1] + ") "
-                                        + " not in ( select IDROW, IDAROW from v_jf_mrk_id2 where Idmarker = :jinv_marker_id )";
-                            //minusSql = "\nMINUS\nselect Idmarker, IDROW, IDAROW from v_jf_mrk_id2 where Idmarker = :jinv_marker_id";
-                            break;
-                        case MRK_U:
-                            sb.append("v_jf_mrk_u( Idmarker, UROW ) select :jinv_marker_id, ").append( markDescriptor.getMarkKeyColumns()[0] );
-                            //minusSql = "\nMINUS\nselect Idmarker, UROW from v_jf_mrk_u where Idmarker = :jinv_marker_id";
-                            minusSql = "\nwhere " + markDescriptor.getMarkKeyColumns()[0] + " not in ( select UROW from v_jf_mrk_u where Idmarker = :jinv_marker_id )";
-                            break;
-                    }
-
-                    SelectBuilder ssb = getSelectBuilder();
-
-                    ssb.hint       ( getOptimizerHint() );
-
-                    //Predicate<PredicateItem> p = item -> !ignoreFilters || !item.isFilter();
-
-                    if(!predicates.isEmpty() )
-                        predicates.values().stream().map(i->i.getFilterStr()).forEach( s->ssb.addPredicat(s) );
-
-                    /*
-                       .addPredicat( autoFilter         )
-                       .addPredicat( getWherePredicat() )
-                       .addPredicat( filters.values().stream().map( (f)->f.getFilterStr() ).collect( Collectors.toList() ) );
-                    */
-
-                    //String alias
-
-                    sb.append( " FROM (" )
-                      .append( ssb.build() )
-                      .append(" ) ").append( "qrslt" );
-
-                    if( minusSql != null )
-                        sb.append( minusSql );
-
-                    return sb.toString();
-                }
-                else // MARK_CLEAR
-                {
-                    final StringBuilder sb = new StringBuilder("delete from ") ;
-
-                    switch( markDescriptor.getMarkMode() ) {
-                        case MRK:
-                            sb.append("v_jf_mrk where ( imrkmarkerid, RMRKROWID ) in ( select :jinv_marker_id, ").append( markDescriptor.getMarkKeyColumns()[0] );
-                            break;
-                        case MRK_ID:
-                            sb.append("v_jf_mrk_id where ( Idmarker, IDROW ) in ( select :jinv_marker_id, ").append( markDescriptor.getMarkKeyColumns()[0]);
-                            break;
-                        case MRK_ID2:
-                            sb.append("v_jf_mrk_id2 where ( Idmarker, IDROW, IDAROW ) in ( select :jinv_marker_id, ")
-                              .append(markDescriptor.getMarkKeyColumns()[0])
-                              .append(", ")
-                              .append(markDescriptor.getMarkKeyColumns()[1]);
-                            break;
-                        case MRK_U:
-                            sb.append("v_jf_mrk_u where ( Idmarker, UROW ) in ( select :jinv_marker_id, ").append(markDescriptor.getMarkKeyColumns()[0]);
-                            break;
-                    }
-
-                    SelectBuilder ssb = getSelectBuilder();
-
-                    ssb.hint( getOptimizerHint() );
-                    if( !predicates.isEmpty() )
-                         predicates.values().stream().map(i->i.getFilterStr()).forEach( s->ssb.addPredicat(s) );
-
-                    sb.append(" FROM( ").append( ssb.build() ).append(") qm) ");
-
-                    return sb.toString();
-                }//end MARK_CLEAR
-            }
-            return null;
+        switch( markDescriptor.getMarkMode() ) {
+            case MRK:
+                sql.append("v_jf_mrk( imrkmarkerid, RMRKROWID ) select ?, ").append(key[0]);
+                break;
+            case MRK_ID:
+                sql.append("v_jf_mrk_id( Idmarker, IDROW ) select ?, ").append(key[0]);
+                break;
+            case MRK_ID2:
+                sql.append("v_jf_mrk_id2( Idmarker, IDROW, IDAROW ) select ?, ")
+                   .append(key[0]).append(", ").append(key[1]);
+                break;
+            case MRK_U:
+                sql.append("v_jf_mrk_u( Idmarker, UROW ) select ?, ").append(key[0]);
+                break;
+            default:
+                throw new IllegalStateException("Unsupported mark mode " + markDescriptor.getMarkMode());
         }
-        return super.prepareCompletedSql( prepareMode );
+
+        sql.append(" FROM (").append(source.getSql()).append(") qrslt");
+
+        switch( markDescriptor.getMarkMode() ) {
+            case MRK:
+                sql.append("\nwhere ").append(key[0])
+                   .append(" not in ( select RMRKROWID from v_jf_mrk where imrkmarkerid = ? )");
+                break;
+            case MRK_ID:
+                sql.append("\nwhere ").append(key[0])
+                   .append(" not in ( select IDROW from v_jf_mrk_id where Idmarker = ? )");
+                break;
+            case MRK_ID2:
+                sql.append("\nwhere ( ").append(key[0]).append(", ").append(key[1])
+                   .append(") not in ( select IDROW, IDAROW from v_jf_mrk_id2 where Idmarker = ? )");
+                break;
+            case MRK_U:
+                sql.append("\nwhere ").append(key[0])
+                   .append(" not in ( select UROW from v_jf_mrk_u where Idmarker = ? )");
+                break;
+            default:
+                break;
+        }
+
+        List<Parameter> parameters = new ArrayList<>( source.getParameters().size() + 2 );
+        parameters.add( Parameter.named("jinv_marker_id") );
+        parameters.addAll( source.getParameters() );
+        parameters.add( Parameter.named("jinv_marker_id") );
+        return new PreparedSql( sql.toString(), parameters );
+    }
+
+    private PreparedSql prepareMarkClearSql( PreparedSql source ) {
+        String[] key = markDescriptor.getMarkKeyColumns();
+        StringBuilder sql = new StringBuilder("delete from ");
+
+        switch( markDescriptor.getMarkMode() ) {
+            case MRK:
+                sql.append("v_jf_mrk where ( imrkmarkerid, RMRKROWID ) in ( select ?, ").append(key[0]);
+                break;
+            case MRK_ID:
+                sql.append("v_jf_mrk_id where ( Idmarker, IDROW ) in ( select ?, ").append(key[0]);
+                break;
+            case MRK_ID2:
+                sql.append("v_jf_mrk_id2 where ( Idmarker, IDROW, IDAROW ) in ( select ?, ")
+                   .append(key[0]).append(", ").append(key[1]);
+                break;
+            case MRK_U:
+                sql.append("v_jf_mrk_u where ( Idmarker, UROW ) in ( select ?, ").append(key[0]);
+                break;
+            default:
+                throw new IllegalStateException("Unsupported mark mode " + markDescriptor.getMarkMode());
+        }
+
+        sql.append(" FROM (").append(source.getSql()).append(") qm)");
+
+        List<Parameter> parameters = new ArrayList<>( source.getParameters().size() + 1 );
+        parameters.add( Parameter.named("jinv_marker_id") );
+        parameters.addAll( source.getParameters() );
+        return new PreparedSql( sql.toString(), parameters );
     }
 
 	/** {@inheritDoc} */
@@ -548,18 +535,15 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         try {
             if( isSupportMark() )
             {
-                String strCompletedSQL = prepareCompletedSql( MARK_INSERT );
+                NextSelectBuilder source = createMarkSourceBuilder();
+                PreparedSql select = source.prepare();
 
-                XXIDsMarkerDao.markAllRow( getTaskContextForUse(), getOrCreateMarkerID(), markDescriptor, strCompletedSQL,
-                    new IParameters() {
-                        @Override
-                        public Object getParameter( String parameterName ) {
-                            return getParameterValue( parameterName );
-                        }
-                        @Override
-                        public Object getParameter( int parameterIndex ) {
-                            return getParameterValue( parameterIndex );
-                    }},
+                XXIDsMarkerDao.markAllRow(
+                    getTaskContextForUse(),
+                    getOrCreateMarkerID(),
+                    markDescriptor,
+                    prepareMarkInsertSql(select),
+                    source.parameters(mainSqlParameters),
                     savePrevMarkedRows
                 );
 
@@ -585,17 +569,14 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
                 if( savePrevMarkedRows ) {
 
-                    String strCompletedSQL = prepareCompletedSql( PrepareSQLModeEnum.MARK_CLEAR );
+                    NextSelectBuilder source = createMarkSourceBuilder();
+                    PreparedSql select = source.prepare();
 
-                    XXIDsMarkerDao.unMarkAllRow( getTaskContextForUse(), markDescriptor, strCompletedSQL, new IParameters() {
-                        @Override
-                        public Object getParameter( String parameterName ) {
-                            return getParameterValue( parameterName );
-                        }
-                        @Override
-                        public Object getParameter( int parameterIndex ) {
-                            return getParameterValue( parameterIndex );
-                    }}
+                    XXIDsMarkerDao.unMarkAllRow(
+                            getTaskContextForUse(),
+                            markDescriptor,
+                            prepareMarkClearSql(select),
+                            source.parameters(mainSqlParameters)
                     );
                 }
                 else
