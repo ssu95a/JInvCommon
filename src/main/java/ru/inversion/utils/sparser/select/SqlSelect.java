@@ -55,7 +55,6 @@ public final class SqlSelect {
         source = Objects.requireNonNull(sql, "sql");
         this.scanner = Objects.requireNonNull(scanner, "scanner");
         sourceTokens = scanner.scan(sql);
-        validateStringLiterals(source, sourceTokens);
         this.layout = inspect();
     }
 
@@ -206,8 +205,6 @@ public final class SqlSelect {
     /** Не допускаем второй statement в пользовательском фрагменте. */
     private void checkFragment(String fragment) {
         List<SqlScanner.Token> tokens = scanner.scan(fragment);
-        validateStringLiterals(fragment, tokens);
-
         int depth = 0;
         for (SqlScanner.Token token : tokens) {
             if (symbol(fragment, token, "(")) depth++;
@@ -218,47 +215,6 @@ public final class SqlSelect {
             }
         }
         if (depth != 0) throw new IllegalArgumentException("Unbalanced SQL fragment");
-    }
-
-    /**
-     * Поддерживаются только обычные строковые литералы из латиницы,
-     * кириллицы и пробелов. Всё остальное должно приходить bind-параметром.
-     */
-    private static void validateStringLiterals(String sql, List<SqlScanner.Token> tokens) {
-        SqlScanner.Token previous = null;
-
-        for (SqlScanner.Token token : tokens) {
-            if (token.getKind() == STRING) {
-                String text = token.text(sql);
-
-                boolean plain = text.length() >= 2
-                        && text.charAt(0) == '\''
-                        && text.charAt(text.length() - 1) == '\'';
-
-                boolean prefixed = previous != null
-                        && previous.getKind() == WORD
-                        && previous.getEnd() == token.getStart();
-
-                if (!plain || prefixed || !plainStringContent(text)) {
-                    throw new IllegalArgumentException(
-                            "Unsupported SQL string literal at offset " + token.getStart()
-                            + ": use a bind parameter");
-                }
-            }
-            if (!trivia(token)) previous = token;
-        }
-    }
-
-    private static boolean plainStringContent(String text) {
-        for (int i = 1; i < text.length() - 1; i++) {
-            char ch = text.charAt(i);
-            if (ch == ' ') continue;
-            if (ch >= 'A' && ch <= 'Z') continue;
-            if (ch >= 'a' && ch <= 'z') continue;
-            if (ch >= '\u0400' && ch <= '\u04FF') continue;
-            return false;
-        }
-        return true;
     }
 
     private static String optionalFragment(String fragment) {
