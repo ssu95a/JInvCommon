@@ -55,7 +55,6 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     private int rowCounter = 0;
     private boolean enableMark = false;
     private final Class<T> rowClass;
-    private final String actualSql;
     private final PreparedSql preparedSql;
 
     /** Prepared SQL produced by sparser; values are resolved for every execution. */
@@ -69,7 +68,6 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         this.rowMapper = rowMapper;
         this.rowClass = rowClass;
         this.enableMark = enableMark;
-        this.actualSql = preparedSql.getSql();
     }
 
     /** Resolves current DataSet values in physical JDBC placeholder order. */
@@ -124,7 +122,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             final List<Object> pv = resolvePreparedParameters(callbackParameters);
 
             try {
-                statement = connection.prepareStatement( actualSql );
+                statement = connection.prepareStatement( preparedSql.getSql() );
 
                 int nIndex = 1;
                 for( Object o : pv )
@@ -135,7 +133,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             }
             catch( SQLException ex ) {
                 doClose();
-                throw new JInvDbException( ex, actualSql, pv );
+                throw new JInvDbException( ex, preparedSql.getSql(), pv );
             }
 
             if( !rowSet.next() )
