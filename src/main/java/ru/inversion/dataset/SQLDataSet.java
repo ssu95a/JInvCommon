@@ -111,7 +111,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    private IParameters preparedReaderParameters;
 
    /** Живое представление параметров DataSet. Явный null имеет приоритет. */
-   private final IParameters mainSqlParameters = new IParameters() {
+   protected final IParameters mainSqlParameters = new IParameters() {
       @Override public Object getParameter(String name) {
          return SQLDataSet.this.getParameterValue(name);
       }
@@ -995,7 +995,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return execute_count;
    }
 
-   private NextSelectBuilder createNextSelectBuilder( boolean ignoreFilters ) {
+   protected NextSelectBuilder createNextSelectBuilder( boolean ignoreFilters ) {
       SqlDialect dialect = getTaskContextForUse().dialect();
       NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
       for (PredicateItem item : predicates.values()) {

@@ -2,6 +2,7 @@ package ru.inversion.dataset;
 
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.JDBCDataReader;
+import ru.inversion.dataset.impl.NextSelectBuilder;
 import ru.inversion.dataset.impl.SelectBuilder;
 import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.dataset.impl.XXIDsMarkerDao;
@@ -9,10 +10,10 @@ import ru.inversion.dataset.mark.IMarkable;
 import ru.inversion.dataset.mark.MarkDescriptor;
 import ru.inversion.dataset.mark.MarkModeEnum;
 import ru.inversion.dataset.parser.SQLParser;
-import ru.inversion.db.rs.RSUtils;
 import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
+import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.lstn.IListenerManConsumer;
 import ru.inversion.utils.lstn.IListenerManEvent;
 import ru.inversion.utils.lstn.ListenerManFactory;
@@ -834,64 +835,38 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         if( !isSupportMark() || getMarkerID() == null )
             return Collections.<T>emptyIterator();
 
-		final StringBuilder sb = new StringBuilder( );
+        NextSelectBuilder builder = createNextSelectBuilder( ignoreFilter );
+        builder.mark("1");
 
-        final SelectBuilder ssb = getSelectBuilder( );
-        ssb.hint( getOptimizerHint( ) )
-           .mark(" 1 " )
-           .orderBy( getOrderBy() );
+        StringBuilder predicate = new StringBuilder("EXISTS\n");
+        String[] markKeyColumns = markDescriptor.getMarkKeyColumns();
 
-        if( !ignoreFilter ) {
-            if(!predicates.isEmpty() )
-                predicates.values().stream().map(i->i.getFilterStr()).forEach( s->ssb.addPredicat(s) );
-
-//            filters.values().stream().forEach( (f)->ssb.addPredicat(f.getFilterStr() ) );
-//            ssb.addPredicat( getWherePredicat( ) );
-//            ssb.addPredicat( autoFilter );
+        if( markDescriptor.getMarkMode() == MRK )
+            predicate.append(" ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id and a$.RMRKROWID = ")
+                     .append(markKeyColumns[0]).append(")");
+        else if( markKeyColumns.length == 1 ) {
+            if( markDescriptor.getMarkMode() == MRK_ID )
+                predicate.append(" ( select 1 from v_jf_mrk_id a$ where a$.idmarker = :jinv_marker_id and a$.idrow = ")
+                         .append(markKeyColumns[0]).append(")");
+            else if( markDescriptor.getMarkMode() == MRK_U )
+                predicate.append(" ( select 1 from v_jf_mrk_u a$ where a$.idmarker = :jinv_marker_id and a$.UROW = ")
+                         .append(markKeyColumns[0]).append(")");
         }
+        else if( markKeyColumns.length > 1 )
+            predicate.append(" ( select 1 from v_jf_mrk_id2 a$ where idmarker = :jinv_marker_id")
+                     .append(" and a$.IDROW = ").append(markKeyColumns[0])
+                     .append(" and a$.IDAROW = ").append(markKeyColumns[1])
+                     .append(")");
 
-        sb.append(" EXISTS\n");
+        builder.addPredicate( predicate.toString() );
 
-        String[] markKeyColumns = this.markDescriptor.getMarkKeyColumns();
+        PreparedSql sql = builder.prepare();
+        JDBCDataReader<T> reader = new JDBCDataReader<>(
+                getTaskContextForUse().getConnection(),
+                sql, getRowMapperForUse(), null, false );
+        reader.executeQuery( builder.parameters(mainSqlParameters) );
 
-        if ( markDescriptor.getMarkMode() == MRK )
-            sb.append( " ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id and a$.RMRKROWID = ").append( ssb.getFromObj() ).append( "." ).append( markDescriptor.getMarkKeyColumns()[0]).append( ")");
-        else
-            if( markKeyColumns.length > 0 ) {
-
-                if ( markKeyColumns.length == 1 ) {
-
-                    if( markDescriptor.getMarkMode() == MRK_ID )
-                        sb.append(" ( select 1 from v_jf_mrk_id a$ where a$.idmarker = :jinv_marker_id and a$.idrow = ").append( ssb.getFromObj() ).append( ".").append( markKeyColumns[0] ).append(")");
-                    else
-                        if ( markDescriptor.getMarkMode() == MRK_U ) {
-                            sb.append(" ( select 1 from v_jf_mrk_u a$ where a$.idmarker = :jinv_marker_id and a$.UROW = ").append( ssb.getFromObj() ).append( ".").append( markKeyColumns[0] ).append(")");
-                    }
-                }
-                else {
-                    sb.append(" ( select 1 from v_jf_mrk_id2 a$ where idmarker = :jinv_marker_id")
-                      .append(" and a$.IDROW = " ).append( ssb.getFromObj() ).append(".")
-                      .append(markKeyColumns[0])
-                      .append(" and a$.IDAROW = ").append( ssb.getFromObj() ).append(".")
-                      .append(markKeyColumns[1])
-                      .append(")");
-                }
-            }
-
-        ssb.addPredicat(sb.toString() );
-
-        return RSUtils.<T>createIterable( getTaskContextForUse().getConnection(), getRowMapperForUse(), ssb.build(),
-            new IParameters() {
-                @Override
-                public Object getParameter( String parameterName ) {
-                    return getParameterValue( parameterName );
-                }
-                @Override
-                public Object getParameter( int parameterIndex ) {
-                    return getParameterValue( parameterIndex );
-                }
-            }
-        ).iterator();
+        return IDataReader.iterator( reader, 50 );
     }
 
     /** {@inheritDoc} */
