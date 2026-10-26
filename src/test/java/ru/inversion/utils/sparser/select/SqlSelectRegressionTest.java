@@ -168,10 +168,11 @@ public class SqlSelectRegressionTest {
         catch (UnsupportedOperationException expected) { /* pass */ }
     }
 
-    @Test public void aggregateWithoutGroupAlsoRejectsMark() {
-        SqlSelect aggregate = pg("select count(*) from t");
-        try { aggregate.setMark("id", "mark"); fail("Expected UnsupportedOperationException"); }
-        catch (UnsupportedOperationException expected) { /* pass */ }
+    @Test public void aggregateFunctionNameDoesNotTriggerSemanticGuessing() {
+        SqlSelect select = pg("select count(*) from t");
+        select.setMark("id", "mark");
+        assertTrue(select.buildSql().contains("count(*), (id"));
+        assertTrue(select.buildSql().contains("AS mark"));
     }
 
     @Test public void legacyMarkerScanDoesNotRepeatedlySearchSuffix() {

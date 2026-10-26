@@ -362,8 +362,6 @@ public final class SqlSelect {
             markRestriction = "GROUP BY/HAVING";
         } else if (hasTopLevelDistinct(selectIndex + 1, itemsBoundary)) {
             markRestriction = "DISTINCT";
-        } else if (hasAggregateProjection(selectIndex + 1, itemsBoundary)) {
-            markRestriction = "aggregate SELECT list";
         }
         int listLastToken = lastSignificant(selectIndex + 1, itemsBoundary);
         if (listLastToken < 0) throw new IllegalArgumentException("Empty SELECT list");
@@ -425,26 +423,6 @@ public final class SqlSelect {
             if (symbol(source, t, "(")) depth++;
             else if (symbol(source, t, ")")) depth--;
             else if (depth == 0 && word(i, "HAVING")) return true;
-        }
-        return false;
-    }
-
-    /**
-     * Консервативно отклоняем mark при известных агрегатных функциях.
-     * Это не SQL semantic analyzer: неизвестные пользовательские агрегаты
-     * пока остаются UNKNOWN и будут проверяться на корпусе запросов.
-     */
-    private boolean hasAggregateProjection(int first, int end) {
-        for (int i = first; i < end; i++) {
-            if (!(word(i, "COUNT") || word(i, "SUM") || word(i, "AVG")
-                    || word(i, "MIN") || word(i, "MAX")
-                    || word(i, "LISTAGG") || word(i, "STRING_AGG")
-                    || word(i, "JSON_AGG") || word(i, "ARRAY_AGG")
-                    || word(i, "XMLAGG") || word(i, "BOOL_AND")
-                    || word(i, "BOOL_OR") || word(i, "STDDEV")
-                    || word(i, "VARIANCE"))) continue;
-            int next = nextSignificant(i + 1);
-            if (next < end && symbol(source, sourceTokens.get(next), "(")) return true;
         }
         return false;
     }
