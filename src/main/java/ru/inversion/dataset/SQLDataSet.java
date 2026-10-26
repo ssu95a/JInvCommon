@@ -34,7 +34,6 @@ import java.util.stream.Collectors;
 import static ru.inversion.dataset.DataSetEvent.DataSetEventType.*;
 import static ru.inversion.dataset.DataSetRowEvent.RowOperationEnum.*;
 import static ru.inversion.dataset.IRowMapper.EMPTY_MAPPER;
-import static ru.inversion.dataset.ISQLDataSet.PrepareSQLModeEnum.*;
 
 /**
  * DataSet для записей полученных из SQL источника данных.
@@ -622,31 +621,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       return sql;
    }
-
-   /**
-    * Готовит SQL выражение в строковом виде для получения и обработки строк данных DataSet.
-    * <p>
-    * @param prepareMode
-    *          режим подготовки SQL выражения см. {@link PrepareSQLModeEnum}
-    * @return
-    *          строку с SQL
-    *
-    * @throws DataSetException
-    *          если была ошибка
-    */
-   protected String prepareCompletedSql( PrepareSQLModeEnum prepareMode ) throws DataSetException {
-      return prepareCompletedSql( prepareMode, false );
-   }
-
-   private String prepareCompletedSql( PrepareSQLModeEnum prepareMode, boolean ignoreFilters ) throws DataSetException {
-
-      if( prepareMode != SHOW )
-         throw new UnsupportedOperationException(
-                 "Prepare SQL mode is not supported by the PreparedSql pipeline: " + prepareMode );
-
-      return createNextSelectBuilder( ignoreFilters ).buildSql();
-   }
-
 
    /**
     * Возвращает значение индексированного параметра.
@@ -1244,83 +1218,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       needReCreateReader( );
    }
 
-   /**
-    *  Получить полное выражение OrderBy
-    *  <p>
-    public String getCompletedOrderBy( ) {
-
-    String orderBy = getOrderBy();
-
-    if( S.isNullOrEmpty(orderBy) )
-    return S.EMPTY_STRING;
-
-    if( orderBy.indexOf('~') == -1 )
-    return orderBy;
-
-    boolean insideStr = false;
-    char    ch;
-
-    StringBuilder sb = new StringBuilder( orderBy.length() );
-
-    for( int i = 0; i < orderBy.length(); i++ ) {
-
-    ch = orderBy.charAt(i);
-
-    if( ch == "'".charAt(0) )
-    insideStr = !insideStr;
-
-    if( ch == '~' && !insideStr )
-    continue;
-
-    sb.append( ch );
-    }
-
-    return sb.toString();
-    }
-    */
-
-   /** {@inheritDoc}
-    @Override
-    public String getCompletedWherePredicat( ) throws DataSetException {
-
-    try {
-
-    SQLParser sp = new SQLParser( this.prepareCompletedSql( SHOW_WITH_TAGS ) );
-
-    String optimizeSql = sp.prepareSqlWithParametersValue (
-
-    new IParameters( ) {
-    @Override
-    public Object getParameter( String parameterName ) {
-    return getParameterValue( parameterName );
-    }
-    @Override
-    public Object getParameter( int parameterIndex ) {
-    return getParameterValue( parameterIndex );
-    }
-    }
-    );
-
-    int index1 = optimizeSql.indexOf("--W[\n");
-
-    if( index1 == -1 )
-    return null; // no where part in SQL expr
-
-
-    index1 += "--W[\n".length();
-
-    int index2 = optimizeSql.indexOf("--W]\n", index1);
-
-    String predicat = optimizeSql.substring( index1, index2 );
-
-    return predicat.replaceFirst( ".*[Ww][Hh][Ee][Rr][Ee]", " ");
-
-    } catch ( Throwable ex) {
-    throw new DataSetException( Tags.PRODUCT_LABEL + "Error in dataSet on call 'getCompletedWherePredicat'", ex );
-    }
-    }
-    */
-
    /** Вернуть полностью готовый SQL, c параметрами */
    @Override
    public String getCompletedSQL( ) {
@@ -1338,7 +1235,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             }
          };
 
-         SQLParser s = new SQLParser( prepareCompletedSql(SHOW) );
+         SQLParser s = new SQLParser( createNextSelectBuilder(false).buildSql() );
          return s.prepareSqlWithParametersValue(p);
       }
       catch( Exception ex ) {
@@ -1810,154 +1707,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return IDataReader.iterator( reader, 50 );
    }
 
-   /*
-   public ResultSetRowsWalker createRSWalker( ) throws DataSetException
-   {
-      try {
-         JDBCDataReader<P> r = new JDBCDataReader<P>(
-            getTaskContextForUse().getConnection(),
-            prepareCompletedSql( SHOW, false ),
-            EMPTY_MAPPER,
-            getRowClass(),
-            isSupportMark( )
-         );
-         r.executeQuery(
-           new IParameters() {
-               @Override
-               public Object getParameter( String parameterName ) {
-                  return getParameterValue( parameterName );
-               }
-               @Override
-               public Object getParameter( int parameterIndex ) {
-                  return getParameterValue( parameterIndex );
-               }
-            }
-         );
-         return r.createResultSetRowsWalker();
-      }catch( Throwable th ) {
-         throw new DataSetException( Tags.PRODUCT_LABEL + "Error while preparing 'ResultSetRowsWalker' to read record", th );
-      }
-   }
-  */
 
-   /** */
-   public <K> boolean findRow (
-           BiPredicate< P, K > predicat,
-           K arg2,
-           boolean withCurrent,
-           boolean populateIfNeed
-   ) throws DataSetException
-   {
-      if( predicat != null && !isEmpty() )
-      {
-         List< P > rowList = rows();
-
-         int index = withCurrent ? getCurrentRowNum() : 0;
-
-         do {
-
-            for( ; index < rowList.size(); index ++ ) {
-
-               P row = rowList.get(index);
-
-               if( predicat.test(row, arg2) ) {
-                  return setCurrentRowNum(index);
-               }
-
-            }//end for
-
-         } while( populateIfNeed && swappingData() );
-      }
-      return false;
-   }
-
-   @Override
-   public void dump( Map<String,Object> d )
-   {
-      super.dump(d);
-
-      IParameters p = new IParameters( ) {
-         @Override
-         public Object getParameter( String parameterName ) { return getParameterValue( parameterName ); }
-         @Override
-         public Object getParameter( int parameterIndex ) {
-            return getParameterValue( parameterIndex );
-         }
-      };
-
-      try {
-
-         String strSQL = prepareCompletedSql(SHOW);
-         d.put("ds.sql.query",  strSQL );
-
-         SQLParser s = new SQLParser( strSQL );
-         d.put("ds.sql.query_with_parameters",  s.prepareSqlWithParametersValue(p) );
-         d.put("ds.support_mark",  isSupportMark() );
-         d.put("ds.native_query_name", S.nvl(nativeQueryName) );
-         d.put("ds.dataQueryMode", getDataQueryMode() );
-
-         P currentRow = getCurrentRow();
-         d.put("zs.currentRow",     S.nvl( currentRow ));
-         d.put("zs.currentRowData", getPojoString( currentRow ) );
-      }
-      catch( Exception ex ) {
-         d.put( "Error on prepare dump", "X" );
-         d.put( "Exception", ex );
-      }
-   }
-
-   public static <P> String getPojoString( final P currentRow ) {
-
-      if( currentRow == null )
-         return S.EMPTY_STRING;
-
-      Class<P> rowClass = (Class<P>) currentRow.getClass();
-
-      final StringBuilder sb = new StringBuilder();
-
-      Collection<? extends IEntityProperty<P,?>> values = EntityMetadataFactory.getEntityMetaData(rowClass).getPropertiesMap().values();
-
-      Map<String,Object> valuesMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-
-      int maxNameLength  = 0;
-      int maxValueLength = 0;
-
-      for( IEntityProperty<P,?> ep : values )
-      {
-         Object v = ep.invokeGetter(currentRow);
-
-         valuesMap.put( ep.getPropertyName(), v );
-
-         if( ep.getPropertyName().length() > maxNameLength )
-            maxNameLength = ep.getPropertyName().length();
-         if( S.isString(v) && ((String)v).length() > maxValueLength )
-            maxValueLength = ((String)v).length();
-      }
-
-      final int n =  maxNameLength + 1;
-      if( maxValueLength > 150 )
-         maxValueLength = 150;
-
-      final String line = S.space( maxNameLength + maxValueLength + 3, '-' );
-
-      sb.append( '\n' );
-      sb.append( line );
-      sb.append( '\n' ).append( S.rPad( "Property", n ) ).append(": Value\n");
-      sb.append( line ).append('\n');
-
-
-      valuesMap.forEach(( s, o ) -> sb.append( S.rPad( s, n ) ).append(": ").append( S.nvl(o).replace('\n',' ') ).append('\n'));
-
-      sb.append( line ).append('\n');
-
-      return sb.toString();
-   }
-
-   private transient int totalRowCount = -1;
-
-   /**
-    * {@inheritDoc}
-    */
    @Override
    public int getTotalRowCount( ) {
       return totalRowCount;

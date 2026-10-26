@@ -241,7 +241,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         try {
 
-            String strSql = prepareCompletedSql( PrepareSQLModeEnum.SHOW );
+            String strSql = createNextSelectBuilder(false).buildSql();
 
             SQLParser sp = new SQLParser( strSql );
 
