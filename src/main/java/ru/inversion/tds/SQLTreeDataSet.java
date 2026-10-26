@@ -25,8 +25,6 @@ import static ru.inversion.dataset.DataSetEvent.DataSetEventType.EXECUTE;
 import static ru.inversion.dataset.DataSetEvent.DataSetEventType.FIRST_TIME_EXECUTE;
 import static ru.inversion.dataset.DataSetRowEvent.RowOperationEnum.INSERT;
 import static ru.inversion.dataset.DataSetRowEvent.RowOperationEnum.REFRESH;
-import static ru.inversion.dataset.ISQLDataSet.PrepareSQLModeEnum.ROW_DATA;
-import static ru.inversion.dataset.ISQLDataSet.PrepareSQLModeEnum.SHOW;
 import static ru.inversion.dataset.SQLDataSet.*;
 import static ru.inversion.meta.EntityMetadataFactory.getEntityMetaData;
 import static ru.inversion.tds.SQLTreeDataSet.PredicateTypeEnum.*;
@@ -514,17 +512,20 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
     }
 
     /**
-     * Готовит SQL выражение в строковом виде для получения и обработки строк данных DataSet.
-     * <p>
-     * @param prepareMode
-     *          режим подготовки SQL выражения см. {@link SQLDataSet.PrepareSQLModeEnum}
-     * @return
-     *          строку с SQL
-     *
-     * @throws TreeDataSetException
-     *          если была ошибка
+     * Готовит SQL выражение для обычной загрузки дерева.
      */
-    protected String prepareCompleteSql( SQLDataSet.PrepareSQLModeEnum prepareMode ) throws TreeDataSetException {
+    protected String prepareCompleteSql() throws TreeDataSetException {
+        return prepareCompleteSql(false);
+    }
+
+    /**
+     * Готовит SQL выражение для обновления одной строки дерева.
+     */
+    protected String prepareRowDataSql() throws TreeDataSetException {
+        return prepareCompleteSql(true);
+    }
+
+    private String prepareCompleteSql( boolean rowData ) throws TreeDataSetException {
 
         StringBuilder sb = new StringBuilder();
 
@@ -546,7 +547,7 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
                 sb.append( "select ").append(mrk).append(",").append(qa).append(".* from (" ).append(sql).append(") ").append(qa);
         }
 
-        if( prepareMode == ROW_DATA )
+        if( rowData )
         {
             final IEntityProperty<? super P, ?> ep = getCompositeAdapter().getIdProperty();
             sb.append("\nwhere ").append( ep.getColumnInfo().getName() ).append(" = :").append( ep.getColumnInfo().getName() );
@@ -586,7 +587,7 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
 
             final String idColumn = idProperty.getColumnInfo().getName();
 
-            final String refreshSql = prepareCompleteSql(ROW_DATA);
+            final String refreshSql = prepareRowDataSql();
 
             final IParameters prm = new ParametersByName() {
 
@@ -809,7 +810,7 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
             fireDataSetEvent( EXECUTE, true );
 
             final IRowMapper<P> rowMapper = getRowMapper();
-            final String sql = prepareCompleteSql(SHOW);
+            final String sql = prepareCompleteSql();
 
             try( final JDBCDataReader<P> dataReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), sql, rowMapper, getRowClass(), isEnableMark() ))
             {
@@ -877,7 +878,7 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
         };
         try {
 
-            String strSQL = prepareCompleteSql(SHOW);
+            String strSQL = prepareCompleteSql();
             d.put("ds.sql.query",  strSQL );
 
             SQLParser s = new SQLParser( strSQL );
