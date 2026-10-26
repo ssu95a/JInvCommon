@@ -2,11 +2,11 @@ package ru.inversion.parser.maker;
 
 import ru.inversion.parser.statement.PrepareContext;
 import ru.inversion.parser.token.Token;
+import ru.inversion.utils.sparser.SqlValueFormatter;
 
 import java.util.List;
 import java.util.function.Function;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
 
 public class SQLMaker_QueryEx extends AbstractSQLMakerBase  {
 
@@ -40,7 +40,7 @@ public class SQLMaker_QueryEx extends AbstractSQLMakerBase  {
                     parameters.add( (o)->t.getValue() );
                 }
                 else
-                    c.sp().append( value2Str( t.getValue() ) ).sp();
+                    c.sp().append( SqlValueFormatter.format( t.getValue() ) ).sp();
                 break;
             default :
                 c.sp().append( t.getValue() );
