@@ -5,13 +5,13 @@ import ru.inversion.datacall.CallPrepareContext;
 import ru.inversion.datacall.maker.CallMaker_WithParametersValue;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.*;
+import ru.inversion.utils.sparser.SqlValueFormatter;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
 import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
 import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
-import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.db.entity.ColumnSQLDefinition;
@@ -1231,7 +1231,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          }
 
          result.append(sql, copiedUntil, token.getStart());
-         result.append(SQLParser.value2Str(value));
+         result.append(SqlValueFormatter.format(value));
          copiedUntil = token.getEnd();
       }
 
@@ -1511,9 +1511,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             else {
 
                if( fi.getType() == String.class || ( value.getClass() == String.class && ((String)value).indexOf('%') != -1 )  )
-                  sb.append('(').append( column ).append(" LIKE ").append( SQLParser.value2Str(value) ).append(')');
+                  sb.append('(').append( column ).append(" LIKE ").append( SqlValueFormatter.format(value) ).append(')');
                else {
-                  sb.append('(').append( column ).append(" = " ).append( SQLParser.value2Str(value) ).append(')');
+                  sb.append('(').append( column ).append(" = " ).append( SqlValueFormatter.format(value) ).append(')');
                }
             }
          }
@@ -1671,10 +1671,10 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                   //if( fi.getType() == String.class || ( value.getClass() == String.class && ((String)value).indexOf('%') != -1 ) )
                   //if( value.getClass() == String.class && S.contains( (String)value, '%', '_' ) )
                   if( value.getClass() == String.class && S.contains( (String)value, '%', ( fi.isIgnore95LikeSym() ? (char)255 : '_' ) ) )
-                     sb.append('(').append( column ).append(" LIKE ").append( SQLParser.value2Str(value) ).append(')');
+                     sb.append('(').append( column ).append(" LIKE ").append( SqlValueFormatter.format(value) ).append(')');
                   else
                   {
-                     sb.append('(').append( column ).append(" = " ).append( SQLParser.value2Str(value) ).append(')');
+                     sb.append('(').append( column ).append(" = " ).append( SqlValueFormatter.format(value) ).append(')');
                   }
                }
             }

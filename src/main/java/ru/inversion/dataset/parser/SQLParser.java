@@ -5,13 +5,9 @@ import ru.inversion.dataset.parser.anlzr.SQLAnalyzerHelper;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.utils.S;
 import ru.inversion.utils.U;
-import ru.inversion.utils.converter.TypeConverter;
+import ru.inversion.utils.sparser.SqlValueFormatter;
 
 import java.io.StringReader;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.time.LocalDate;
-import java.time.temporal.Temporal;
 import java.util.*;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -386,9 +382,6 @@ public class SQLParser implements Iterable<SQLItem>, ReaderScaner.IScanerListene
 	}
 
 
-    static final private DateFormat to_dateFormatter  = new SimpleDateFormat("yyyy-MM-dd");
-    static final private DateFormat to_dateFormatterM = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-
 	/** */
 	public String prepareSqlWithParametersValue( IParameters callbackParameters ) {
 
@@ -408,13 +401,13 @@ public class SQLParser implements Iterable<SQLItem>, ReaderScaner.IScanerListene
 			switch( currentItem.getType() ) {
 				case INDEXED_PARAMETER:
 					if( callbackParameters != null )
-						sb.append( value2Str( callbackParameters.getParameter(nIndex++) ) );
+						sb.append( SqlValueFormatter.format( callbackParameters.getParameter(nIndex++) ) );
                     else
     					sb.append('?');
 				break;
 				case NAMED_PARAMETER:
 					if( callbackParameters != null )
-						sb.append( value2Str( callbackParameters.getParameter( currentItem.getValue().toString() ) ) );
+						sb.append( SqlValueFormatter.format( callbackParameters.getParameter( currentItem.getValue().toString() ) ) );
                     else
     					sb.append(':').append( currentItem.getValue() );
 				break;
@@ -438,50 +431,6 @@ public class SQLParser implements Iterable<SQLItem>, ReaderScaner.IScanerListene
 //	{
 //		return LangEnum.getGLangPL() == LangEnum.PL_pgSQL ? "to_timestamp" : "to_date";
 //	}
-
-	/** */
-    public static String value2Str( Object value ) {
-
-        if( value == null )
-            return " NULL ";
-
-        Class clazz = value.getClass();
-
-        if( clazz == String.class ) {
-            String v = ((String)value).replace("'", "''");
-            return " '" + v + "' ";
-        }
-
-		if( clazz == char[].class ) {
-			String v = ( value.toString() ).replace("'", "''");
-			return " '" + v + "' ";
-		}
-
-        if( clazz == Boolean.class ) {
-            return ((Boolean)value) ? "1" : "0";
-        }
-
-        if( clazz == java.sql.Date.class ) {
-            return " to_date('" + to_dateFormatter.format( (java.sql.Date) value ) + "','YYYY-MM-DD') ";
-        }
-
-        if( clazz == LocalDate.class ) {
-//            return " trunc( " + to_date() + "( '" + to_dateFormatter.format( TypeConverter.convert( value, java.util.Date.class ) ) + "','YYYY-MM-DD')) ";
-            return " to_date('" + to_dateFormatter.format( TypeConverter.convert( value, java.util.Date.class ) ) + "','YYYY-MM-DD') ";
-        }
-
-        if( value instanceof java.util.Date ) {
-            return " to_timestamp( '" + to_dateFormatterM.format( (java.util.Date)value) + "','YYYY-MM-DD HH24:MI:SS') ";
-//			return " " + to_date() + "( '" + to_dateFormatterM.format( (java.util.Date)value) + "','YYYY-MM-DD HH24:MI:SS') ";
-        }
-
-        if( value instanceof Temporal ) {
-			return " to_timestamp( '" + to_dateFormatterM.format( TypeConverter.convert(value, java.util.Date.class ) ) + "','YYYY-MM-DD HH24:MI:SS') ";
-        }
-
-        return uncommentOrderBy( value.toString( ) );
-
-    }
 
 	/** */
 	public String prepareExplainPlanSql( ) {
