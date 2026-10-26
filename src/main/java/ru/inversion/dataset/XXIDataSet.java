@@ -289,13 +289,6 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
 
     private NextSelectBuilder createMarkSourceBuilder() {
-        if( S.isNotNullOrEmpty(getOptimizerHint()) )
-            throw new UnsupportedOperationException(
-                    "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
-        if( S.isNotNullOrEmpty(getQueryAlias()) )
-            throw new UnsupportedOperationException(
-                    "queryAlias is not supported by the PreparedSql pipeline");
-
         NextSelectBuilder builder = createNextSelectBuilder( false );
         builder.mark( null );
         builder.orderBy( (String)null );
@@ -955,13 +948,6 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
             if( dataReader != null )
                 return;
-
-            if( S.isNotNullOrEmpty(getOptimizerHint()) )
-                throw new UnsupportedOperationException(
-                        "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
-            if( S.isNotNullOrEmpty(getQueryAlias()) )
-                throw new UnsupportedOperationException(
-                        "queryAlias is not supported by the PreparedSql pipeline");
 
             String[] key = markDescriptor.getMarkKeyColumns();
             String qualifier = S.isNullOrEmpty(aggrTable) ? null : aggrTable;

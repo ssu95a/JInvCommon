@@ -68,17 +68,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    private   String        orderBYExpression;
 
    /**
-    * Инструкция для оптимизатора RDBMS.
-    */
-   protected String        optimizerHint;
-
-   /**
-    * Query alias.
-    */
-   protected String		queryAlias;
-
-
-   /**
     * Имя запроса, если DataSet строится на аннотации NamedNativeQuery
     */
    protected String        nativeQueryName;
@@ -312,117 +301,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    public SQLDataSet< P > pageSize( int pageSize ) {
       setPageSize(pageSize); return this;
-   }
-
-   /**
-    * Устанавливает query Alias для запроса.
-    * <p>
-    * Установка значения отличного от текущего, приводит к сбросу состояния запроса внутри DataSet.
-    * см. {@link #needReCreateReader() }
-    *
-    * @param qa
-    *          строка со значением
-    *
-    * @see #queryAlias
-    * @see #getQueryAlias()
-    * @see #needReCreateReader()
-    */
-   public void setQueryAlias( String qa ) {
-
-      String newQueryAlias = ( qa == null ? null : qa.trim() );
-
-      if( S.isNullOrEmpty( qa )  )
-         newQueryAlias = null;
-
-      if( !U.equals( newQueryAlias, this.queryAlias ) )
-      {
-         this.queryAlias = newQueryAlias;
-
-         needReCreateReader( );
-      }
-   }
-
-   /**
-    * Возвращает Query alias для запроса, установленного методом setQueryAlias.
-    * <p>
-    * @return  queryAlias
-    *
-    * @see #queryAlias
-    * @see #setQueryAlias(java.lang.String)
-    */
-   public String getQueryAlias( ) {
-      return queryAlias;
-   }
-
-   /**
-    * Версия метода setQueryAlias в стиле "Fluent interface".
-    * <p>
-    * @param queryAlias
-    *
-    * @return
-    *          this
-    *
-    * @see #setQueryAlias
-    */
-   public SQLDataSet< P > queryAlias( String queryAlias ) {
-      setQueryAlias(queryAlias);
-      return this;
-   }
-
-
-   /**
-    * Устанавливает подсказку оптимизатору RDMS для выполнения запроса.
-    * <p>
-    * Установка подсказки отличной от текущей, приводит к сбросу состояния запроса внутри DataSet.
-    * см. {@link #needReCreateReader() }
-    *
-    * @param oh
-    *          строка с подсказкой
-    *
-    * @see #optimizerHint
-    * @see #getOptimizerHint()
-    * @see #needReCreateReader()
-    */
-   public void setOptimizerHint( String oh ) {
-
-      String newOptimizerHint = ( oh == null ? null : oh.trim() );
-
-      if( S.isNullOrEmpty( newOptimizerHint )  )
-         newOptimizerHint = null;
-
-      if( !Objects.equals( newOptimizerHint, this.optimizerHint ) )
-      {
-         this.optimizerHint = newOptimizerHint;
-
-         needReCreateReader( );
-      }
-   }
-
-   /**
-    * Возвращает подсказку для оптимизатора RDBM установленную методом setOptimizerHint.
-    * <p>
-    * @return  строку подсказки
-    *
-    * @see #optimizerHint
-    * @see #setOptimizerHint(java.lang.String)
-    */
-   public String getOptimizerHint( ) {
-      return optimizerHint;
-   }
-
-   /**
-    * Версия метода setOptimizerHint в стиле "Fluent interface".
-    * <p>
-    * @param optimizerHint
-    *          строка с подсказкой
-    * @return
-    *          this
-    *
-    * @see #setOptimizerHint
-    */
-   public SQLDataSet< P > optimizerHint( String optimizerHint ) {
-      setOptimizerHint(optimizerHint);
-      return this;
    }
 
    /** */
@@ -766,14 +644,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          throw new UnsupportedOperationException(
                  "Prepare SQL mode is not supported by the PreparedSql pipeline: " + prepareMode );
 
-      if( S.isNotNullOrEmpty(getOptimizerHint()) )
-         throw new UnsupportedOperationException(
-                 "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
-
-      if( S.isNotNullOrEmpty(getQueryAlias()) )
-         throw new UnsupportedOperationException(
-                 "queryAlias is not supported by the PreparedSql pipeline");
-
       return createNextSelectBuilder( ignoreFilters ).buildSql();
    }
 
@@ -924,12 +794,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * Legacy SelectBuilder здесь больше не участвует.
     */
    protected PreparedSql prepareDataQuery() throws DataSetException {
-      if (S.isNotNullOrEmpty(getOptimizerHint()))
-         throw new UnsupportedOperationException(
-                 "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
-      if (S.isNotNullOrEmpty(getQueryAlias()))
-         throw new UnsupportedOperationException(
-                 "queryAlias is not supported by the PreparedSql pipeline");
       NextSelectBuilder builder = createNextSelectBuilder( false );
       PreparedSql sql = builder.prepare();
       preparedReaderParameters = builder.parameters(mainSqlParameters);
@@ -1811,8 +1675,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       try {
 
-         String qa = getQueryAlias( );
-
          StringBuilder sb = new StringBuilder( );
 
          for( IFilterItem fi : filterList ) {
@@ -1834,12 +1696,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                sb.append(" AND ");
 
             if( !S.isNullOrEmpty(column) )
-            {
-               if( S.isNotNullOrEmpty(qa) )
-                  column = " " + qa + "." + column + " ";
-               else
-                  column = " " + column + " ";
-            }
+               column = " " + column + " ";
 
             {
                if( fi.isExpression() )
@@ -2249,13 +2106,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
          if( dataReader != null )
             return;
-
-         if( S.isNotNullOrEmpty(getOptimizerHint()) )
-            throw new UnsupportedOperationException(
-                    "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
-         if( S.isNotNullOrEmpty(getQueryAlias()) )
-            throw new UnsupportedOperationException(
-                    "queryAlias is not supported by the PreparedSql pipeline");
 
          NextSelectBuilder base =
                  new NextSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
