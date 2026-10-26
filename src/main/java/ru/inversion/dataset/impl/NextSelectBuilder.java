@@ -88,7 +88,7 @@ public final class NextSelectBuilder {
 
     /**
      * Добавляет optimizer hint после внешнего top-level SELECT.
-     * Текст задаётся без /* */; если нужен Oracle-style hint,
+     * Текст задаётся без ; если нужен Oracle-style hint,
      * caller передаёт строку, начинающуюся с '+'.
      */
     public NextSelectBuilder optimizerHint(String hint) {
