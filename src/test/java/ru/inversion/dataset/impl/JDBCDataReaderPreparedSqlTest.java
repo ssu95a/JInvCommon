@@ -97,7 +97,7 @@ public class JDBCDataReaderPreparedSqlTest {
     }
 
     @Test
-    public void closesStatementWhenParameterResolutionFails() throws Exception {
+    public void doesNotOpenStatementWhenParameterResolutionFails() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc();
         JDBCDataReader<Object> reader = reader(jdbc, prepared("select ?", Parameter.named("explode")));
         try {
@@ -111,8 +111,7 @@ public class JDBCDataReaderPreparedSqlTest {
         } catch (DataSetException expected) {
             assertTrue(expected.getCause() instanceof IllegalArgumentException);
         }
-        assertTrue(jdbc.statements.get(0).closed);
-        assertEquals(0, jdbc.statements.get(0).executions);
+        assertTrue(jdbc.statements.isEmpty());
         assertTrue(reader.isEOF());
     }
 
@@ -147,18 +146,6 @@ public class JDBCDataReaderPreparedSqlTest {
         assertEquals(Arrays.asList(17, "ACTIVE"), jdbc.statements.get(0).values());
         assertEquals(2, prepared.getParameters().size());
     }
-
-    @Test
-    public void oldStringConstructorStillWorks() throws Exception {
-        RecordingJdbc jdbc = new RecordingJdbc();
-        JDBCDataReader<Object> reader = new JDBCDataReader<>(jdbc.connection(),
-                "select 1", dummyMapper(), null, false);
-        reader.executeQuery(new Params());
-       assertEquals("select ?", jdbc.statements.get(0).sql);
-       assertEquals(
-               Arrays.asList(1),
-               jdbc.statements.get(0).values()
-       );    }
 
     private static JDBCDataReader<Object> reader(RecordingJdbc jdbc, PreparedSql sql) {
         return new JDBCDataReader<>(jdbc.connection(), sql, dummyMapper(), null, false);
