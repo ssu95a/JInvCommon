@@ -33,6 +33,25 @@ class SQLDataSetLifecycleTest {
         }
     }
 
+    private static final class PagingDataSet extends SQLDataSet<String> {
+        int swapCount;
+
+        PagingDataSet() {
+            super(null, String.class);
+            rows().add("first");
+            setCurrentRowNum(0);
+        }
+
+        @Override
+        public boolean swappingData() {
+            if( swapCount++ == 0 ) {
+                rows().add("target");
+                return true;
+            }
+            return false;
+        }
+    }
+
     private static final class Reader implements ISQLDataReader<String> {
         final List<Object> receivedParameters = new ArrayList<>();
         int executeCount;
@@ -243,4 +262,20 @@ class SQLDataSetLifecycleTest {
 
         assertTrue(ds.readerNeedsRecreation());
     }
+    @Test
+    void findRowCanPopulateUntilMatch() throws DataSetException {
+        PagingDataSet ds = new PagingDataSet();
+
+        assertTrue(ds.findRow(
+                (row, value) -> row.equals(value),
+                "target",
+                false,
+                true
+        ));
+
+        assertEquals(1, ds.getCurrentRowNum());
+        assertEquals("target", ds.getCurrentRow());
+        assertEquals(1, ds.swapCount);
+    }
+
 }

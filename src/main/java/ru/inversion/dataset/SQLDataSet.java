@@ -1804,6 +1804,34 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    private transient int totalRowCount = -1;
 
+   /**
+    * Ищет строку среди уже загруженных данных и, при необходимости,
+    * продолжает поиск с подкачкой следующих страниц.
+    */
+   public <K> boolean findRow(
+           BiPredicate<P,K> predicate,
+           K value,
+           boolean withCurrent,
+           boolean populateIfNeed
+   ) throws DataSetException {
+
+      if( predicate == null || isEmpty() )
+         return false;
+
+      List<P> rowList = rows();
+      int index = withCurrent ? getCurrentRowNum() : 0;
+
+      do {
+         for( ; index < rowList.size(); index++ ) {
+            if( predicate.test(rowList.get(index), value) )
+               return setCurrentRowNum(index);
+         }
+      }
+      while( populateIfNeed && swappingData() );
+
+      return false;
+   }
+
    @Override
    public int getTotalRowCount( ) {
       return totalRowCount;
