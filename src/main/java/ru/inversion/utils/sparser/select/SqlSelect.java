@@ -511,7 +511,7 @@ public final class SqlSelect {
     /** */
     private static final class Layout {
 
-       int selectItemsEnd;
+        int selectItemsEnd;
 
         int whereWordEnd;
 
