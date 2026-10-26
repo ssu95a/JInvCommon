@@ -76,6 +76,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected String        queryAlias;
 
    /**
+    * Инструкция для оптимизатора RDBMS.
+    * Текст хранится без /* */ и вставляется после внешнего SELECT.
+    */
+   protected String        optimizerHint;
+
+   /**
     * Имя запроса, если DataSet строится на аннотации NamedNativeQuery
     */
    protected String        nativeQueryName;
@@ -331,6 +337,33 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** Fluent version of setQueryAlias. */
    public SQLDataSet<P> queryAlias( String queryAlias ) {
       setQueryAlias(queryAlias);
+      return this;
+   }
+
+   /**
+    * Устанавливает optimizer hint.
+    */
+   public void setOptimizerHint( String oh ) {
+
+      String newOptimizerHint = oh == null ? null : oh.trim();
+
+      if( S.isNullOrEmpty(newOptimizerHint) )
+         newOptimizerHint = null;
+
+      if( !Objects.equals(newOptimizerHint, optimizerHint) ) {
+         optimizerHint = newOptimizerHint;
+         needReCreateReader();
+      }
+   }
+
+   /** Возвращает optimizer hint. */
+   public String getOptimizerHint() {
+      return optimizerHint;
+   }
+
+   /** Fluent version of setOptimizerHint. */
+   public SQLDataSet<P> optimizerHint( String optimizerHint ) {
+      setOptimizerHint(optimizerHint);
       return this;
    }
 
@@ -763,6 +796,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       SqlDialect dialect = getTaskContextForUse().dialect();
       NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
       builder.queryAlias(getQueryAlias());
+      builder.optimizerHint(getOptimizerHint());
       for (PredicateItem item : predicates.values()) {
          if (ignoreFilters && item.isFilter())
             continue;

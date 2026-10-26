@@ -39,6 +39,7 @@ public final class NextSelectBuilder {
     private Part sorting;
     private String mark;
     private String queryAlias;
+    private String optimizerHint;
 
     private PreparedSql prepared;
     // Ключ — индекс среди POSITIONAL в финальном PreparedSql, а НЕ JDBC position.
@@ -81,6 +82,21 @@ public final class NextSelectBuilder {
         String value = alias == null ? null : alias.trim();
         queryAlias = value == null || value.isEmpty() ? null : value;
         if (queryAlias != null) validateAlias(queryAlias);
+        invalidate();
+        return this;
+    }
+
+    /**
+     * Добавляет optimizer hint после внешнего top-level SELECT.
+     * Текст задаётся без /* */; если нужен Oracle-style hint,
+     * caller передаёт строку, начинающуюся с '+'.
+     */
+    public NextSelectBuilder optimizerHint(String hint) {
+        String value = hint == null ? null : hint.trim();
+        if (value != null && value.isEmpty()) value = null;
+        if (value != null && value.contains("*/"))
+            throw new IllegalArgumentException("optimizerHint contains comment terminator");
+        optimizerHint = value;
         invalidate();
         return this;
     }
@@ -260,9 +276,41 @@ public final class NextSelectBuilder {
     }
 
     private String sourceForSelect() {
-        if (queryAlias == null) return sourceSql;
-        return "SELECT " + queryAlias + ".* FROM (\n"
-                + sourceSql + "\n) " + queryAlias;
+        String source = queryAlias == null
+                ? sourceSql
+                : "SELECT " + queryAlias + ".* FROM (\n"
+                    + sourceSql + "\n) " + queryAlias;
+
+        return optimizerHint == null ? source : addOptimizerHint(source);
+    }
+
+    private String addOptimizerHint(String source) {
+        int depth = 0;
+
+        for (SqlScanner.Token token : scanner.scan(source)) {
+            if (token.getKind() == SqlScanner.Kind.SYMBOL) {
+                String text = token.text(source);
+                if ("(".equals(text)) {
+                    depth++;
+                    continue;
+                }
+                if (")".equals(text)) {
+                    depth--;
+                    continue;
+                }
+            }
+
+            if (depth == 0
+                    && token.getKind() == SqlScanner.Kind.WORD
+                    && token.isWord(source, "SELECT")) {
+                return source.substring(0, token.getEnd())
+                        + " /*" + optimizerHint + "*/ "
+                        + source.substring(token.getEnd());
+            }
+        }
+
+        throw new IllegalArgumentException(
+                "Top-level SELECT not found for optimizerHint");
     }
 
     private void validateAlias(String alias) {

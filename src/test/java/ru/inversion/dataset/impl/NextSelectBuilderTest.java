@@ -266,4 +266,45 @@ public class NextSelectBuilderTest {
                 .queryAlias("q where 1=1");
     }
 
+    @Test public void optimizerHintIsInsertedAfterTopLevelSelect() {
+        NextSelectBuilder b =
+                new NextSelectBuilder("select id from client", SqlDialectFactory.ORACLE);
+        b.optimizerHint("+ index(client idx_client)");
+
+        String sql = b.buildSql();
+
+        assertTrue(sql, sql.contains(
+                "select /*+ index(client idx_client)*/  id from client"));
+    }
+
+    @Test public void optimizerHintTargetsOuterSelectWhenAliasWrapsSource() {
+        NextSelectBuilder b =
+                new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
+        b.queryAlias("q");
+        b.optimizerHint("+ test_hint");
+
+        String sql = b.buildSql();
+
+        assertTrue(sql, sql.startsWith("SELECT /*+ test_hint*/  q.* FROM ("));
+        assertTrue(sql, sql.contains("select id from client"));
+    }
+
+    @Test public void optimizerHintSkipsSelectInsideCte() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "with x as (select id from client) select id from x",
+                SqlDialectFactory.POSTGRES);
+        b.optimizerHint("+ outer_hint");
+
+        String sql = b.buildSql();
+
+        assertTrue(sql, sql.contains(
+                "with x as (select id from client) select /*+ outer_hint*/  id from x"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void optimizerHintRejectsCommentTerminator() {
+        new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)
+                .optimizerHint("+ bad */ delete");
+    }
+
 }
