@@ -2353,24 +2353,50 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          if( dataReader != null )
             return;
 
-         final SelectBuilder ssb = getSelectBuilder();
+         if( S.isNotNullOrEmpty(getOptimizerHint()) )
+            throw new UnsupportedOperationException(
+                    "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
+         if( S.isNotNullOrEmpty(getQueryAlias()) )
+            throw new UnsupportedOperationException(
+                    "queryAlias is not supported by the PreparedSql pipeline");
 
-         ssb.hint       ( getOptimizerHint() );
+         NextSelectBuilder base =
+                 new NextSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
 
-//               .addPredicat( autoFilter         )
-//               .addPredicat( getWherePredicat() );
-//
-//            if( !ignoreFilter )
-//                 ssb.addPredicat( filters.values().stream().map( (f)->f.getFilterStr() ).collect( Collectors.toList() ) );
+         for( PredicateItem item : predicates.values() ) {
+            if( ignoreFilter && item.isFilter() )
+               continue;
+            if( item.getExpression() != null )
+               throw new UnsupportedOperationException(
+                       "ISQLExpression predicates in aggregator are not yet supported");
+            base.addPredicate( item.getFilterStr() );
+         }
 
-         if(!predicates.isEmpty() )
-            predicates.values().stream().filter(item -> !ignoreFilter || !item.isFilter()).map(i->i.getFilterStr()).forEach( s->ssb.addPredicat(s) );
+         StringBuilder sql = new StringBuilder("SELECT ");
+         int index = 0;
+         for( Triplet<String, AggrFuncEnum, String> aggregate : aggrList ) {
+            if( index++ > 0 )
+               sql.append(", ");
 
-         //ssb.addPredicat(predicateList);
+            if( aggregate.getSecond() != AggrFuncEnum.NONE )
+               sql.append( aggregate.getSecond() ).append(' ');
 
-         aggrList.forEach( (p)->ssb.addAggregator( p.getFirst(), p.getSecond(), p.third ) );
+            sql.append('(')
+               .append( aggregate.getFirst() )
+               .append(") ")
+               .append( aggregate.third );
+         }
 
-         dataReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), ssb.build(), AggrRSMapper.instance, null, false );
+         sql.append(" FROM (")
+            .append( base.buildSql() )
+            .append(") arslt");
+
+         PreparedSql preparedSql =
+                 new SqlSelect( sql.toString(), getTaskContextForUse().dialect() ).prepare();
+
+         dataReader = new JDBCDataReader<>(
+                 getTaskContextForUse().getConnection(),
+                 preparedSql, AggrRSMapper.instance, null, false );
       }
 
       /** */
