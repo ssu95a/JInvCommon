@@ -1625,16 +1625,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          {
             StringBuilder sb = new StringBuilder( );
 
-            SelectBuilder selectBuilder = getSelectBuilder();
-
-            String sqlMark = isSupportMark( ) ? getMarkSQLPart( ) : null;
-
-            if( sqlMark != null )
-               selectBuilder.mark( sqlMark );
-            else
-            if( isSupportMark( ) )
-               selectBuilder.mark(" 0 ");
-
             idPropertyList.forEach( (IEntityProperty p) -> {
 
                String column = p.getColumnInfo().getName();
@@ -1647,14 +1637,17 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             sb.append("null is null");
 
-            selectBuilder.addPredicat( sb.toString() );
+            NextSelectBuilder builder =
+                    new NextSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
+            builder.addPredicate( sb.toString() );
 
-            // Сохраняем структуру legacy SELECT, меняем только JDBC-подготовку.
-            String sql = selectBuilder.build();
-            SqlDialect dialect = getTaskContextForUse().dialect();
-            PreparedSql plan = new SqlSelect(sql, dialect).prepare();
-            refreshCurrentRowSQL = sql;
-            refreshCurrentRowPreparedSql = plan;
+            if( isSupportMark() ) {
+               String mark = getMarkSQLPart();
+               builder.mark( mark == null ? "0" : mark );
+            }
+
+            refreshCurrentRowSQL = builder.buildSql();
+            refreshCurrentRowPreparedSql = builder.prepare();
          }
 
          try (JDBCDataReader<P> recordReader = new JDBCDataReader<>(
