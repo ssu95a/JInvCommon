@@ -4,8 +4,7 @@ import ru.inversion.dataset.IDataReader;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.IRowMapper;
 import ru.inversion.dataset.impl.JDBCDataReader;
-import ru.inversion.dataset.parser.ExprInfo;
-import ru.inversion.dataset.parser.SQLParser;
+import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.meta.IEntityMetaData;
 import ru.inversion.meta.IEntityProperty;
@@ -13,6 +12,8 @@ import ru.inversion.tc.TCStorage;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
+import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.select.SqlSelect;
 
 import javax.persistence.NamedNativeQuery;
 import java.sql.Connection;
@@ -227,7 +228,13 @@ public class RSUtils {
 
             //ArrayList f;
 
-            final JDBCDataReader<? extends P> dataReader = new JDBCDataReader<>( connection, strSQL, null, clazz, false );
+            PreparedSql sql = new SqlSelect(
+                    strSQL,
+                    TCStorage.INSTANCE().getByConnection(connection).dialect()
+            ).prepare();
+
+            final JDBCDataReader<? extends P> dataReader =
+                    new JDBCDataReader<>( connection, sql, null, clazz, false );
             dataReader.executeQuery( parameters );
 
             return U.<P>iterable( (Iterator<P>)IDataReader.iterator( dataReader, 50 ));
@@ -263,7 +270,13 @@ public class RSUtils {
      */
     public static <P> Iterator<P> createIterator( Connection connection, IRowMapper<P> rsMapper, String strSQL, IParameters parameters ) {
         try {
-            JDBCDataReader<P> dataReader = new JDBCDataReader<>( connection, strSQL, rsMapper, null, false );
+            PreparedSql sql = new SqlSelect(
+                    strSQL,
+                    TCStorage.INSTANCE().getByConnection(connection).dialect()
+            ).prepare();
+
+            JDBCDataReader<P> dataReader =
+                    new JDBCDataReader<>( connection, sql, rsMapper, null, false );
             dataReader.executeQuery( parameters );
             return IDataReader.iterator( dataReader,50);
         }
@@ -306,9 +319,10 @@ public class RSUtils {
     public static <P> Iterable<P> createIterable( Connection connection, Class<? extends P> entityClass, String strWhere, String strOrderBy, IParameters parameters) {
 
         try {
-        
+
             Objects.requireNonNull( entityClass, "entityClass is null");
-            
+
+            SqlDialect dialect = TCStorage.INSTANCE().getByConnection(connection).dialect();
             String strSQL = null;
 
             NamedNativeQuery nnq = entityClass.getAnnotation(NamedNativeQuery.class);
@@ -317,67 +331,38 @@ public class RSUtils {
 
             if( strSQL == null ) {
 
-                IEntityMetaData<? extends P> entityMetaData = EntityMetadataFactory.getEntityMetaData( entityClass );
+                IEntityMetaData<? extends P> entityMetaData =
+                        EntityMetadataFactory.getEntityMetaData( entityClass );
 
-                Function< IEntityProperty, String > colMapper = new Function< IEntityProperty, String >() {
+                Function<IEntityProperty, String> colMapper = ec -> {
+                    if( ec.getColumnInfo().getQueryExpr() == null )
+                        return ec.getColumnName();
 
-                    @Override
-                    public String apply( IEntityProperty ec ) {
-
-                        if( ec.getColumnInfo().getQueryExpr() == null )
-                            return ec.getColumnName();
-
-                        return ec.getColumnInfo().makeQueryExpr( TCStorage.INSTANCE().getByConnection(connection).dialect() );
-                    }
+                    return ec.getColumnInfo().makeQueryExpr( dialect );
                 };
 
                 strSQL = entityMetaData
                         .getColumnsMap()
                         .values()
                         .stream()
-                        //.map( ( IEntityProperty p)->p.getColumnInfo().getName() )
                         .map( colMapper )
-                        .collect( Collectors.joining( ",", "SELECT ", " FROM " + entityMetaData.getTableName() ) );
-                
-                StringBuilder sb = new StringBuilder(strSQL);
-                
-                if( !S.isNullOrEmpty( strWhere ) )
-                    sb.append("\nwhere ").append(strWhere);
-                if( !S.isNullOrEmpty( strOrderBy ) )
-                    sb.append("\n order by ").append(strOrderBy);
-                
-                strSQL = sb.toString();
+                        .collect( Collectors.joining(
+                                ",",
+                                "SELECT ",
+                                " FROM " + entityMetaData.getTableName()
+                        ) );
             }
-            else 
-            {
-                if( !S.isNullOrEmpty( strWhere ) )
-                {
-                    SQLParser prs      = new SQLParser( strSQL );
-                    ExprInfo  exprInfo = prs.analyze( );
 
-                    StringBuilder sb = new StringBuilder();
+            if( !S.isNullOrEmpty(strWhere) || !S.isNullOrEmpty(strOrderBy) ) {
+                SqlSelect select = new SqlSelect( strSQL, dialect );
 
-                    if( exprInfo.isMysterious() ) {   
-                    
-                        sb.append("select * from (").append( strSQL ).append(") qrslt where ").append(strWhere);
-                        
-                    } else {
-                        
-                        if( exprInfo.isHasWhere() )
-                            sb.append( strSQL ).append(" and (").append(strWhere).append(")");
-                        else
-                            sb.append( strSQL ).append(" where ").append(strWhere);
-                    }
+                if( !S.isNullOrEmpty(strWhere) )
+                    select.setPredicates( Collections.singletonList(strWhere) );
 
-                    if( strOrderBy != null )
-                        sb.append("\n order by ").append(strOrderBy);
-                    
-                    strSQL = sb.toString();
-                }
-                else {
-                    if( !S.isNullOrEmpty( strOrderBy ) )
-                        strSQL = strSQL + "\n order by " + strOrderBy;
-                }
+                if( !S.isNullOrEmpty(strOrderBy) )
+                    select.setOrderBy( strOrderBy );
+
+                strSQL = select.buildSql();
             }
 
             return createIterable( connection, entityClass, strSQL, parameters );
@@ -387,6 +372,7 @@ public class RSUtils {
         }
         return null;
     }
+
 
     /** */
     static public <T> IDataReader<T> createResultSetDataReader( ResultSet rs, Class<T> tClass ) {
