@@ -446,18 +446,30 @@ public interface ISQLDataSet<P> extends IDataSet<P>, ISQLExpression {
      */
     default int setFilter( ISQLExpression sqlExpression, boolean fixed, boolean append ) throws DataSetException {
 
-        if( sqlExpression == null || sqlExpression.getSQL() == null )
+        if( sqlExpression == null || S.isNullOrEmpty(sqlExpression.getSQL()) )
             return 0;
 
-        try {
+        int filterId = g_filterIDSequence.incrementAndGet();
+        final Map<Integer, PredicateItem> prdcts = predicates();
 
-            SQLParser sp = new SQLParser( sqlExpression.getSQL()  );
-            String optimizeSql = sp.prepareSqlWithParametersValue( sqlExpression );
-
-            return setFilter( optimizeSql, fixed, append );
-        } catch( Throwable th ) {
-            throw new DataSetException( Tags.PRODUCT_LABEL + "setFilter, SQLExpression version", th );
+        if( fixed ) {
+            if( !append )
+                prdcts.entrySet().removeIf( t -> t.getValue().isFixed() );
         }
+        else {
+            if( !append )
+                prdcts.entrySet().removeIf( t -> t.getValue().isTemporary() );
+        }
+
+        prdcts.put(
+                filterId,
+                new PredicateItem(
+                        sqlExpression,
+                        fixed ? PredicateTypeEnum.FIXED_FILTER : PredicateTypeEnum.TEMPORARY_FILTER
+                )
+        );
+
+        return filterId;
     }
 
 
