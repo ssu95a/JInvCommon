@@ -426,6 +426,14 @@ public class SQLParser implements Iterable<SQLItem>, ReaderScaner.IScanerListene
 		return uncommentOrderBy( sb.toString() );
 	}
 
+	/**
+	 * Compatibility wrapper.
+	 * SQL value formatting lives in SqlValueFormatter.
+	 */
+	public static String value2Str( Object value ) {
+		return SqlValueFormatter.format(value);
+	}
+
 	/** */
 //	private static String to_date( )
 //	{
