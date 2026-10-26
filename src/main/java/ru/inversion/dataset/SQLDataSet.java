@@ -79,27 +79,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected String		queryAlias;
 
 
-   /*
-    * afterOrderBy zone
-    * то что добавляется в запрос после Order By
-    */
-
-   /**
-    * Ограничение на кол-во выбираемых данных
-    */
-   private int             limitRows = 0,
-
-   /**
-    * Смещение от начала
-    */
-   offsetRows = 0;
-
-   /**
-    * Выражение которое, дописывается после order by
-    * забарывает limit и offset
-    **/
-   private String          afterOrderBy;
-
    /**
     * Имя запроса, если DataSet строится на аннотации NamedNativeQuery
     */
@@ -475,60 +454,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setNativeQueryName(nqn);
       return this;
    }
-
-   /**
-    * Возвращает заданное ограничение на кол-во получаемых данных в выборке
-    */
-   public int getLimitRows( ) {
-      return limitRows;
-   }
-   public void setLimitRows( int limit ) {
-
-      if( this.limitRows != limit )
-      {
-         this.limitRows = limit;
-         if( S.isNullOrEmpty(afterOrderBy) )
-            needReCreateReader();
-      }
-   }
-
-   /**
-    * Возвращает смещение в выборке при
-    */
-   public int getOffsetRows( ) {
-      return offsetRows;
-   }
-   public void setOffsetRows( int offset ) {
-
-      if( this.offsetRows != offset )
-      {
-         this.offsetRows = offset;
-         if( S.isNullOrEmpty(afterOrderBy) )
-            needReCreateReader();
-      }
-   }
-
-   /**
-    * Получить часть запроса, которая добавляется в SQL выражение,
-    * после order by
-    * */
-   public String getAfterOrderBy( ) {
-      return afterOrderBy;
-   }
-   public void setAfterOrderBy( String v ) {
-
-      String newValue = ( v == null ? null : v.trim() );
-
-      if( S.isNullOrEmpty( newValue )  )
-         newValue = null;
-
-      if( !U.equals( newValue, this.afterOrderBy ) )
-      {
-         this.afterOrderBy = newValue;
-         needReCreateReader( );
-      }
-   }
-
 
    /**
     * Метод сброса флага состояния о том, что SQL выражение изменилось.
@@ -1098,10 +1023,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if (S.isNotNullOrEmpty(getQueryAlias()))
          throw new UnsupportedOperationException(
                  "queryAlias is not supported by the PreparedSql pipeline");
-      if (S.isNotNullOrEmpty(getAfterOrderBy()) || getLimitRows() != 0 || getOffsetRows() != 0)
-         throw new UnsupportedOperationException(
-                 "Legacy afterOrderBy/limitRows/offsetRows modifiers are not supported");
-
       NextSelectBuilder builder = createNextSelectBuilder();
       PreparedSql sql = builder.prepare();
       preparedReaderParameters = builder.parameters(mainSqlParameters);
