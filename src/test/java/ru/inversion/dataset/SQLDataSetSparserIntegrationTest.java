@@ -3,6 +3,7 @@ package ru.inversion.dataset;
 import org.junit.Test;
 import ru.inversion.dataset.impl.NextSelectBuilder;
 import ru.inversion.db.dialect.SqlDialectFactory;
+import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 
 import static org.junit.Assert.*;
@@ -99,6 +100,45 @@ public class SQLDataSetSparserIntegrationTest {
         NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         builder.addPredicate(ds.predicates().get(id).getExpression());
         assertNull(builder.parameters(values(ds)).getParameter("branch"));
+    }
+
+    @Test
+    public void filterItemValueRemainsBound() throws Exception {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+        final String value = "A%' OR 1=1 --";
+
+        IFilterItem item = new IFilterItem() {
+            @Override public String getColumn() { return "name"; }
+            @Override public Object getValue() { return value; }
+            @Override public Class getType() { return String.class; }
+            @Override public IFilterItem getProxyFor() { return null; }
+        };
+
+        int id = ds.setFilter(
+                java.util.Collections.singletonList(item),
+                false,
+                false
+        );
+
+        ISQLDataSet.PredicateItem predicate = ds.predicates().get(id);
+        assertNotNull(predicate);
+        assertNotNull(predicate.getExpression());
+        assertFalse(predicate.getFilterStr().contains(value));
+
+        NextSelectBuilder builder =
+                new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
+        builder.addPredicate(predicate.getExpression());
+
+        PreparedSql prepared = builder.prepare();
+        assertFalse(prepared.getSql().contains(value));
+        assertEquals(1, prepared.getParameters().size());
+
+        Parameter parameter = prepared.getParameters().get(0);
+        assertEquals(Parameter.Kind.NAMED, parameter.getKind());
+        assertEquals(
+                value,
+                builder.parameters(values(ds)).getParameter(parameter.getName())
+        );
     }
 
     private static IParameters values(SQLDataSet<?> ds) {
