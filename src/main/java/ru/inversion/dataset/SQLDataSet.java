@@ -71,9 +71,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    protected String        nativeQueryName;
 
-   /** Имя native query было вычислено автоматически, а не задано явно. */
-   private boolean nativeQueryNameAutoDetected;
-
    /**
     * Коллекция предикатов
     */
@@ -241,7 +238,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if (getRowClass() != rowClass) {
          // Сначала проверяем инвариант базового DataSet: нельзя менять тип при загруженных строках.
          super.setRowClass(rowClass);
-         clearAutoDetectedNativeQueryName();
          needReCreateReader();
       }
    }
@@ -312,7 +308,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       // После явного вызова setter имя больше не считается автоматически выбранным,
       // в том числе когда оно совпадает с текущим.
-      nativeQueryNameAutoDetected = false;
       if( !Objects.equals( newNativeQueryName, this.nativeQueryName ) )
       {
          this.nativeQueryName = newNativeQueryName;
@@ -345,14 +340,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       needReCreateReader.setValue( true );
    }
 
-   /** Удаляем только автоматически определённое имя; явно заданное сохраняем. */
-   private void clearAutoDetectedNativeQueryName() {
-      if (nativeQueryNameAutoDetected) {
-         nativeQueryName = null;
-         nativeQueryNameAutoDetected = false;
-      }
-   }
-
    /**
     * Устанавливает TaskContext для досутпа к БД.
     * <p>
@@ -363,7 +350,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public void setTaskContext( TaskContext taskContext ) {
       if (this.taskContext != taskContext) {
          this.taskContext = taskContext;
-         clearAutoDetectedNativeQueryName();
          needReCreateReader();
       }
    }
@@ -907,7 +893,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    @Override
    public void setSQL( String strSQL ) {
       this.strSQL = strSQL;
-      clearAutoDetectedNativeQueryName();
       needReCreateReader();
    }
 
