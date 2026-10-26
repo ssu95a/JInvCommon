@@ -721,7 +721,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /**
     * Получение текущей строки SQL на которой строится выражение получения данных.
     */
-   private String internalGetSQL( ) {
+   protected String internalGetSQL( ) {
 
       String sql = getSQL( );
 

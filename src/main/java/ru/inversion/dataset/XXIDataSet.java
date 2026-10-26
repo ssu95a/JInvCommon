@@ -15,6 +15,7 @@ import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.utils.lstn.IListenerManConsumer;
 import ru.inversion.utils.lstn.IListenerManEvent;
 import ru.inversion.utils.lstn.ListenerManFactory;
@@ -956,48 +957,83 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             if( dataReader != null )
                 return;
 
-            SelectBuilder ssb = getSelectBuilder( );
+            if( S.isNotNullOrEmpty(getOptimizerHint()) )
+                throw new UnsupportedOperationException(
+                        "optimizerHint is not supported by the PreparedSql pipeline; put the hint in SQL");
+            if( S.isNotNullOrEmpty(getQueryAlias()) )
+                throw new UnsupportedOperationException(
+                        "queryAlias is not supported by the PreparedSql pipeline");
 
-            StringBuilder sb = new StringBuilder();
+            String[] key = markDescriptor.getMarkKeyColumns();
+            String qualifier = S.isNullOrEmpty(aggrTable) ? null : aggrTable;
+            String prefix = qualifier == null ? "" : qualifier + ".";
 
-            String[] markKeyColumns = markDescriptor.getMarkKeyColumns();
+            StringBuilder markPredicate = new StringBuilder();
 
-            String fromObj = S.isNullOrEmpty(aggrTable) ? ssb.getFromObj() : aggrTable;
+            if( markDescriptor.getMarkMode() == MRK )
+                markPredicate.append("exists ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id and a$.RMRKROWID = ")
+                             .append(prefix).append(key[0]).append(")");
+            else if( key.length == 1 ) {
+                if( markDescriptor.getMarkMode() == MRK_ID )
+                    markPredicate.append("exists ( select 1 from v_jf_mrk_id a$ where a$.idmarker = :jinv_marker_id and a$.idrow = ")
+                                 .append(prefix).append(key[0]).append(")");
+                else if( markDescriptor.getMarkMode() == MRK_U )
+                    markPredicate.append("exists ( select 1 from v_jf_mrk_u a$ where a$.idmarker = :jinv_marker_id and a$.UROW = ")
+                                 .append(prefix).append(key[0]).append(")");
+            }
+            else if( key.length > 1 )
+                markPredicate.append("exists ( select 1 from v_jf_mrk_id2 a$ where idmarker = :jinv_marker_id")
+                             .append(" and a$.IDROW = ").append(prefix).append(key[0])
+                             .append(" and a$.IDAROW = ").append(prefix).append(key[1])
+                             .append(")");
 
-            if ( markDescriptor.getMarkMode() == MRK )
-                sb.append( " exists ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id and a$.RMRKROWID = ").append( fromObj ).append( "." ).append( markDescriptor.getMarkKeyColumns()[0]).append( ")");
-            else
-                if( markKeyColumns.length > 0 ) {
+            StringBuilder sql = new StringBuilder("SELECT ");
+            int index = 0;
 
-                    if ( markKeyColumns.length == 1 ) {
+            for( Triplet<String, AggrFuncEnum, String> aggregate : aggrList ) {
+                if( index++ > 0 )
+                    sql.append(", ");
 
-                        if( markDescriptor.getMarkMode() == MRK_ID )
-                            sb.append(" exists ( select 1 from v_jf_mrk_id a$ where a$.idmarker = :jinv_marker_id and a$.idrow = ").append( fromObj ).append( ".").append( markKeyColumns[0] ).append(")");
-                        else
-                            if ( markDescriptor.getMarkMode() == MRK_U ) {
-                                sb.append(" exists ( select 1 from v_jf_mrk_u a$ where a$.idmarker = :jinv_marker_id and a$.UROW = ").append( fromObj ).append( ".").append( markKeyColumns[0] ).append(")");
-                        }
-                    }
-                    else {
-                        sb.append(" exists ( select 1 from v_jf_mrk_id2 a$ where idmarker = :jinv_marker_id")
-                          .append(" and a$.IDROW = " ).append( fromObj ).append(".")
-                          .append(markKeyColumns[0])
-                          .append(" and a$.IDAROW = ").append( fromObj ).append(".")
-                          .append(markKeyColumns[1])
-                          .append(")");
-                    }
+                if( aggregate.getSecond() != AggrFuncEnum.NONE )
+                    sql.append( aggregate.getSecond() ).append(' ');
+
+                sql.append('(')
+                   .append( aggregate.getFirst() )
+                   .append(") ")
+                   .append( aggregate.third );
             }
 
+            if( S.isNullOrEmpty(aggrTable) ) {
+                NextSelectBuilder base =
+                        new NextSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
 
-            ssb.aggrTable  ( aggrTable    ) // fromObj
-               .addPredicat( predicatList )
-               .addPredicat( sb.toString());
+                for( String predicate : predicatList )
+                    base.addPredicate(predicate);
 
-            aggrList.forEach( (p)->ssb.addAggregator( p.getFirst(), p.getSecond(), p.third ) );
+                base.addPredicate(markPredicate.toString());
 
-            dataReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), ssb.build(), AggrRSMapper.instance, null, false );
+                sql.append(" FROM (")
+                   .append(base.buildSql())
+                   .append(") arslt");
+            }
+            else {
+                sql.append(" FROM ").append(aggrTable)
+                   .append(" WHERE null is null");
 
+                for( String predicate : predicatList )
+                    sql.append(" AND (").append(predicate).append(')');
+
+                sql.append(" AND (").append(markPredicate).append(')');
+            }
+
+            PreparedSql preparedSql =
+                    new SqlSelect( sql.toString(), getTaskContextForUse().dialect() ).prepare();
+
+            dataReader = new JDBCDataReader<>(
+                    getTaskContextForUse().getConnection(),
+                    preparedSql, AggrRSMapper.instance, null, false );
         }
+
         /** */
         @Override
         public Map<String,Object> getValues() {
@@ -1019,18 +1055,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
             prepareReader( );
 
-            dataReader.executeQuery (
-                new IParameters() {
-                    @Override
-                    public Object getParameter( String parameterName ) {
-                        return getParameterValue( parameterName );
-                    }
-                    @Override
-                    public Object getParameter( int parameterIndex ) {
-                        return getParameterValue( parameterIndex );
-                    }
-                }
-            );
+            dataReader.executeQuery( mainSqlParameters );
 
             values = (Map<String,Object>)dataReader.getNextPage(-1).get(0);
 
