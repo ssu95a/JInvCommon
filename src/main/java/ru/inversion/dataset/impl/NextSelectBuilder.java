@@ -38,6 +38,7 @@ public final class NextSelectBuilder {
     private final List<Part> predicates = new ArrayList<>();
     private Part sorting;
     private String mark;
+    private String queryAlias;
 
     private PreparedSql prepared;
     // Ключ — индекс среди POSITIONAL в финальном PreparedSql, а НЕ JDBC position.
@@ -68,6 +69,18 @@ public final class NextSelectBuilder {
         String sql = Objects.requireNonNull(expression.getSQL(), "expression.sql");
         if (sql.trim().isEmpty()) throw new IllegalArgumentException("Empty predicate expression");
         predicates.add(new Part(sql, expression));
+        invalidate();
+        return this;
+    }
+
+    /**
+     * Оборачивает исходный SELECT внешним SELECT с alias.
+     * Predicates, mark и ORDER BY применяются к внешнему SELECT.
+     */
+    public NextSelectBuilder queryAlias(String alias) {
+        String value = alias == null ? null : alias.trim();
+        queryAlias = value == null || value.isEmpty() ? null : value;
+        if (queryAlias != null) validateAlias(queryAlias);
         invalidate();
         return this;
     }
@@ -209,7 +222,7 @@ public final class NextSelectBuilder {
 
     private SqlSelect createSelect(boolean withLocalBindings,
                                    Map<String, LocalPositional> bindings) {
-        SqlSelect select = new SqlSelect(sourceSql, dialect);
+        SqlSelect select = new SqlSelect(sourceForSelect(), dialect);
         List<String> predicatesSql = new ArrayList<>(predicates.size());
         int id = 0;
         for (Part part : predicates) {
@@ -246,8 +259,23 @@ public final class NextSelectBuilder {
         return text.toString();
     }
 
+    private String sourceForSelect() {
+        if (queryAlias == null) return sourceSql;
+        return "SELECT " + queryAlias + ".* FROM (\n"
+                + sourceSql + "\n) " + queryAlias;
+    }
+
+    private void validateAlias(String alias) {
+        List<SqlScanner.Token> tokens = scanner.scan(alias);
+        if (tokens.size() != 1
+                || (tokens.get(0).getKind() != SqlScanner.Kind.WORD
+                && tokens.get(0).getKind() != SqlScanner.Kind.QUOTED_IDENTIFIER)) {
+            throw new IllegalArgumentException("queryAlias must be one SQL identifier");
+        }
+    }
+
     private void checkReservedParameters() {
-        checkReserved(sourceSql);
+        checkReserved(sourceForSelect());
         for (Part part : predicates) checkReserved(part.sql);
         if (sorting != null) checkReserved(sorting.sql);
         if (mark != null) checkReserved(mark);

@@ -247,4 +247,23 @@ public class NextSelectBuilderTest {
         assertTrue(sql.contains("order by 1"));
     }
 
+    @Test public void queryAliasWrapsSourceAndPredicatesUseOuterAlias() {
+        NextSelectBuilder b =
+                new NextSelectBuilder("select id, name from client", SqlDialectFactory.POSTGRES);
+        b.queryAlias("q");
+        b.addPredicate("q.id = :id");
+
+        PreparedSql sql = b.prepare();
+
+        assertTrue(sql.getSql().contains("SELECT q.* FROM ("));
+        assertTrue(sql.getSql().contains(") q"));
+        assertTrue(sql.getSql().contains("q.id = ?"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void queryAliasMustBeSingleIdentifier() {
+        new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)
+                .queryAlias("q where 1=1");
+    }
+
 }

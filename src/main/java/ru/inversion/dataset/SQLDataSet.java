@@ -71,6 +71,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    private   String        orderBYExpression;
 
    /**
+    * Alias внешнего SELECT.
+    */
+   protected String        queryAlias;
+
+   /**
     * Имя запроса, если DataSet строится на аннотации NamedNativeQuery
     */
    protected String        nativeQueryName;
@@ -300,6 +305,33 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    public SQLDataSet< P > pageSize( int pageSize ) {
       setPageSize(pageSize); return this;
+   }
+
+   /**
+    * Устанавливает alias внешнего SELECT.
+    */
+   public void setQueryAlias( String qa ) {
+
+      String newQueryAlias = qa == null ? null : qa.trim();
+
+      if( S.isNullOrEmpty(newQueryAlias) )
+         newQueryAlias = null;
+
+      if( !Objects.equals(newQueryAlias, queryAlias) ) {
+         queryAlias = newQueryAlias;
+         needReCreateReader();
+      }
+   }
+
+   /** Возвращает alias внешнего SELECT. */
+   public String getQueryAlias() {
+      return queryAlias;
+   }
+
+   /** Fluent version of setQueryAlias. */
+   public SQLDataSet<P> queryAlias( String queryAlias ) {
+      setQueryAlias(queryAlias);
+      return this;
    }
 
    /** */
@@ -730,6 +762,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected NextSelectBuilder createNextSelectBuilder( boolean ignoreFilters ) {
       SqlDialect dialect = getTaskContextForUse().dialect();
       NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
+      builder.queryAlias(getQueryAlias());
       for (PredicateItem item : predicates.values()) {
          if (ignoreFilters && item.isFilter())
             continue;
@@ -1572,6 +1605,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       try {
 
+         String qa = getQueryAlias();
+
          StringBuilder sb = new StringBuilder( );
 
          for( IFilterItem fi : filterList ) {
@@ -1593,7 +1628,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                sb.append(" AND ");
 
             if( !S.isNullOrEmpty(column) )
-               column = " " + column + " ";
+            {
+               if( S.isNotNullOrEmpty(qa) )
+                  column = " " + qa + "." + column + " ";
+               else
+                  column = " " + column + " ";
+            }
 
             {
                if( fi.isExpression() )
