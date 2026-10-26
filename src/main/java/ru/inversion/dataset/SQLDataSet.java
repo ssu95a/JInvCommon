@@ -952,54 +952,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setWherePredicat(wherePredicate, false );
    }
 
-   /** {@inheritDoc}
-    @Override
-    public String removeWherePredicat( int predicatId ) {
-
-    this.completeWherePredicate = null;
-
-    needReCreateReader( );
-
-    return this.wherePredicates.remove( predicatId );
-    }
-    */
-
-   /** {@inheritDoc}
-    public void setWherePredicat( ISQLExpression sqlExpression ) {
-
-    if( sqlExpression == null || S.isNullOrEmpty( sqlExpression.getSQL() ) )
-    setWherePredicat( (String)null );
-    else
-    {
-    String predicat = sqlExpression.getSQL();
-
-    if( predicat.indexOf('?') > 0 || predicat.indexOf(':') > 0 ) {
-
-    SQLParser  sp = new SQLParser( predicat );
-    predicat = sp.prepareSqlWithParametersValue( sqlExpression );
-    }
-
-    setWherePredicat(predicat);
-    }
-    }
-    */
-
-   /** {@inheritDoc}
-    @Override
-    public String getWherePredicat( ) {
-
-    if( completeWherePredicate == null && !predicates.isEmpty() ) {
-
-    //if( !wherePredicates.isEmpty() )
-    completeWherePredicate =
-    predicates.values().stream()
-    .filter(e->e.getType()==PredicateTypeEnum.WHERE_PREDICATE).map(e->e.getFilterStr()).collect( Collectors.joining( " ) and ( ", "(", ")") );
-    }
-
-    return completeWherePredicate;
-    }
-    */
-
    /**
     * Версия метода setWherePredicat(String) в стиле "Fluent interface".
     * <p>
