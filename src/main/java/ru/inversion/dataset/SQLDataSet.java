@@ -409,7 +409,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    /**
-    * Устанавливает TaskContext для досутпа к БД.
+    * Устанавливает TaskContext для доступа к БД.
     * <p>
     * @param taskContext
     *
