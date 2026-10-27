@@ -177,6 +177,26 @@ public class SqlScannerTest {
     }
 
     @Test
+    public void classifiesKnownSqlKeywordsWithoutChangingWordTokens() {
+        String sql = "SeLeCt customer FROM orders WHERE \"order\" = 1";
+        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
+
+        assertEquals(WORD, tokens.get(0).getKind());
+        assertEquals(SqlKeyword.SELECT, tokens.get(0).keyword(sql));
+
+        SqlScanner.Token customer = tokens.get(2);
+        assertEquals(WORD, customer.getKind());
+        assertNull(customer.keyword(sql));
+
+        assertEquals(SqlKeyword.FROM, tokens.get(4).keyword(sql));
+        assertEquals(SqlKeyword.WHERE, tokens.get(8).keyword(sql));
+
+        SqlScanner.Token quotedOrder = tokens.get(10);
+        assertEquals(QUOTED_IDENTIFIER, quotedOrder.getKind());
+        assertNull(quotedOrder.keyword(sql));
+    }
+
+    @Test
     public void returnsImmutableTokensAndList() {
         List<SqlScanner.Token> tokens = POSTGRES.scan("select 1");
         try {
