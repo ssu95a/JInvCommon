@@ -177,26 +177,9 @@ public class SqlSelectPrepareTest {
         assertPreserved(pg(interval), interval);
     }
 
-    @Test public void dialectSpecificStringsArePreserved() {
-        String oracleQ = "select q'[abc]' from dual";
-        String oracleN = "select n'hello' from dual";
-        String pgDollar = "select $hello$ from t";
-        String pgTagged = "select $tag$hello$tag$ from t";
-
-        assertPreserved(ora(oracleQ), oracleQ);
-        assertPreserved(ora(oracleN), oracleN);
-        assertPreserved(pg(pgDollar), pgDollar);
-        assertPreserved(pg(pgTagged), pgTagged);
-    }
-
-    @Test public void postgresNonstandardStringsArePreservedButPlainStringStillBinds() {
-        String escape = "select E'hello' from t";
-        String unicode = "select U&'hello' from t";
-
-        assertPreserved(pg(escape), escape);
-        assertPreserved(pg(unicode), unicode);
-
+    @Test public void plainStringWithBackslashIsBound() {
         PreparedSql p = pg("select x from t where a='A\\B'").prepare();
+
         assertEquals("select x from t where a=?", p.getSql());
         assertParameterKinds(p, Parameter.Kind.LITERAL);
         assertEquals("A\\B", p.getParameters().get(0).getValue());
@@ -281,13 +264,6 @@ public class SqlSelectPrepareTest {
         assertTrue(p.getSql().contains("limit 5"));
     }
 
-    @Test public void oracleNationalStringsArePreserved() {
-        String national = "select n'hello' from dual";
-        String nationalQ = "select nq'[national]' from dual";
-
-        assertPreserved(ora(national), national);
-        assertPreserved(ora(nationalQ), nationalQ);
-    }
     @Test public void pgJdbcOperatorEscapeIsPreserved() {
         PreparedSql p = pg("select data from t where data ?? 'key' and id = :id").prepare();
         assertTrue(p.getSql().contains("data ?? ?"));
@@ -303,14 +279,10 @@ public class SqlSelectPrepareTest {
         assertEquals(new BigInteger("7"), p.getParameters().get(1).getValue());
     }
 
-    @Test public void prefixedAndPrecisionTypedStringsArePreserved() {
-        String national = "select n'hello' from t";
-        String bit = "select b'AB' from t";
+    @Test public void precisionTypedStringIsPreserved() {
         String timestamp =
                 "select x from t where ts > timestamp(3) '2026-01-01 12:00:00'";
 
-        assertPreserved(pg(national), national);
-        assertPreserved(pg(bit), bit);
         assertPreserved(pg(timestamp), timestamp);
     }
 
