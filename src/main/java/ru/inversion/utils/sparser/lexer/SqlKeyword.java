@@ -1,5 +1,9 @@
 package ru.inversion.utils.sparser.lexer;
 
+import ru.inversion.utils.U;
+
+import java.util.TreeMap;
+
 /**
  * SQL words that have structural meaning for sparser.
  *
@@ -62,6 +66,19 @@ public enum SqlKeyword {
     WITH,
     YEAR;
 
+    private static final TreeMap<String,SqlKeyword> BY_NAME =
+            new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+
+    static {
+        for( SqlKeyword keyword : values() )
+            BY_NAME.put(keyword.name(), keyword);
+    }
+
+    @SafeVarargs
+    public static boolean in( SqlKeyword keyword, SqlKeyword ... values ) {
+        return U.in(keyword, values);
+    }
+
     boolean matches(String source, int start, int end) {
         String text = name();
         return end - start == text.length()
@@ -69,21 +86,10 @@ public enum SqlKeyword {
     }
 
     static SqlKeyword of(String source, int start, int end) {
-        for (SqlKeyword keyword : values()) {
-            if (keyword.matches(source, start, end))
-                return keyword;
-        }
-        return null;
+        return BY_NAME.get(source.substring(start, end));
     }
 
     public static SqlKeyword of(String text) {
-        if (text == null)
-            return null;
-
-        for (SqlKeyword keyword : values()) {
-            if (keyword.name().equalsIgnoreCase(text))
-                return keyword;
-        }
-        return null;
+        return text == null ? null : BY_NAME.get(text);
     }
 }

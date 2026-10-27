@@ -155,13 +155,12 @@ final class SqlParameterizer {
 
     private boolean isOrderTerminator(List<SqlScanner.Token> tokens, int i) {
         SqlScanner.Token t = tokens.get(i);
-        return symbol(t, ";") || word(t, LIMIT) || word(t, OFFSET)
-                || word(t, FETCH) || word(t, UNION) || word(t, INTERSECT)
-                || word(t, EXCEPT) || word(t, MINUS)
-                || (word(t, FOR) && (wordAt(tokens, nextSignificant(tokens, i + 1), UPDATE)
-                || wordAt(tokens, nextSignificant(tokens, i + 1), SHARE)
-                || wordAt(tokens, nextSignificant(tokens, i + 1), KEY)
-                || wordAt(tokens, nextSignificant(tokens, i + 1), NO)));
+        return symbol(t, ";")
+                || in(keyword(t), LIMIT, OFFSET, FETCH, UNION, INTERSECT, EXCEPT, MINUS)
+                || (word(t, FOR) && in(
+                        keywordAt(tokens, nextSignificant(tokens, i + 1)),
+                        UPDATE, SHARE, KEY, NO
+                ));
     }
 
     /**
@@ -216,15 +215,13 @@ final class SqlParameterizer {
      * может остаться непараметризованной (false negative), но SQL не испортится.
      */
     private boolean isTypePrecisionName(List<SqlScanner.Token> tokens, int i) {
-        return wordAt(tokens, i, TIME) || wordAt(tokens, i, TIMESTAMP)
-                || wordAt(tokens, i, INTERVAL)
-                || wordAt(tokens, i, CURRENT_TIME)
-                || wordAt(tokens, i, CURRENT_TIMESTAMP)
-                || wordAt(tokens, i, LOCALTIME)
-                || wordAt(tokens, i, LOCALTIMESTAMP)
-                || wordAt(tokens, i, YEAR) || wordAt(tokens, i, MONTH)
-                || wordAt(tokens, i, DAY) || wordAt(tokens, i, HOUR)
-                || wordAt(tokens, i, MINUTE) || wordAt(tokens, i, SECOND);
+        return in(
+                keywordAt(tokens, i),
+                TIME, TIMESTAMP, INTERVAL,
+                CURRENT_TIME, CURRENT_TIMESTAMP,
+                LOCALTIME, LOCALTIMESTAMP,
+                YEAR, MONTH, DAY, HOUR, MINUTE, SECOND
+        );
     }
 
     private boolean isIdentifier(SqlScanner.Token lexeme) {
@@ -253,12 +250,8 @@ final class SqlParameterizer {
         if (prev.getKind() == WORD && prev.getEnd() == token.getStart())
             return false;
 
-        if (word(prev, DATE)
-                || word(prev, TIME)
-                || word(prev, TIMESTAMP)
-                || word(prev, INTERVAL)) {
+        if (in(keyword(prev), DATE, TIME, TIMESTAMP, INTERVAL))
             return false;
-        }
 
         return !isPrecisionTypedString(previous);
     }
@@ -324,6 +317,14 @@ final class SqlParameterizer {
         int i = from;
         while (i >= 0 && isTrivia(tokens.get(i).getKind())) i--;
         return i;
+    }
+
+    private SqlKeyword keyword(SqlScanner.Token token) {
+        return token == null ? null : token.keyword(source);
+    }
+
+    private SqlKeyword keywordAt(List<SqlScanner.Token> tokens, int i) {
+        return i >= 0 && i < tokens.size() ? keyword(tokens.get(i)) : null;
     }
 
     private boolean wordAt(List<SqlScanner.Token> tokens, int i, SqlKeyword keyword) {
@@ -426,12 +427,12 @@ final class SqlParameterizer {
         SqlScanner.Token n = tokens.get(next);
         return n.getKind() == SqlScanner.Kind.OPERATOR
                 || symbol(n, ")") || symbol(n, ",") || symbol(n, ";")
-                || word(n, AS) || word(n, FROM)
-                || word(n, ASC) || word(n, DESC) || word(n, NULLS)
-                || word(n, COLLATE)
-                || word(n, LIMIT) || word(n, OFFSET) || word(n, FETCH)
-                || word(n, AND) || word(n, OR) || word(n, ORDER)
-                || word(n, GROUP) || word(n, WHERE);
+                || in(
+                        keyword(n),
+                        AS, FROM, ASC, DESC, NULLS, COLLATE,
+                        LIMIT, OFFSET, FETCH,
+                        AND, OR, ORDER, GROUP, WHERE
+                );
     }
     private boolean word(SqlScanner.Token token, SqlKeyword keyword) {
         return token.isKeyword(source, keyword);

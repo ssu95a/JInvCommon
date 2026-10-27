@@ -197,6 +197,28 @@ public class SqlScannerTest {
     }
 
     @Test
+    public void sqlKeywordLookupIsCaseInsensitiveAndSupportsMembership() {
+        assertEquals(SqlKeyword.SELECT, SqlKeyword.of("select"));
+        assertEquals(SqlKeyword.SELECT, SqlKeyword.of("SeLeCt"));
+        assertNull(SqlKeyword.of("customer"));
+
+        assertTrue(SqlKeyword.in(
+                SqlKeyword.UNION,
+                SqlKeyword.UNION,
+                SqlKeyword.INTERSECT,
+                SqlKeyword.EXCEPT,
+                SqlKeyword.MINUS
+        ));
+        assertFalse(SqlKeyword.in(
+                SqlKeyword.WHERE,
+                SqlKeyword.UNION,
+                SqlKeyword.INTERSECT,
+                SqlKeyword.EXCEPT,
+                SqlKeyword.MINUS
+        ));
+    }
+
+    @Test
     public void returnsImmutableTokensAndList() {
         List<SqlScanner.Token> tokens = POSTGRES.scan("select 1");
         try {

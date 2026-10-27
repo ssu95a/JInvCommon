@@ -302,8 +302,7 @@ public final class SqlSelect {
             if (symbol(source, token, ")")) { depth--; continue; }
             if (depth != 0 || trivia(token)) continue;
 
-            if (word(i, UNION) || word(i, INTERSECT) ||
-                    word(i, EXCEPT) || word(i, MINUS)) {
+            if (in(keyword(i), UNION, INTERSECT, EXCEPT, MINUS)) {
                 compoundQuery = true;
             }
             boolean orderClause = orderClauseAt(i);
@@ -457,10 +456,11 @@ public final class SqlSelect {
     }
 
     private boolean tailAt(int i) {
-        return word(i, LIMIT) || word(i, OFFSET) ||
-                word(i, FETCH) || wordPair(i, FOR, UPDATE) ||
-                wordPair(i, FOR, SHARE) || wordPair(i, FOR, KEY) ||
-                wordPair(i, FOR, NO);
+        return in(keyword(i), LIMIT, OFFSET, FETCH)
+                || wordPair(i, FOR, UPDATE)
+                || wordPair(i, FOR, SHARE)
+                || wordPair(i, FOR, KEY)
+                || wordPair(i, FOR, NO);
     }
 
     private boolean wordPair(int i, SqlKeyword first, SqlKeyword second) {
@@ -469,6 +469,12 @@ public final class SqlSelect {
 
     private boolean wordPair3(int i, SqlKeyword a, SqlKeyword b, SqlKeyword c) {
         return word(i, a) && wordPair(nextSignificant(i + 1), b, c);
+    }
+
+    private SqlKeyword keyword(int i) {
+        return i >= 0 && i < sourceTokens.size()
+                ? sourceTokens.get(i).keyword(source)
+                : null;
     }
 
     private boolean word(int i, SqlKeyword keyword) {
