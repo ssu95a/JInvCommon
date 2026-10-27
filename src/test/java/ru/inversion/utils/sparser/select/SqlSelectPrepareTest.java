@@ -196,10 +196,18 @@ public class SqlSelectPrepareTest {
         ).prepare();
 
         assertEquals(
-                "select * from (select 1 v) x where v > ?",
+                "select * from (select ? v) x where v > ?",
                 p.getSql()
         );
-        assertParameterKinds(p, Parameter.Kind.POSITIONAL);
+        assertParameterKinds(
+                p,
+                Parameter.Kind.LITERAL,
+                Parameter.Kind.POSITIONAL
+        );
+        assertEquals(
+                new BigInteger("1"),
+                p.getParameters().get(0).getValue()
+        );
     }
 
     @Test public void legacyTildeProtectsExpressionAndIsRemoved() {
