@@ -5,11 +5,10 @@ import ru.inversion.datacall.CallPrepareContext;
 import ru.inversion.datacall.maker.CallMaker_WithParametersValue;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.*;
+import ru.inversion.utils.sparser.SqlScannerFactory;
 import ru.inversion.utils.sparser.SqlValueFormatter;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
-import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
 import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.db.JInvDbException;
@@ -1265,18 +1264,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       PreparedSql preparedSql = builder.prepare();
       IParameters parameters = builder.parameters(mainSqlParameters);
 
-      SqlScanner scanner;
-      switch( dialect.type() ) {
-         case ORACLE:
-            scanner = new OracleSqlScanner();
-            break;
-         case POSTGRES:
-            scanner = new PostgresSqlScanner();
-            break;
-         default:
-            throw new IllegalStateException(
-                    "Unsupported SQL dialect: " + dialect);
-      }
+      SqlScanner scanner = SqlScannerFactory.create(dialect);
 
       String completed =
               renderPreparedSql(preparedSql, parameters, scanner);
@@ -1302,18 +1290,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          PreparedSql preparedSql = builder.prepare();
          IParameters parameters = builder.parameters(mainSqlParameters);
 
-         SqlScanner scanner;
-         switch( getTaskContextForUse().dialect().type() ) {
-            case ORACLE:
-               scanner = new OracleSqlScanner();
-               break;
-            case POSTGRES:
-               scanner = new PostgresSqlScanner();
-               break;
-            default:
-               throw new IllegalStateException(
-                       "Unsupported SQL dialect: " + getTaskContextForUse().dialect());
-         }
+         SqlScanner scanner =
+                 SqlScannerFactory.create(getTaskContextForUse().dialect());
 
          return renderPreparedSql(preparedSql, parameters, scanner);
       }

@@ -2,8 +2,8 @@ package ru.inversion.utils.sparser.select;
 
 import ru.inversion.utils.sparser.lexer.SqlKeyword;
 import ru.inversion.utils.sparser.lexer.SqlScanner;
+import ru.inversion.utils.sparser.SqlScannerFactory;
 import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
-import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
@@ -42,15 +42,7 @@ public final class SqlSelect {
 
     /** Прикладной API: детали выбора lexer скрыты за диалектом. */
     public SqlSelect(String sql, SqlDialect dialect) {
-        this(sql, createScanner(Objects.requireNonNull(dialect, "dialect")));
-    }
-
-    private static SqlScanner createScanner(SqlDialect dialect) {
-        switch (dialect.type()) {
-            case ORACLE: return new OracleSqlScanner();
-            case POSTGRES: return new PostgresSqlScanner();
-            default: throw new IllegalArgumentException("Unsupported dialect: " + dialect);
-        }
+        this(sql, SqlScannerFactory.create(dialect));
     }
 
     /** Совместимость с прежним внутренним API. */

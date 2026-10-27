@@ -1,6 +1,8 @@
 package ru.inversion.utils.sparser.lexer;
 
 import org.junit.Test;
+import ru.inversion.db.dialect.SqlDialectFactory;
+import ru.inversion.utils.sparser.SqlScannerFactory;
 
 import java.util.Arrays;
 import java.util.List;
@@ -13,6 +15,12 @@ public class SqlScannerTest {
 
     private static final SqlScanner ORACLE = new OracleSqlScanner();
     private static final SqlScanner POSTGRES = new PostgresSqlScanner();
+
+    @Test
+    public void scannerFactoryUsesDialect() {
+        assertTrue(SqlScannerFactory.create(SqlDialectFactory.ORACLE) instanceof OracleSqlScanner);
+        assertTrue(SqlScannerFactory.create(SqlDialectFactory.POSTGRES) instanceof PostgresSqlScanner);
+    }
 
     @Test
     public void recognizesParametersButNotInsideQuotedTextOrComments() {

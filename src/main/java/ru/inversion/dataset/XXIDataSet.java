@@ -11,10 +11,9 @@ import ru.inversion.dataset.mark.MarkModeEnum;
 import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
+import ru.inversion.utils.sparser.SqlScannerFactory;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
-import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
 import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
 import ru.inversion.utils.lstn.IListenerManConsumer;
@@ -250,20 +249,16 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             final TaskContext tc = getTaskContextForUse();
             final String stmnt = "{? = call jf_pkg_util.Is_TrnFullScan(?,?)}";
 
+            SqlScanner scanner = SqlScannerFactory.create(tc.dialect());
             final String strSql;
             if( tc.isOracle() )
             {
-                strSql = renderExplainPlanSql(
-                        preparedSql,
-                        new OracleSqlScanner()
-                );
+                strSql = renderExplainPlanSql(preparedSql, scanner);
             }
             else
             {
                 strSql = SQLDataSet.renderPreparedSql(
-                        preparedSql,
-                        parameters,
-                        new PostgresSqlScanner()
+                        preparedSql, parameters, scanner
                 );
             }
 
