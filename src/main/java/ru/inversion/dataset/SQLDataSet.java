@@ -1784,6 +1784,31 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /**
     * Формирует диагностическое представление POJO.
     */
+   @Override
+   public void dump( Map<String,Object> d ) {
+
+      super.dump(d);
+
+      if( d == null )
+         return;
+
+      try {
+         d.put("ds.sql.query", createNextSelectBuilder(false).buildSql());
+         d.put("ds.sql.query_with_parameters", getCompletedSQL());
+         d.put("ds.support_mark", isSupportMark());
+         d.put("ds.native_query_name", S.nvl(nativeQueryName));
+         d.put("ds.dataQueryMode", getDataQueryMode());
+
+         P currentRow = getCurrentRow();
+         d.put("zs.currentRow", S.nvl(currentRow));
+         d.put("zs.currentRowData", getPojoString(currentRow));
+      }
+      catch( Exception ex ) {
+         d.put("Error on prepare dump", "X");
+         d.put("Exception", ex);
+      }
+   }
+
    public static <P> String getPojoString( final P currentRow ) {
 
       if( currentRow == null )
