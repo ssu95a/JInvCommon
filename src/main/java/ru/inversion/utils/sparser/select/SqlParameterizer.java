@@ -412,7 +412,8 @@ final class SqlParameterizer {
         int previous = previousSignificant(tokens, i - 1);
         if (previous < 0) return true;
         SqlScanner.Token p = tokens.get(previous);
-        return symbol(p, "(") || symbol(p, ",") || symbol(p, "=")
+        return p.getKind() == SqlScanner.Kind.OPERATOR
+                || symbol(p, "(") || symbol(p, ",") || symbol(p, "=")
                 || word(p, "BY") || word(p, "WHERE") || word(p, "AND")
                 || word(p, "OR") || word(p, "SELECT") || word(p, "HAVING");
     }
@@ -421,7 +422,8 @@ final class SqlParameterizer {
         int next = nextSignificant(tokens, i + 1);
         if (next == tokens.size()) return true;
         SqlScanner.Token n = tokens.get(next);
-        return symbol(n, ")") || symbol(n, ",") || symbol(n, ";")
+        return n.getKind() == SqlScanner.Kind.OPERATOR
+                || symbol(n, ")") || symbol(n, ",") || symbol(n, ";")
                 || word(n, "AS") || word(n, "FROM")
                 || word(n, "ASC") || word(n, "DESC") || word(n, "NULLS")
                 || word(n, "COLLATE")

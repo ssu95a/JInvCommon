@@ -190,6 +190,18 @@ public class SqlSelectPrepareTest {
         assertTrue(p.getSql(), p.getSql().contains("code ~ ?"));
         assertParameterKinds(p, Parameter.Kind.NAMED, Parameter.Kind.NAMED, Parameter.Kind.LITERAL);
     }
+    @Test public void postgresLegacyMarkerAroundJdbcParameterAfterComparisonIsRemoved() {
+        PreparedSql p = pg(
+                "select * from (select 1 v) x where v > ~?~"
+        ).prepare();
+
+        assertEquals(
+                "select * from (select 1 v) x where v > ?",
+                p.getSql()
+        );
+        assertParameterKinds(p, Parameter.Kind.POSITIONAL);
+    }
+
     @Test public void legacyTildeProtectsExpressionAndIsRemoved() {
         SqlSelect select = ora("select id from t order by 1 limit 100");
         select.setOrderBy("~replace(code, 'a', 'b')~");
