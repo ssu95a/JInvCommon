@@ -108,6 +108,43 @@ public class SQLDataSetSparserIntegrationTest {
     }
 
     @Test
+    public void completedWherePredicateUsesExpressionLocalValues() throws Exception {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+
+        SQLExpression expression =
+                new SQLExpression("branch = :branch and state = 'A-1'");
+
+        expression.setParameter("branch", 17);
+        ds.setFilter(expression, false, false);
+
+        String predicate =
+                ds.renderCompletedWherePredicate(SqlDialectFactory.POSTGRES);
+
+        assertTrue(predicate, predicate.contains("branch = 17"));
+        assertTrue(predicate, predicate.contains("state =  'A-1' "));
+        assertFalse(predicate, predicate.contains(":branch"));
+    }
+
+    @Test
+    public void completedWherePredicateKeepsDatasetOverrideIncludingNull() throws Exception {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+
+        SQLExpression expression =
+                new SQLExpression("branch is not distinct from :branch");
+
+        expression.setParameter("branch", 17);
+        ds.setFilter(expression, false, false);
+        ds.setParameter("branch", null);
+
+        String predicate =
+                ds.renderCompletedWherePredicate(SqlDialectFactory.POSTGRES);
+
+        assertTrue(predicate, predicate.contains(
+                "branch is not distinct from  NULL "
+        ));
+    }
+
+    @Test
     public void completedSqlRenderingUsesPreparedParameterPlan() {
         PreparedSql prepared = new PreparedSql(
                 "select '?' as literal_text, ? from client where owner_id = ? and amount = ?",

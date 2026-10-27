@@ -796,19 +796,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
       builder.queryAlias(getQueryAlias());
       builder.optimizerHint(getOptimizerHint());
-      for (PredicateItem item : predicates.values()) {
-         if (ignoreFilters && item.isFilter())
-            continue;
-
-         if (item.getExpression() != null) {
-            if (!item.getFilterStr().equals(item.getExpression().getSQL()))
-               throw new IllegalStateException(
-                       "ISQLExpression SQL changed after filter registration");
-            builder.addPredicate(item.getExpression());
-         } else {
-            builder.addPredicate(item.getFilterStr());
-         }
-      }
+      addPredicates(builder, ignoreFilters);
       builder.orderBy(getOrderBy());
 
       if (isSupportMark()) {
@@ -817,6 +805,23 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
 
       return builder;
+   }
+
+   private void addPredicates( NextSelectBuilder builder, boolean ignoreFilters ) {
+      for( PredicateItem item : predicates.values() ) {
+         if( ignoreFilters && item.isFilter() )
+            continue;
+
+         if( item.getExpression() != null ) {
+            if( !item.getFilterStr().equals(item.getExpression().getSQL()) )
+               throw new IllegalStateException(
+                       "ISQLExpression SQL changed after filter registration");
+
+            builder.addPredicate(item.getExpression());
+         }
+         else
+            builder.addPredicate(item.getFilterStr());
+      }
    }
 
    /**
@@ -1223,6 +1228,69 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          predicates.entrySet().removeIf( (t) -> t.getValue().isTemporary() );
 
       needReCreateReader( );
+   }
+
+   /**
+    * Возвращает predicates DataSet с фактическими runtime-значениями.
+    * Для разрешения параметров используется тот же NextSelectBuilder,
+    * что и при JDBC execution.
+    */
+   @Override
+   public String getCompletedWherePredicate() throws DataSetException {
+
+      try {
+         return renderCompletedWherePredicate(getTaskContextForUse().dialect());
+      }
+      catch( Throwable ex ) {
+         throw new DataSetException(
+                 Tags.PRODUCT_LABEL
+                         + "Error in dataSet on call 'getCompletedWherePredicate'",
+                 ex
+         );
+      }
+   }
+
+   String renderCompletedWherePredicate( SqlDialect dialect ) {
+
+      if( predicates.isEmpty() )
+         return null;
+
+      final String prefix = "SELECT NULL WHERE NULL IS NULL ";
+
+      NextSelectBuilder builder =
+              new NextSelectBuilder(prefix + "<w>", dialect);
+
+      addPredicates(builder, false);
+
+      PreparedSql preparedSql = builder.prepare();
+      IParameters parameters = builder.parameters(mainSqlParameters);
+
+      SqlScanner scanner;
+      switch( dialect.type() ) {
+         case ORACLE:
+            scanner = new OracleSqlScanner();
+            break;
+         case POSTGRES:
+            scanner = new PostgresSqlScanner();
+            break;
+         default:
+            throw new IllegalStateException(
+                    "Unsupported SQL dialect: " + dialect);
+      }
+
+      String completed =
+              renderPreparedSql(preparedSql, parameters, scanner);
+
+      if( !completed.startsWith(prefix) )
+         throw new IllegalStateException(
+                 "Unexpected completed predicate SQL: " + completed);
+
+      String predicate = completed.substring(prefix.length()).trim();
+
+      if( predicate.regionMatches(true, 0, "AND ", 0, 4) )
+         predicate = predicate.substring(4).trim();
+
+      return predicate;
    }
 
    /** Вернуть полностью готовый SQL, c параметрами */
