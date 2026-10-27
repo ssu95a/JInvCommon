@@ -63,6 +63,17 @@ public abstract class SqlScanner {
             return kind == Kind.WORD && end - start == expected.length() && source.regionMatches(true, start, expected, 0, expected.length());
         }
 
+        /** Parser-level classification for WORD tokens. */
+        public SqlKeyword keyword(String source) {
+            return kind == Kind.WORD ? SqlKeyword.of(source, start, end) : null;
+        }
+
+        public boolean isKeyword(String source, SqlKeyword keyword) {
+            return kind == Kind.WORD
+                    && keyword != null
+                    && keyword.matches(source, start, end);
+        }
+
         @Override
         public String toString() {
             return kind + "[" + start + ", " + end + ")";

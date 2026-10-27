@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Objects;
 
 import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.*;
+import static ru.inversion.utils.sparser.lexer.SqlKeyword.*;
 
 /**
  * Структурные изменения одного внешнего SELECT без дополнительной SQL-обёртки.
@@ -256,7 +257,7 @@ public final class SqlSelect {
         int selectIndex = -1;
         int firstSignificant = nextSignificant(0);
         if (firstSignificant >= sourceTokens.size() ||
-                (!word(firstSignificant, "SELECT") && !word(firstSignificant, "WITH"))) {
+                (!word(firstSignificant, SELECT) && !word(firstSignificant, WITH))) {
             throw new IllegalArgumentException("Expected SELECT or WITH");
         }
 
@@ -269,7 +270,7 @@ public final class SqlSelect {
             } else if (depth == 0 && symbol(source, token, ";")) {
                 statementEndIndex = i;
                 break;
-            } else if (depth == 0 && selectIndex < 0 && word(i, "SELECT")) {
+            } else if (depth == 0 && selectIndex < 0 && word(i, SELECT)) {
                 selectIndex = i;
             }
         }
@@ -280,7 +281,7 @@ public final class SqlSelect {
             throw new IllegalArgumentException("Multiple SQL statements are not supported");
         }
         // Убрали отбор до SELECT: прочие начальные варианты сейчас не поддерживаем.
-        if (selectIndex != firstSignificant && !word(firstSignificant, "WITH")) {
+        if (selectIndex != firstSignificant && !word(firstSignificant, WITH)) {
             throw new IllegalArgumentException("Unsupported SELECT prefix");
         }
 
@@ -299,30 +300,30 @@ public final class SqlSelect {
             if (symbol(source, token, ")")) { depth--; continue; }
             if (depth != 0 || trivia(token)) continue;
 
-            if (word(i, "UNION") || word(i, "INTERSECT") ||
-                    word(i, "EXCEPT") || word(i, "MINUS")) {
+            if (word(i, UNION) || word(i, INTERSECT) ||
+                    word(i, EXCEPT) || word(i, MINUS)) {
                 compoundQuery = true;
             }
             boolean orderClause = orderClauseAt(i);
-            boolean groupClause = wordPair(i, "GROUP", "BY");
-            boolean whereBoundary = orderClause || groupClause || word(i, "HAVING") ||
-                    word(i, "WINDOW") || word(i, "QUALIFY") ||
-                    wordPair(i, "START", "WITH") ||
-                    wordPair(i, "CONNECT", "BY") ||
-                    word(i, "MODEL") || tailAt(i);
-            if (word(i, "FROM") && firstSelectBoundary == statementEndIndex) {
+            boolean groupClause = wordPair(i, GROUP, BY);
+            boolean whereBoundary = orderClause || groupClause || word(i, HAVING) ||
+                    word(i, WINDOW) || word(i, QUALIFY) ||
+                    wordPair(i, START, WITH) ||
+                    wordPair(i, CONNECT, BY) ||
+                    word(i, MODEL) || tailAt(i);
+            if (word(i, FROM) && firstSelectBoundary == statementEndIndex) {
                 firstSelectBoundary = i;
             }
             if (whereBoundary && firstSelectBoundary == statementEndIndex) firstSelectBoundary = i;
             if (whereBoundary && firstWhereBoundary == statementEndIndex) firstWhereBoundary = i;
-            if (word(i, "WHERE") && where < 0) {
+            if (word(i, WHERE) && where < 0) {
                 where = i;
                 if (firstSelectBoundary == statementEndIndex) firstSelectBoundary = i;
             }
             if (groupClause) hasGroupBy = true;
             if (orderClause && order < 0) {
                 order = i;
-                siblings = wordPair3(i, "ORDER", "SIBLINGS", "BY");
+                siblings = wordPair3(i, ORDER, SIBLINGS, BY);
             }
             if (tailAt(i) && tail < 0) tail = i;
             if (where >= 0 && i > where && whereBoundary) {
@@ -338,7 +339,7 @@ public final class SqlSelect {
         if (hasGroupBy || hasOuterHaving(selectIndex, statementEndIndex)) {
             markRestriction = "GROUP BY/HAVING";
         } else if (hasTopLevelDistinct(selectIndex + 1, itemsBoundary)) {
-            markRestriction = "DISTINCT";
+            markRestriction = DISTINCT;
         }
         int listLastToken = lastSignificant(selectIndex + 1, itemsBoundary);
         if (listLastToken < 0) throw new IllegalArgumentException("Empty SELECT list");
@@ -433,7 +434,7 @@ public final class SqlSelect {
             SqlScanner.Token t = sourceTokens.get(i);
             if (symbol(source, t, "(")) depth++;
             else if (symbol(source, t, ")")) depth--;
-            else if (depth == 0 && word(i, "DISTINCT")) return true;
+            else if (depth == 0 && word(i, DISTINCT)) return true;
         }
         return false;
     }
@@ -444,32 +445,34 @@ public final class SqlSelect {
             SqlScanner.Token t = sourceTokens.get(i);
             if (symbol(source, t, "(")) depth++;
             else if (symbol(source, t, ")")) depth--;
-            else if (depth == 0 && word(i, "HAVING")) return true;
+            else if (depth == 0 && word(i, HAVING)) return true;
         }
         return false;
     }
 
     private boolean orderClauseAt(int i) {
-        return wordPair(i, "ORDER", "BY") || wordPair3(i, "ORDER", "SIBLINGS", "BY");
+        return wordPair(i, ORDER, BY) || wordPair3(i, ORDER, SIBLINGS, BY);
     }
 
     private boolean tailAt(int i) {
-        return word(i, "LIMIT") || word(i, "OFFSET") ||
-                word(i, "FETCH") || wordPair(i, "FOR", "UPDATE") ||
-                wordPair(i, "FOR", "SHARE") || wordPair(i, "FOR", "KEY") ||
-                wordPair(i, "FOR", "NO");
+        return word(i, LIMIT) || word(i, OFFSET) ||
+                word(i, FETCH) || wordPair(i, FOR, UPDATE) ||
+                wordPair(i, FOR, SHARE) || wordPair(i, FOR, KEY) ||
+                wordPair(i, FOR, NO);
     }
 
-    private boolean wordPair(int i, String first, String second) {
+    private boolean wordPair(int i, SqlKeyword first, SqlKeyword second) {
         return word(i, first) && word(nextSignificant(i + 1), second);
     }
 
-    private boolean wordPair3(int i, String a, String b, String c) {
+    private boolean wordPair3(int i, SqlKeyword a, SqlKeyword b, SqlKeyword c) {
         return word(i, a) && wordPair(nextSignificant(i + 1), b, c);
     }
 
-    private boolean word(int i, String text) {
-        return i >= 0 && i < sourceTokens.size() && sourceTokens.get(i).isWord(source, text);
+    private boolean word(int i, SqlKeyword keyword) {
+        return i >= 0
+                && i < sourceTokens.size()
+                && sourceTokens.get(i).isKeyword(source, keyword);
     }
 
     private int nextSignificant(int start) {
