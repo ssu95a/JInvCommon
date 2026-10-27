@@ -251,10 +251,42 @@ final class SqlParameterizer {
         if (prev.getKind() == WORD && prev.getEnd() == token.getStart())
             return false;
 
-        return !(word(prev, "DATE")
+        if (word(prev, "DATE")
                 || word(prev, "TIME")
                 || word(prev, "TIMESTAMP")
-                || word(prev, "INTERVAL"));
+                || word(prev, "INTERVAL")) {
+            return false;
+        }
+
+        return !isPrecisionTypedString(previous);
+    }
+
+    /**
+     * TIMESTAMP(3) '...', TIME(6) '...' and similar typed literals
+     * keep their SQL grammar intact.
+     */
+    private boolean isPrecisionTypedString(int previous) {
+        if (previous < 0 || !symbol(tokens.get(previous), ")"))
+            return false;
+
+        int depth = 0;
+
+        for (int i = previous; i >= 0; i = previousSignificant(tokens, i - 1)) {
+            SqlScanner.Token token = tokens.get(i);
+
+            if (symbol(token, ")")) {
+                depth++;
+            }
+            else if (symbol(token, "(")) {
+                depth--;
+                if (depth == 0) {
+                    int typeName = previousSignificant(tokens, i - 1);
+                    return isTypePrecisionName(tokens, typeName);
+                }
+            }
+        }
+
+        return false;
     }
 
     /** Decode a plain SQL string literal to the JDBC value it represents. */

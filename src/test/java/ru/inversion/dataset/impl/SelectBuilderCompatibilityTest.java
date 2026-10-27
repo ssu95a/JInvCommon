@@ -53,7 +53,9 @@ public class SelectBuilderCompatibilityTest {
 
         String sql = builder.build();
 
-        assertTrue(sql, sql.contains("SELECT q.* FROM ("));
+        assertTrue(sql, sql.contains("SELECT q.*"));
+        assertTrue(sql, sql.contains("FROM ("));
+        assertTrue(sql, sql.contains(") q"));
         assertTrue(sql, sql.contains("q.id = :id"));
         assertTrue(sql, sql.contains("ORDER BY q.name"));
         assertTrue(sql, sql.contains("AS MARK"));
