@@ -1,8 +1,12 @@
 package ru.inversion.dataset;
 
 import ru.inversion.dataset.parser.SQLParser;
+import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.utils.S;
 import ru.inversion.utils.U;
+import ru.inversion.utils.sparser.SqlScannerFactory;
+import ru.inversion.utils.sparser.SqlValueFormatter;
+import ru.inversion.utils.sparser.lexer.SqlScanner;
 
 import java.util.*;
 
@@ -93,16 +97,60 @@ public class SQLExpression implements ISQLExpression {
 		parameterNamedMap.putAll(parameters);
 	}
 
-    /** */
+    /**
+     * Compatibility API. Without an explicit SQL dialect the legacy parser
+     * remains responsible for interpreting parameters.
+     */
     @Override
     public String getCompletedSQL() {
 
         if( S.isNullOrEmpty(strSQL) )
             return S.EMPTY_STRING;
-        
+
         SQLParser sp = new SQLParser(strSQL);
-        
         return sp.prepareSqlWithParametersValue(this);
+    }
+
+    /**
+     * Diagnostic SQL with values substituted using the actual dialect lexer.
+     * Works with arbitrary SQL fragments, not just SELECT statements.
+     * Literal text, quoted identifiers and comments are left unchanged.
+     */
+    public String getCompletedSQL(SqlDialect dialect) {
+
+        if( S.isNullOrEmpty(strSQL) )
+            return S.EMPTY_STRING;
+
+        SqlScanner scanner = SqlScannerFactory.create(dialect);
+        StringBuilder result = new StringBuilder(strSQL.length() + 64);
+        int copiedUntil = 0;
+        int positionalIndex = 0;
+
+        for( SqlScanner.Token token : scanner.scan(strSQL) ) {
+            Object value;
+
+            switch( token.getKind() ) {
+                case POSITIONAL_PARAMETER:
+                    value = getParameter(positionalIndex++);
+                    break;
+                case NAMED_PARAMETER:
+                    value = getParameter(token.text(strSQL).substring(1));
+                    break;
+                case NUMBERED_PARAMETER:
+                    value = getParameter(Integer.parseInt(
+                            token.text(strSQL).substring(1)) - 1);
+                    break;
+                default:
+                    continue;
+            }
+
+            result.append(strSQL, copiedUntil, token.getStart());
+            result.append(SqlValueFormatter.format(value));
+            copiedUntil = token.getEnd();
+        }
+
+        result.append(strSQL, copiedUntil, strSQL.length());
+        return result.toString();
     }
 
     /** */
