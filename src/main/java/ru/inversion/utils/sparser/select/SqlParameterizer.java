@@ -2,6 +2,7 @@ package ru.inversion.utils.sparser.select;
 
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.lexer.SqlKeyword;
 import ru.inversion.utils.sparser.lexer.SqlScanner;
 
 import java.math.BigDecimal;

@@ -1,5 +1,6 @@
 package ru.inversion.utils.sparser.select;
 
+import ru.inversion.utils.sparser.lexer.SqlKeyword;
 import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
 import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
@@ -340,7 +341,7 @@ public final class SqlSelect {
         if (hasGroupBy || hasOuterHaving(selectIndex, statementEndIndex)) {
             markRestriction = "GROUP BY/HAVING";
         } else if (hasTopLevelDistinct(selectIndex + 1, itemsBoundary)) {
-            markRestriction = DISTINCT;
+            markRestriction = DISTINCT.name();
         }
         int listLastToken = lastSignificant(selectIndex + 1, itemsBoundary);
         if (listLastToken < 0) throw new IllegalArgumentException("Empty SELECT list");
