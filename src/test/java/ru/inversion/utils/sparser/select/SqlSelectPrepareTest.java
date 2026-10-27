@@ -220,6 +220,32 @@ public class SqlSelectPrepareTest {
         assertEquals(new BigInteger("100"), p.getParameters().get(0).getValue());
     }
 
+    @Test public void legacyWhereMarkerIsPredicateInsertionPoint() {
+        SqlSelect select = pg(
+                "select * from t where (TRUE <w>) order by id"
+        );
+        select.setPredicates(Collections.singletonList("code != :code"));
+
+        PreparedSql p = select.prepare();
+
+        assertFalse(p.getSql(), p.getSql().contains("<w>"));
+        assertTrue(p.getSql(), p.getSql().contains(
+                "where (TRUE  AND (code != ?"
+        ));
+        assertParameterKinds(p, Parameter.Kind.NAMED);
+        assertEquals("code", p.getParameters().get(0).getName());
+    }
+
+    @Test public void legacyWhereMarkerIsRemovedWithoutPredicates() {
+        PreparedSql p = pg(
+                "select * from t where (TRUE <w>)"
+        ).prepare();
+
+        assertFalse(p.getSql(), p.getSql().contains("<w>"));
+        assertTrue(p.getSql(), p.getSql().contains("where (TRUE )"));
+        assertTrue(p.getParameters().isEmpty());
+    }
+
     @Test public void cacheIsReusedAndAllMutationsInvalidate() {
         SqlSelect select = pg("select id from t where x=:x and a=10");
         PreparedSql first = select.prepare();

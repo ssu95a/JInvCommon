@@ -66,7 +66,8 @@ public final class SqlSelect {
             checkFragment(part);
             copy.add(part);
         }
-        if (!copy.isEmpty()) requireSimple("WHERE predicates");
+        if (!copy.isEmpty() && layout.legacyWhereMarkerStart < 0)
+            requireSimple("WHERE predicates");
         predicates = Collections.unmodifiableList(copy);
         invalidate();
     }
@@ -115,7 +116,8 @@ public final class SqlSelect {
     /** Исходная строка возвращается byte-for-byte, пока не задано изменений. */
     public String buildSql() {
         if (builtSql != null) return builtSql;
-        if (predicates.isEmpty() && orderBy == null && markExpression == null) {
+        if (predicates.isEmpty() && orderBy == null && markExpression == null
+                && layout.legacyWhereMarkerStart < 0) {
             return builtSql = source;
         }
 
@@ -161,7 +163,15 @@ public final class SqlSelect {
                     ", (" + markExpression + "\n) AS " + markAlias + " ", 0));
         }
 
-        if (!predicates.isEmpty()) {
+        if (layout.legacyWhereMarkerStart >= 0) {
+            edits.add(new Edit(
+                    layout.legacyWhereMarkerStart,
+                    layout.legacyWhereMarkerEnd,
+                    predicates.isEmpty() ? "" : joinLegacyWherePredicates(),
+                    10
+            ));
+        }
+        else if (!predicates.isEmpty()) {
             String joined = joinPredicates();
             if (layout.whereWordEnd >= 0) {
                 edits.add(new Edit(layout.whereWordEnd, layout.whereWordEnd,
@@ -191,6 +201,17 @@ public final class SqlSelect {
         for (String predicate : predicates) {
             if (result.length() > 0) result.append(" AND ");
             result.append('(').append(predicate).append("\n)");
+        }
+        return result.toString();
+    }
+
+    /** Legacy <w> replacement used by former SQLSelectBuilder. */
+    private String joinLegacyWherePredicates() {
+        StringBuilder result = new StringBuilder();
+        for (String predicate : predicates) {
+            result.append(" AND (")
+                  .append(predicate)
+                  .append("\n)");
         }
         return result.toString();
     }
@@ -333,6 +354,15 @@ public final class SqlSelect {
         result.orderEnd = -1;
         result.whereInsertion = -1;
         result.orderInsertion = -1;
+        result.legacyWhereMarkerStart = -1;
+        result.legacyWhereMarkerEnd = -1;
+
+        int[] legacyWhereMarker = findLegacyWhereMarker();
+        if (legacyWhereMarker != null) {
+            result.legacyWhereMarkerStart = legacyWhereMarker[0];
+            result.legacyWhereMarkerEnd = legacyWhereMarker[1];
+        }
+
         int mainContentEnd = lastSignificantEnd(selectIndex + 1, statementEndIndex);
 
         if (where >= 0) {
@@ -358,6 +388,42 @@ public final class SqlSelect {
                     ? sourceTokens.get(tail).getStart() : mainContentEnd;
         }
         return result;
+    }
+
+    /**
+     * Находит первый legacy marker <w> вне строк и комментариев.
+     * Старый SQLSelectBuilder также поддерживал один такой insertion point.
+     */
+    private int[] findLegacyWhereMarker() {
+        for (int i = 0; i + 2 < sourceTokens.size(); i++) {
+            SqlScanner.Token open = sourceTokens.get(i);
+            SqlScanner.Token word = sourceTokens.get(i + 1);
+            SqlScanner.Token close = sourceTokens.get(i + 2);
+
+            if (open.getEnd() != word.getStart()
+                    || word.getEnd() != close.getStart()) {
+                continue;
+            }
+
+            boolean openBracket =
+                    (open.getKind() == SqlScanner.Kind.OPERATOR
+                            || open.getKind() == SqlScanner.Kind.SYMBOL)
+                    && "<".equals(open.text(source));
+
+            boolean markerWord =
+                    word.getKind() == SqlScanner.Kind.WORD
+                    && word.isWord(source, "W");
+
+            boolean closeBracket =
+                    (close.getKind() == SqlScanner.Kind.OPERATOR
+                            || close.getKind() == SqlScanner.Kind.SYMBOL)
+                    && ">".equals(close.text(source));
+
+            if (openBracket && markerWord && closeBracket) {
+                return new int[] { open.getStart(), close.getEnd() };
+            }
+        }
+        return null;
     }
 
     /** Ограничения на mark проверяются до изменения SELECT list. */
@@ -452,6 +518,9 @@ public final class SqlSelect {
         int wherePredicateEnd;
 
         int whereInsertion;
+
+        int legacyWhereMarkerStart;
+        int legacyWhereMarkerEnd;
 
         int orderStart;
         int orderEnd;
