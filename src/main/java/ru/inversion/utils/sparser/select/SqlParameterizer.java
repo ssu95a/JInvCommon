@@ -18,6 +18,7 @@ import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.*;
  * Не получает значения пользовательских параметров: это обязанность DataSet.
  */
 final class SqlParameterizer {
+
     private final String source;
     private final List<SqlScanner.Token> tokens;
     private final boolean oracle;

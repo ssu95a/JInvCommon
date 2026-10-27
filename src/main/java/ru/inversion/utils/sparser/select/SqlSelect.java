@@ -30,10 +30,12 @@ public final class SqlSelect {
     private final Layout layout;
 
     private List<String> predicates = Collections.emptyList();
+
     private String orderBy;
     private String markExpression;
     private String markAlias;
     private String builtSql;
+
     private PreparedSql preparedSql;
 
     /** Прикладной API: детали выбора lexer скрыты за диалектом. */

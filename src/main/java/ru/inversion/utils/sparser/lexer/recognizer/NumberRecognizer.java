@@ -14,12 +14,15 @@ final class NumberRecognizer implements TokenRecognizer {
     }
 
     @Override
-    public SqlScanner.Token recognize(String sql, int at) {
+    public SqlScanner.Token recognize( String sql, int at )
+    {
         char ch = sql.charAt(at);
-        if (!ScanChars.digit(ch)
-                && !(ch == '.' && at + 1 < sql.length()
-                && ScanChars.digit(sql.charAt(at + 1))
-                && (at == 0 || sql.charAt(at - 1) != '.'))) {
+
+        if( !ScanChars.digit(ch)
+             && !(ch == '.' && at + 1 < sql.length()
+             && ScanChars.digit(sql.charAt(at + 1))
+             && (at == 0 || sql.charAt(at - 1) != '.')))
+        {
             return null;
         }
 

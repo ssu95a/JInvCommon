@@ -7,6 +7,7 @@ import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.*;
 
 /** Общие для Oracle и PostgreSQL простые правила. */
 final class CommonRecognizers {
+
     private CommonRecognizers() { }
 
     static final class Whitespace implements TokenRecognizer {
@@ -77,13 +78,17 @@ final class CommonRecognizers {
 
     /** Структурная пунктуация, которую scanner умеет пропускать безопасно. */
     static final class Symbol implements TokenRecognizer {
-        private static final String SYMBOLS = "()[],.;~";
+
+       private static final char[] SYMBOLS = "()[],.;~".toCharArray();
 
         @Override
-        public SqlScanner.Token recognize(String sql, int at) {
-            return SYMBOLS.indexOf(sql.charAt(at)) >= 0
-                    ? new SqlScanner.Token(SYMBOL, at, at + 1)
-                    : null;
+        public SqlScanner.Token recognize( String sql, int at )
+        {
+           for( char ch : SYMBOLS )
+               if( ch == sql.charAt(at) )
+                   return new SqlScanner.Token( SYMBOL, at, at + 1);
+
+           return null;
         }
     }
 
