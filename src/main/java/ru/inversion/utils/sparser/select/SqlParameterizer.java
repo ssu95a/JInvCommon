@@ -102,6 +102,18 @@ final class SqlParameterizer {
                     parameters.add(Parameter.numbered(parseNumberedPosition(text)));
                     break;
                 case STRING:
+                    if (enabled && !legacyOff && typeScopes.isEmpty()
+                            && orderScopes.isEmpty()
+                            && canParameterizeString(i, current, text)) {
+                        Object literal = literalValue(kind, text);
+                        if (literal != null) {
+                            sql.append('?');
+                            parameters.add(Parameter.literal(literal));
+                            break;
+                        }
+                    }
+                    sql.append(text);
+                    break;
                 case NUMBER:
                     if (enabled && !legacyOff && typeScopes.isEmpty()
                             && orderScopes.isEmpty()) {
@@ -217,7 +229,35 @@ final class SqlParameterizer {
         return lexeme.getKind() == WORD || lexeme.getKind() == QUOTED_IDENTIFIER;
     }
 
-    /** String tokens reaching this point are plain literals validated by SqlSelect. */
+    /**
+     * Параметризуем только обычный SQL literal '...'.
+     * Диалектные/prefixed forms (N'...', q'...', E'...', U&'...', $tag$...$)
+     * и typed literals (DATE '...', TIMESTAMP '...', INTERVAL '...') оставляем
+     * byte-for-byte: bind на их месте может изменить или сломать SQL grammar.
+     */
+    private boolean canParameterizeString(int index, SqlScanner.Token token, String text) {
+        if (text.length() < 2 || text.charAt(0) != '\''
+                || text.charAt(text.length() - 1) != '\'') {
+            return false;
+        }
+
+        int previous = previousSignificant(tokens, index - 1);
+        if (previous < 0) return true;
+
+        SqlScanner.Token prev = tokens.get(previous);
+
+        // B'...', X'...' and other prefix forms that scanner represents
+        // as WORD immediately followed by a plain STRING token.
+        if (prev.getKind() == WORD && prev.getEnd() == token.getStart())
+            return false;
+
+        return !(word(prev, "DATE")
+                || word(prev, "TIME")
+                || word(prev, "TIMESTAMP")
+                || word(prev, "INTERVAL"));
+    }
+
+    /** Decode a plain SQL string literal to the JDBC value it represents. */
     private static Object literalValue(SqlScanner.Kind kind, String text) {
         if (kind == NUMBER) {
             try {
@@ -233,7 +273,11 @@ final class SqlParameterizer {
                 return null;
             }
         }
-        return text.substring(1, text.length() - 1);
+        if (text.length() < 2 || text.charAt(0) != '\''
+                || text.charAt(text.length() - 1) != '\'') {
+            return null;
+        }
+        return text.substring(1, text.length() - 1).replace("''", "'");
     }
 
     private int nextSignificant(List<SqlScanner.Token> tokens, int from) {

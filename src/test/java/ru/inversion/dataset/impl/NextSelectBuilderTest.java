@@ -307,4 +307,52 @@ public class NextSelectBuilderTest {
                 .optimizerHint("+ bad */ delete");
     }
 
+    @Test public void ordinaryStringLiteralWithPunctuationIsBound() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from t where code = 'A-1/2'",
+                SqlDialectFactory.POSTGRES);
+
+        PreparedSql p = b.prepare();
+
+        assertEquals("select id from t where code = ?", p.getSql());
+        assertEquals(1, p.getParameters().size());
+        assertEquals(Parameter.Kind.LITERAL, p.getParameters().get(0).getKind());
+        assertEquals("A-1/2", p.getParameters().get(0).getValue());
+    }
+
+    @Test public void escapedQuoteInStringLiteralIsDecodedForBinding() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from t where name = 'O''Brien'",
+                SqlDialectFactory.ORACLE);
+
+        PreparedSql p = b.prepare();
+
+        assertEquals("select id from t where name = ?", p.getSql());
+        assertEquals("O'Brien", p.getParameters().get(0).getValue());
+    }
+
+    @Test public void typedStringLiteralIsPreserved() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from t where d = DATE '2026-10-26'",
+                SqlDialectFactory.ORACLE);
+
+        PreparedSql p = b.prepare();
+
+        assertEquals(
+                "select id from t where d = DATE '2026-10-26'",
+                p.getSql());
+        assertTrue(p.getParameters().isEmpty());
+    }
+
+    @Test public void dialectSpecificStringLiteralIsPreserved() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select q'[A-1/2]' as txt from dual",
+                SqlDialectFactory.ORACLE);
+
+        PreparedSql p = b.prepare();
+
+        assertEquals("select q'[A-1/2]' as txt from dual", p.getSql());
+        assertTrue(p.getParameters().isEmpty());
+    }
+
 }

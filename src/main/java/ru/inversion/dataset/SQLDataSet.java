@@ -77,7 +77,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /**
     * Инструкция для оптимизатора RDBMS.
-    * Текст хранится без / и вставляется после внешнего SELECT.
     */
    protected String        optimizerHint;
 
