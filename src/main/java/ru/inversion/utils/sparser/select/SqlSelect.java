@@ -260,7 +260,7 @@ public final class SqlSelect {
         int selectIndex = -1;
         int firstSignificant = nextSignificant(0);
         if (firstSignificant >= sourceTokens.size() ||
-                (!word(firstSignificant, SELECT) && !word(firstSignificant, WITH))) {
+                (!keyword(firstSignificant, SELECT) && !keyword(firstSignificant, WITH))) {
             throw new IllegalArgumentException("Expected SELECT or WITH");
         }
 
@@ -273,7 +273,7 @@ public final class SqlSelect {
             } else if (depth == 0 && symbol(source, token, ";")) {
                 statementEndIndex = i;
                 break;
-            } else if (depth == 0 && selectIndex < 0 && word(i, SELECT)) {
+            } else if (depth == 0 && selectIndex < 0 && keyword(i, SELECT)) {
                 selectIndex = i;
             }
         }
@@ -284,7 +284,7 @@ public final class SqlSelect {
             throw new IllegalArgumentException("Multiple SQL statements are not supported");
         }
         // Убрали отбор до SELECT: прочие начальные варианты сейчас не поддерживаем.
-        if (selectIndex != firstSignificant && !word(firstSignificant, WITH)) {
+        if (selectIndex != firstSignificant && !keyword(firstSignificant, WITH)) {
             throw new IllegalArgumentException("Unsupported SELECT prefix");
         }
 
@@ -307,25 +307,25 @@ public final class SqlSelect {
                 compoundQuery = true;
             }
             boolean orderClause = orderClauseAt(i);
-            boolean groupClause = wordPair(i, GROUP, BY);
-            boolean whereBoundary = orderClause || groupClause || word(i, HAVING) ||
-                    word(i, WINDOW) || word(i, QUALIFY) ||
-                    wordPair(i, START, WITH) ||
-                    wordPair(i, CONNECT, BY) ||
-                    word(i, MODEL) || tailAt(i);
-            if (word(i, FROM) && firstSelectBoundary == statementEndIndex) {
+            boolean groupClause = keywords(i, GROUP, BY);
+            boolean whereBoundary = orderClause || groupClause || keyword(i, HAVING) ||
+                    keyword(i, WINDOW) || keyword(i, QUALIFY) ||
+                    keywords(i, START, WITH) ||
+                    keywords(i, CONNECT, BY) ||
+                    keyword(i, MODEL) || tailAt(i);
+            if (keyword(i, FROM) && firstSelectBoundary == statementEndIndex) {
                 firstSelectBoundary = i;
             }
             if (whereBoundary && firstSelectBoundary == statementEndIndex) firstSelectBoundary = i;
             if (whereBoundary && firstWhereBoundary == statementEndIndex) firstWhereBoundary = i;
-            if (word(i, WHERE) && where < 0) {
+            if (keyword(i, WHERE) && where < 0) {
                 where = i;
                 if (firstSelectBoundary == statementEndIndex) firstSelectBoundary = i;
             }
             if (groupClause) hasGroupBy = true;
             if (orderClause && order < 0) {
                 order = i;
-                siblings = wordPair3(i, ORDER, SIBLINGS, BY);
+                siblings = keywords(i, ORDER, SIBLINGS, BY);
             }
             if (tailAt(i) && tail < 0) tail = i;
             if (where >= 0 && i > where && whereBoundary) {
@@ -436,7 +436,7 @@ public final class SqlSelect {
             SqlScanner.Token t = sourceTokens.get(i);
             if (symbol(source, t, "(")) depth++;
             else if (symbol(source, t, ")")) depth--;
-            else if (depth == 0 && word(i, DISTINCT)) return true;
+            else if (depth == 0 && keyword(i, DISTINCT)) return true;
         }
         return false;
     }
@@ -447,29 +447,34 @@ public final class SqlSelect {
             SqlScanner.Token t = sourceTokens.get(i);
             if (symbol(source, t, "(")) depth++;
             else if (symbol(source, t, ")")) depth--;
-            else if (depth == 0 && word(i, HAVING)) return true;
+            else if (depth == 0 && keyword(i, HAVING)) return true;
         }
         return false;
     }
 
     private boolean orderClauseAt(int i) {
-        return wordPair(i, ORDER, BY) || wordPair3(i, ORDER, SIBLINGS, BY);
+        return keywords(i, ORDER, BY) || keywords(i, ORDER, SIBLINGS, BY);
     }
 
     private boolean tailAt(int i) {
         return in(keyword(i), LIMIT, OFFSET, FETCH)
-                || wordPair(i, FOR, UPDATE)
-                || wordPair(i, FOR, SHARE)
-                || wordPair(i, FOR, KEY)
-                || wordPair(i, FOR, NO);
+                || keywords(i, FOR, UPDATE)
+                || keywords(i, FOR, SHARE)
+                || keywords(i, FOR, KEY)
+                || keywords(i, FOR, NO);
     }
 
-    private boolean wordPair(int i, SqlKeyword first, SqlKeyword second) {
-        return word(i, first) && word(nextSignificant(i + 1), second);
-    }
+    private boolean keywords(int i, SqlKeyword ... keywords) {
+        int index = i;
 
-    private boolean wordPair3(int i, SqlKeyword a, SqlKeyword b, SqlKeyword c) {
-        return word(i, a) && wordPair(nextSignificant(i + 1), b, c);
+        for( SqlKeyword keyword : keywords ) {
+            if( !keyword(index, keyword) )
+                return false;
+
+            index = nextSignificant(index + 1);
+        }
+
+        return true;
     }
 
     private SqlKeyword keyword(int i) {
@@ -478,7 +483,7 @@ public final class SqlSelect {
                 : null;
     }
 
-    private boolean word(int i, SqlKeyword keyword) {
+    private boolean keyword(int i, SqlKeyword keyword) {
         return i >= 0
                 && i < sourceTokens.size()
                 && sourceTokens.get(i).isKeyword(source, keyword);

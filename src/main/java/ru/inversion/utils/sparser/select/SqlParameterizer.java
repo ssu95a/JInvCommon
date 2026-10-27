@@ -79,7 +79,7 @@ final class SqlParameterizer {
                 orderScopes.pop();
             }
 
-            if (word(current, ORDER) && isOrderStart(tokens, i)) {
+            if (keyword(current, ORDER) && isOrderStart(tokens, i)) {
                 orderScopes.push(depth);
             }
             if (symbol(current, "(")) {
@@ -149,16 +149,16 @@ final class SqlParameterizer {
 
     private boolean isOrderStart(List<SqlScanner.Token> tokens, int i) {
         int next = nextSignificant(tokens, i + 1);
-        if (next < tokens.size() && word(tokens.get(next), BY)) return true;
-        return next < tokens.size() && word(tokens.get(next), SIBLINGS)
-                && wordAt(tokens, nextSignificant(tokens, next + 1), BY);
+        if (next < tokens.size() && keyword(tokens.get(next), BY)) return true;
+        return next < tokens.size() && keyword(tokens.get(next), SIBLINGS)
+                && keywordAt(tokens, nextSignificant(tokens, next + 1), BY);
     }
 
     private boolean isOrderTerminator(List<SqlScanner.Token> tokens, int i) {
         SqlScanner.Token t = tokens.get(i);
         return symbol(t, ";")
                 || in(keyword(t), LIMIT, OFFSET, FETCH, UNION, INTERSECT, EXCEPT, MINUS)
-                || (word(t, FOR) && in(
+                || (keyword(t, FOR) && in(
                         keywordAt(tokens, nextSignificant(tokens, i + 1)),
                         UPDATE, SHARE, KEY, NO
                 ));
@@ -184,26 +184,26 @@ final class SqlParameterizer {
             p = previousSignificant(tokens, p - 1);
         }
 
-        if (p >= 0 && (symbol(tokens.get(p), "::") || word(tokens.get(p), AS))) {
+        if (p >= 0 && (symbol(tokens.get(p), "::") || keyword(tokens.get(p), AS))) {
             return true;
         }
 
         // character varying(...), bit varying(...), double precision(...)
-        if (p >= 0 && (word(tokens.get(typeName), VARYING)
-                || word(tokens.get(typeName), PRECISION))) {
+        if (p >= 0 && (keyword(tokens.get(typeName), VARYING)
+                || keyword(tokens.get(typeName), PRECISION))) {
             int preceding = p;
             boolean multiWordType =
-                    (word(tokens.get(typeName), VARYING)
-                            && (wordAt(tokens, preceding, CHARACTER)
-                            || wordAt(tokens, preceding, BIT)))
-                    || (word(tokens.get(typeName), PRECISION)
-                            && wordAt(tokens, preceding, DOUBLE));
+                    (keyword(tokens.get(typeName), VARYING)
+                            && (keywordAt(tokens, preceding, CHARACTER)
+                            || keywordAt(tokens, preceding, BIT)))
+                    || (keyword(tokens.get(typeName), PRECISION)
+                            && keywordAt(tokens, preceding, DOUBLE));
 
             if (multiWordType) {
                 int prefix = previousSignificant(tokens, preceding - 1);
                 return prefix >= 0
                         && (symbol(tokens.get(prefix), "::")
-                        || word(tokens.get(prefix), AS));
+                        || keyword(tokens.get(prefix), AS));
             }
         }
 
@@ -328,8 +328,8 @@ final class SqlParameterizer {
         return i >= 0 && i < tokens.size() ? keyword(tokens.get(i)) : null;
     }
 
-    private boolean wordAt(List<SqlScanner.Token> tokens, int i, SqlKeyword keyword) {
-        return i >= 0 && i < tokens.size() && word(tokens.get(i), keyword);
+    private boolean keywordAt(List<SqlScanner.Token> tokens, int i, SqlKeyword expected) {
+        return i >= 0 && i < tokens.size() && keyword(tokens.get(i), expected);
     }
 
     private static boolean isTrivia(SqlScanner.Kind kind) {
@@ -418,8 +418,8 @@ final class SqlParameterizer {
         SqlScanner.Token p = tokens.get(previous);
         return p.getKind() == SqlScanner.Kind.OPERATOR
                 || symbol(p, "(") || symbol(p, ",") || symbol(p, "=")
-                || word(p, BY) || word(p, WHERE) || word(p, AND)
-                || word(p, OR) || word(p, SELECT) || word(p, HAVING);
+                || keyword(p, BY) || keyword(p, WHERE) || keyword(p, AND)
+                || keyword(p, OR) || keyword(p, SELECT) || keyword(p, HAVING);
     }
 
     private boolean legacyClosing(List<SqlScanner.Token> tokens, int i) {
@@ -435,8 +435,8 @@ final class SqlParameterizer {
                         AND, OR, ORDER, GROUP, WHERE
                 );
     }
-    private boolean word(SqlScanner.Token token, SqlKeyword keyword) {
-        return token.isKeyword(source, keyword);
+    private boolean keyword(SqlScanner.Token token, SqlKeyword expected) {
+        return token.isKeyword(source, expected);
     }
 
     private boolean symbol(SqlScanner.Token token, String expected) {
