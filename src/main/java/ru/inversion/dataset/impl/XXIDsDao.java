@@ -2,8 +2,8 @@ package ru.inversion.dataset.impl;
 
 import ru.inversion.dataset.DataSetException;
 import ru.inversion.dataset.ISQLExpression;
-import ru.inversion.dataset.ParametersByName;
-import ru.inversion.dataset.parser.SQLParser;
+import ru.inversion.dataset.SQLExpression;
+import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.ParametersValues;
@@ -84,53 +84,7 @@ public class XXIDsDao {
                 }
 
 
-                if( paramMap.isEmpty() )
-                {
-                    retFilterStr = filterSQLText;
-                }
-                else
-                {
-                    SQLParser sp = new SQLParser(filterSQLText);
-                    retFilterStr = sp.prepareSqlWithParametersValue((ParametersByName)parameterName -> paramMap.get(parameterName));
-                    /*
-                    String sql       = filterSQLText;
-                    StringBuilder sb = new StringBuilder();
-
-                    char ch;
-
-                    for( int i = 0; i < sql.length(); i++ ) {
-
-                        ch = sql.charAt(i);
-
-                        if( ch == ':' ) {
-
-                            while (
-                                ++i < sql.length() && isIgnoreChar( sql.charAt(i) )
-                            )
-                            {;}
-
-                            StringBuilder p = new StringBuilder( );
-
-                            for( ; i < sql.length() && !isIgnoreChar( sql.charAt(i) ); i++ ) {
-                                p.append( sql.charAt(i) );
-                            }
-
-                            if( p.length() > 0 )
-                            {
-                                Object parameterValue = paramMap.get( p.toString() );
-                                p = null;
-                                if( parameterValue != null )
-                                    sb.append( castValue2Str( parameterValue ) );
-                            }
-
-                            continue;
-                        }
-                        sb.append(ch);
-                    }//end for
-
-                    retFilterStr = sb.toString();
-                    */
-                }//end else
+                retFilterStr = renderStoredFilter(filterSQLText, paramMap, tc.dialect());
 
             }// ifPresent
 
@@ -140,6 +94,24 @@ public class XXIDsDao {
             throw new DataSetException( Tags.PRODUCT_LABEL + "Error on load filter with ID = " + filterID, th );
         }
 	}
+
+    /**
+     * Сохранённые фильтры FRM_FILTER используют :p1, :p2, ...
+     * Если значений нет, возвращаем исходный текст без трансформаций.
+     * Legacy ~-маркеры удаляет SqlParameterizer при сборке SELECT.
+     */
+    static String renderStoredFilter(
+            String filterSql,
+            Map<String,Object> parameters,
+            SqlDialect dialect
+    ) {
+        if( parameters == null || parameters.isEmpty() )
+            return filterSql;
+
+        SQLExpression expression = new SQLExpression(filterSql);
+        expression.setParameters(parameters);
+        return expression.getCompletedSQL(dialect);
+    }
 
     /** */
     static public FilterData loadDefaultFilter( TaskContext tc, String formName, String dataSetName ) throws Exception {
