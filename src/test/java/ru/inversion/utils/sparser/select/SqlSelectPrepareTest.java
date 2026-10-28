@@ -210,6 +210,23 @@ public class SqlSelectPrepareTest {
         );
     }
 
+    @Test public void postgresLegacyWhereAfterFromAliasRemovesPairedMarkers() {
+        String source =
+                "SELECT cmnamenu CMNBMNA, cMnaName CMNBNAME FROM xmna "
+                + "~WHERE ( desk_Dsbl is null or desk_Dsbl <> ?) "
+                + "AND ( xMNA.secured = ?~ OR exists ( "
+                + "select NULL from MNQ, MNB WHERE mnb.CMNBMNA = xMNA.CMNAMENU "
+                + "AND MNQ.iMNQmnb=MNB.iMNBid AND MNQ.iMNQusr=Access_1.Get_Cur_User_Id() "
+                + ") ) ORDER BY cMnbName";
+
+        PreparedSql prepared = pg(source).prepare();
+
+        assertEquals(source.replace("~", ""), prepared.getSql());
+        assertParameterKinds(prepared,
+                Parameter.Kind.POSITIONAL,
+                Parameter.Kind.POSITIONAL);
+    }
+
     @Test public void legacyTildeProtectsExpressionAndIsRemoved() {
         SqlSelect select = ora("select id from t order by 1 limit 100");
         select.setOrderBy("~replace(code, 'a', 'b')~");

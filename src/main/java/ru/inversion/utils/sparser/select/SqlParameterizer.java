@@ -413,6 +413,15 @@ final class SqlParameterizer {
     }
 
     private boolean legacyOpening(List<SqlScanner.Token> tokens, int i) {
+        // Legacy ~WHERE can follow a FROM table/alias, i.e. a WORD token.
+        // Require adjacency: do not reinterpret PostgreSQL's regex operator
+        // when a standalone ~ happens to precede a WHERE keyword.
+        if (i + 1 < tokens.size()
+                && tokens.get(i).getEnd() == tokens.get(i + 1).getStart()
+                && keywordAt(tokens, i + 1, WHERE)) {
+            return true;
+        }
+
         int previous = previousSignificant(tokens, i - 1);
         if (previous < 0) return true;
         SqlScanner.Token p = tokens.get(previous);
