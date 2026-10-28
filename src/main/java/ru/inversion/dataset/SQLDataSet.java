@@ -1305,54 +1305,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
            IParameters parameters,
            SqlScanner scanner
    ) {
-      String sql = preparedSql.getSql();
-      List<Parameter> parameterList = preparedSql.getParameters();
-
-      StringBuilder result = new StringBuilder(sql.length() + 64);
-      int copiedUntil = 0;
-      int parameterIndex = 0;
-      int positionalIndex = 0;
-
-      for( SqlScanner.Token token : scanner.scan(sql) ) {
-         if( token.getKind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
-            continue;
-
-         if( parameterIndex >= parameterList.size() )
-            throw new IllegalStateException(
-                    "PreparedSql has more JDBC placeholders than parameters");
-
-         Parameter parameter = parameterList.get(parameterIndex++);
-         Object value;
-
-         switch( parameter.getKind() ) {
-            case POSITIONAL:
-               value = parameters.getParameter(positionalIndex++);
-               break;
-            case NAMED:
-               value = parameters.getParameter(parameter.getName());
-               break;
-            case NUMBERED:
-               value = parameters.getParameter(parameter.getNumber() - 1);
-               break;
-            case LITERAL:
-               value = parameter.getValue();
-               break;
-            default:
-               throw new IllegalStateException(
-                       "Unknown parameter kind: " + parameter.getKind());
-         }
-
-         result.append(sql, copiedUntil, token.getStart());
-         result.append(SqlValueFormatter.format(value));
-         copiedUntil = token.getEnd();
-      }
-
-      if( parameterIndex != parameterList.size() )
-         throw new IllegalStateException(
-                 "PreparedSql has fewer JDBC placeholders than parameters");
-
-      result.append(sql, copiedUntil, sql.length());
-      return result.toString();
+      return PreparedSqlRenderer.render(preparedSql, parameters, scanner);
    }
 
    private transient String refreshCurrentRowSQL;

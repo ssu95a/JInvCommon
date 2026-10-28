@@ -3,7 +3,7 @@ package ru.inversion.tds;
 import ru.inversion.dataset.*;
 import ru.inversion.dataset.impl.JDBCDataReader;
 import ru.inversion.dataset.impl.XXIDsDao;
-import ru.inversion.dataset.parser.SQLParser;
+import ru.inversion.dataset.impl.PreparedSqlRenderer;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.meta.IEntityProperty;
@@ -11,6 +11,7 @@ import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
+import ru.inversion.utils.sparser.SqlScannerFactory;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.sparser.select.SqlSelect;
 
@@ -888,23 +889,22 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
 
         super.dump(d);
 
-        IParameters p = new IParameters( ) {
-            @Override
-            public Object getParameter( String parameterName ) {
-                return getParameterValue( parameterName );
-            }
-            @Override
-            public Object getParameter( int parameterIndex ) {
-                return getParameterValue( parameterIndex );
-            }
-        };
         try {
 
             String strSQL = prepareCompleteSql();
-            d.put("ds.sql.query",  strSQL );
+            d.put("ds.sql.query", strSQL);
 
-            SQLParser s = new SQLParser( strSQL );
-            d.put("ds.sql.query_with_parameters",  s.prepareSqlWithParametersValue(p) );
+            PreparedSql preparedSql = new SqlSelect(
+                    strSQL,
+                    getTaskContextForUse().dialect()
+            ).prepare();
+
+            d.put("ds.sql.query_with_parameters",
+                    PreparedSqlRenderer.render(
+                            preparedSql,
+                            getParameters(),
+                            SqlScannerFactory.create(getTaskContextForUse().dialect())
+                    ));
             d.put("ds.support_mark",  isSupportMark() );
             d.put("ds.native_query_name", S.nvl(nativeQueryName) );
             d.put("ds.dataQueryMode", IDataSet.DataQueryModeEnum.QUERY_ALL_ROWS);
