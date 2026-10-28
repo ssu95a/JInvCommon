@@ -1,9 +1,6 @@
 package ru.inversion.tc.jdbc.internal.proxy;
 
-import ru.inversion.tc.jdbc.event.EventPhase;
-import ru.inversion.tc.jdbc.event.EventType;
-import ru.inversion.tc.jdbc.event.JdbcEvent;
-import ru.inversion.tc.jdbc.event.JdbcEventBus;
+import ru.inversion.tc.jdbc.event.*;
 import ru.inversion.tc.jdbc.internal.db.JdbcDatabaseSupport;
 import ru.inversion.tc.jdbc.internal.db.JdbcDatabaseSupportFactory;
 import ru.inversion.tc.jdbc.internal.lifecycle.JdbcLifecycleManager;
@@ -494,31 +491,67 @@ public final class JdbcConnectionProxy extends JdbcObjectProxy
     */
    private Object setAutoCommit( Method method, Object[] args ) throws Throwable
    {
-      suspendAutoFinish( );
+      suspendAutoFinish();
 
       boolean autoCommit = (Boolean) args[0];
 
-      try {
-
-         Object value = invokeRaw( method, args );
+      try
+      {
+         Object value = invokeRaw( method, args);
 
          if( autoCommit )
              transactionCompleted();
 
+         /*
+          * setAutoCommit(true) может завершить transaction
+          * и изменить состояние ResultSet/Statement.
+          */
+         syncStatements();
+
+         fireAutoCommitSet( autoCommit );
+
          return value;
       }
-      finally
+      catch( Throwable throwable )
       {
-         try {
-            syncStatements();
-         }
-         finally {
-            resumeAutoFinish();
-         }
-      }
+         /*
+          * Driver мог изменить часть JDBC state даже при ошибке.
+          */
+         syncStatements();
 
+         fireAutoCommitError( autoCommit, throwable );
+
+         throw throwable;
+      }
+      finally {
+         resumeAutoFinish();
+      }
    }
 
+
+   /** */
+   private void fireAutoCommitSet( boolean autoCommit )
+   {
+      if( eventBus == null )
+          return;
+
+      if( !eventBus.hasListeners(JdbcEvent.class) && !eventBus.hasListeners(JdbcConnectionEvent.class) )
+         return;
+
+      eventBus.fire( JdbcConnectionEvent.autoCommitSet( proxy, autoCommit ) );
+   }
+
+   /** */
+   private void fireAutoCommitError( boolean autoCommit, Throwable throwable )
+   {
+      if( eventBus == null )
+          return;
+
+      if( !eventBus.hasListeners(JdbcEvent.class) && !eventBus.hasListeners(JdbcConnectionEvent.class) )
+          return;
+
+      eventBus.fire( JdbcConnectionEvent.autoCommitError( proxy, autoCommit, throwable ) );
+   }
 
    /**
     * Connection.releaseSavepoint(...).

@@ -187,16 +187,14 @@ public final class JdbcTraceEvent extends EventObject
     * Преобразует точное low-level JDBC событие
     * в пользовательскую trace-категорию.
     */
-   private static JdbcTraceType traceType(
-           JdbcEvent event
-   )
+   private static JdbcTraceType traceType( JdbcEvent event )
    {
       /*
        * Ошибка любого JDBC operation полезна пользователю,
        * даже если исходное событие относится к TECH.
        */
       if( event.phase() == EventPhase.ERROR )
-         return JdbcTraceType.ERROR;
+          return JdbcTraceType.ERROR;
 
       switch( event.type() )
       {
@@ -220,6 +218,9 @@ public final class JdbcTraceEvent extends EventObject
          case DBMS_OUTPUT:
             return JdbcTraceType.DBMS_OUTPUT;
 
+         case CONNECTION_AUTOCOMMIT_SET:
+            return JdbcTraceType.INFO;
+
          default:
             /*
              * CONNECTION_OPEN/CLOSE
@@ -239,38 +240,23 @@ public final class JdbcTraceEvent extends EventObject
     * Самостоятельное trace-событие,
     * не имеющее JdbcEvent.
     */
-   public static JdbcTraceEvent custom(
-           Object source,
-           JdbcTraceType type,
-           String text
-   )
+   public static JdbcTraceEvent custom( Object source, JdbcTraceType type, String text )
    {
-      return custom(
-              source,
-              type,
-              text,
-              null
-      );
+      return custom( source, type, text, null );
    }
 
 
    /**
-    * Самостоятельное trace-событие
-    * с дополнительными properties.
+    * Самостоятельное trace-событие дополнительными properties.
     */
-   public static JdbcTraceEvent custom(
-           Object source,
-           JdbcTraceType type,
-           String text,
-           Map<String, Object> properties
-   )
+   public static JdbcTraceEvent custom( Object source, JdbcTraceType type, String text, Map<String, Object> properties )
    {
-      return new JdbcTraceEvent(
-              source,
-              null,
-              type,
-              text,
-              properties
+      return new JdbcTraceEvent (
+         source,
+         null,
+         type,
+         text,
+         properties
       );
    }
 
@@ -278,29 +264,20 @@ public final class JdbcTraceEvent extends EventObject
    /**
     * Создаёт immutable snapshot properties.
     */
-   private static Map<String, Object> snapshot(
-           Map<String, Object> source
-   )
+   private static Map<String, Object> snapshot( Map<String, Object> source )
    {
       if( source == null || source.isEmpty() )
          return Collections.emptyMap();
 
-      return Collections.unmodifiableMap(
-              new LinkedHashMap<>(source)
-      );
+      return Collections.unmodifiableMap( new LinkedHashMap<>(source) );
    }
 
 
    /**
     * Форматированный вывод события.
     */
-   public void print(
-           Writer writer
-   )
+   public void print( Writer writer )
    {
-      JdbcTraceEventWriter.write(
-              this,
-              writer
-      );
+      JdbcTraceEventWriter.write( this, writer );
    }
 }

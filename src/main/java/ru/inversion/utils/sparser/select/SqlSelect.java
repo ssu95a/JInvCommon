@@ -5,7 +5,6 @@ import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.SqlScannerFactory;
 import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
 import ru.inversion.db.dialect.SqlDialect;
-import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 
 import java.util.ArrayList;

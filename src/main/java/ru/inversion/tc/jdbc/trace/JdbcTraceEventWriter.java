@@ -1,9 +1,6 @@
 package ru.inversion.tc.jdbc.trace;
 
-import ru.inversion.tc.jdbc.event.EventType;
-import ru.inversion.tc.jdbc.event.JdbcEvent;
-import ru.inversion.tc.jdbc.event.JdbcMessageEvent;
-import ru.inversion.tc.jdbc.event.JdbcStatementEvent;
+import ru.inversion.tc.jdbc.event.*;
 import ru.inversion.utils.S;
 
 import java.io.IOException;
@@ -66,7 +63,33 @@ public final class JdbcTraceEventWriter
          return;
       }
 
+      if( jdbcEvent instanceof JdbcConnectionEvent )
+      {
+         writeConnectionEvent( traceEvent, (JdbcConnectionEvent) jdbcEvent, writer );
+         return;
+      }
+
       writeGenericJdbcEvent(traceEvent,jdbcEvent,writer);
+   }
+
+
+   private static void writeConnectionEvent(
+      JdbcTraceEvent traceEvent,
+      JdbcConnectionEvent event,
+      Writer writer
+   )
+      throws IOException
+   {
+      writer.append("CONNECTION");
+
+      writeSession( traceEvent, writer );
+
+      writer.append(": autoCommit = ");
+      writer.append( String.valueOf( event.autoCommit() ) );
+
+      writer.append('\n');
+
+      writeThrowable( event.throwable(), writer );
    }
 
    private static void writeMessageEvent(

@@ -161,7 +161,6 @@ public final class JdbcResultSetProxy extends JdbcObjectProxy
 
       /*
        * unwrap(ResultSet.class) должен вернуть proxy.
-       * <p>
        * Если запрос на Vendor-specific unwrap, то isWrapperFor вернет false и вызов делегируется driver-у.
        */
       if( "unwrap".equals(methodName) && args != null && args.length == 1 )
@@ -190,16 +189,13 @@ public final class JdbcResultSetProxy extends JdbcObjectProxy
    {
       if( closed )
           return;
-      try
-      {
+
+      try {
          resultSet.close();
       }
       catch( Throwable throwable )
       {
-         /*
-          * Driver мог физически закрыть RS
-          * и одновременно вернуть ошибку.
-          */
+         /* Driver мог физически закрыть RS и одновременно вернуть ошибку. */
          if( isRawClosed() )
              lifecycleClosed();
 
@@ -236,7 +232,7 @@ public final class JdbcResultSetProxy extends JdbcObjectProxy
    private void lifecycleClosed()
    {
       if( closed )
-         return;
+          return;
 
       boolean removed = lifecycle.unregisterCursor( registration );
 
@@ -279,9 +275,7 @@ public final class JdbcResultSetProxy extends JdbcObjectProxy
       }
       catch( SQLException ignored )
       {
-         /*
-          * считаем открытым.
-          */
+         /* считаем открытым.  */
          return false;
       }
    }
@@ -291,8 +285,7 @@ public final class JdbcResultSetProxy extends JdbcObjectProxy
    private Object invokeRaw( Method method, Object[] args )
            throws Throwable
    {
-      try
-      {
+      try {
          return method.invoke( resultSet, args );
       }
       catch( InvocationTargetException ex )
@@ -316,9 +309,7 @@ public final class JdbcResultSetProxy extends JdbcObjectProxy
           return;
 
       if( !eventBus.hasListeners( JdbcResultSetEvent.class ) )
-      {
-         return;
-      }
+          return;
 
       eventBus.fire( JdbcResultSetEvent.open( proxy, lifecycle.openCursorCount(), statement.isTraceIgnored() ) );
    }

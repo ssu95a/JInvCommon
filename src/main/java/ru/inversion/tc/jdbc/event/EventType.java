@@ -21,7 +21,9 @@ public enum EventType
    SAVEPOINT_ROLLBACK   (Kind.JDBC),
 
    NOTICE               (Kind.SERVER_OUTPUT),
-   DBMS_OUTPUT          (Kind.SERVER_OUTPUT);
+   DBMS_OUTPUT          (Kind.SERVER_OUTPUT),
+
+   CONNECTION_AUTOCOMMIT_SET(Kind.JDBC);
 
    /** Вид событий */
    public enum Kind
