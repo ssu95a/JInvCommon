@@ -1,6 +1,7 @@
 package ru.inversion.dataset;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
   * Интерфейс для работы с набором индексируемых параметров.
@@ -28,13 +29,23 @@ public interface ParametersByIndex extends IParameters {
 
     /** */
     static ParametersByIndex of( List<Object> list ) {
+        Objects.requireNonNull(list, "list");
+
         return new ParametersByIndex() {
             @Override
             public Object getParameter( int parameterIndex ) {
-                return list.get(parameterIndex);
+                return hasParameter(parameterIndex)
+                        ? list.get(parameterIndex)
+                        : null;
             }
             @Override
-            public boolean hasParameter( int parameterIndex ) { return parameterIndex > -1 && parameterIndex <  list.size(); }
+            public boolean hasParameter( int parameterIndex ) {
+                return parameterIndex >= 0 && parameterIndex < list.size();
+            }
+            @Override
+            public boolean isEmpty() {
+                return list.isEmpty();
+            }
         };
     }
 }

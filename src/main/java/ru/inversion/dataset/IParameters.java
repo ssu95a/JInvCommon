@@ -75,6 +75,36 @@ public interface IParameters {
      */
 	Object getParameter( int parameterIndex );
 
+    /**
+     * Возвращает значение именованного параметра или {@code defaultValue},
+     * если параметр отсутствует.
+     * <p>
+     * Явно установленный {@code null} считается значением и возвращается как {@code null}.
+     */
+    default Object getParameterOrDefault(
+            String parameterName,
+            Object defaultValue
+    ) {
+        return hasParameter(parameterName)
+                ? getParameter(parameterName)
+                : defaultValue;
+    }
+
+    /**
+     * Возвращает значение индексированного параметра или {@code defaultValue},
+     * если параметр отсутствует.
+     * <p>
+     * Явно установленный {@code null} считается значением и возвращается как {@code null}.
+     */
+    default Object getParameterOrDefault(
+            int parameterIndex,
+            Object defaultValue
+    ) {
+        return hasParameter(parameterIndex)
+                ? getParameter(parameterIndex)
+                : defaultValue;
+    }
+
     /** 
      * Установка значения именованного параметра {@code parameterName}.
      * <p>
@@ -316,6 +346,10 @@ public interface IParameters {
         throw new UnsupportedOperationException( "getParametersNames" );
     }
 
-    /** */
+    /**
+     * @deprecated unsafe unchecked cast; prefer an explicit cast at the call site.
+     */
+    @Deprecated
+    @SuppressWarnings("unchecked")
     default <T extends IParameters> T to() { return (T)this; }
 }

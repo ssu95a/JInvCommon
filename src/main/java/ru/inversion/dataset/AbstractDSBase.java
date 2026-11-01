@@ -182,16 +182,15 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
      */
     public Object getParameterValue( int index ) throws DataSetParameterException {
 
-        Object value = NO_PARAMETER_VALUE;
-
         IParameters callback = getCallbackParameters();
 
-        if (callback != null && callback.hasParameter(index))
-            value = callback.getParameter(index);
+        Object value = callback == null
+                ? NO_PARAMETER_VALUE
+                : callback.getParameterOrDefault(index, NO_PARAMETER_VALUE);
 
         // null считается заданным значением. Только sentinel разрешает fallback.
-        if (value == NO_PARAMETER_VALUE && hasParameter(index))
-            value = getParameter(index);
+        if (value == NO_PARAMETER_VALUE)
+            value = getParameterOrDefault(index, NO_PARAMETER_VALUE);
 
         if (value == NO_PARAMETER_VALUE)
             DataSetParameterException.throwNoSetParameterValue(index);
@@ -207,16 +206,15 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
      */
     public Object getParameterValue( String name ) throws DataSetParameterException {
 
-        Object value = NO_PARAMETER_VALUE;
-
         IParameters callback = getCallbackParameters();
 
-        if (callback != null && callback.hasParameter(name))
-            value = callback.getParameter(name);
+        Object value = callback == null
+                ? NO_PARAMETER_VALUE
+                : callback.getParameterOrDefault(name, NO_PARAMETER_VALUE);
 
         // null считается заданным значением. Только sentinel разрешает fallback.
-        if (value == NO_PARAMETER_VALUE && hasParameter(name))
-            value = getParameter(name);
+        if (value == NO_PARAMETER_VALUE)
+            value = getParameterOrDefault(name, NO_PARAMETER_VALUE);
 
         if (value == NO_PARAMETER_VALUE)
             DataSetParameterException.throwNoSetParameterValue(name);

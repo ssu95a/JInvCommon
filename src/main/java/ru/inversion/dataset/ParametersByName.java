@@ -1,6 +1,7 @@
 package ru.inversion.dataset;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -30,6 +31,8 @@ public interface ParametersByName extends IParameters {
 
     /** */
     static ParametersByName of( Map<String,Object> map ) {
+        Objects.requireNonNull(map, "map");
+
         return new ParametersByName() {
             @Override
             public Object getParameter( String parameterName ) {
@@ -38,6 +41,10 @@ public interface ParametersByName extends IParameters {
             @Override
             public boolean hasParameter( String parameterName ) {
                 return map.containsKey(parameterName);
+            }
+            @Override
+            public boolean isEmpty() {
+                return map.isEmpty();
             }
         };
     }

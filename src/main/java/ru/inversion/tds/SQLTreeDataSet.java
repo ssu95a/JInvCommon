@@ -717,15 +717,15 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
      */
     protected Object getParameterValue( int index ) {
 
-        Object value = NO_PARAMETER_VALUE;
-
         IParameters cp = getCallbackParameters();
 
-        if( cp != null && cp.hasParameter(index) )
-            value = cp.getParameter(index);
+        Object value = cp == null
+                ? NO_PARAMETER_VALUE
+                : cp.getParameterOrDefault(index, NO_PARAMETER_VALUE);
 
-        if( value == NO_PARAMETER_VALUE && dataSetParameters != null && dataSetParameters.hasParameter(index) )
-            value = dataSetParameters.getParameter(index);
+        if( value == NO_PARAMETER_VALUE && dataSetParameters != null )
+            value = dataSetParameters.getParameterOrDefault(
+                    index, NO_PARAMETER_VALUE);
 
         if( value == NO_PARAMETER_VALUE )
             throw new TreeDataSetException("throwNoSetParameterValue");
@@ -750,15 +750,15 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
      */
     protected Object getParameterValue( String name ) {
 
-        Object value = NO_PARAMETER_VALUE;
-
         IParameters cp = getCallbackParameters();
 
-        if( cp != null && cp.hasParameter(name) )
-            value = cp.getParameter(name);
+        Object value = cp == null
+                ? NO_PARAMETER_VALUE
+                : cp.getParameterOrDefault(name, NO_PARAMETER_VALUE);
 
-        if( value == NO_PARAMETER_VALUE && dataSetParameters != null && dataSetParameters.hasParameter(name) )
-            value = dataSetParameters.getParameter(name);
+        if( value == NO_PARAMETER_VALUE && dataSetParameters != null )
+            value = dataSetParameters.getParameterOrDefault(
+                    name, NO_PARAMETER_VALUE);
 
         if( value == NO_PARAMETER_VALUE )
             throw new TreeDataSetException( Tags.PRODUCT_LABEL + "No parameter value for '" + name +"'");
