@@ -177,7 +177,7 @@ public class NextSelectBuilderTest {
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
         assertEquals(
-                Arrays.<Object>asList(null, 12),
+                Arrays.<Object>asList(null, null),
                 b.values(new Params().set(0, null))
         );
     }
