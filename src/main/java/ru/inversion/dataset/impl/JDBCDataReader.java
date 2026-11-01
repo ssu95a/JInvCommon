@@ -4,13 +4,9 @@ import ru.inversion.dataset.*;
 import ru.inversion.dataset.mark.IMarkable;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.meta.EntityMetadataFactory;
-import ru.inversion.utils.Jt2St;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
-import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
-
-import java.math.BigInteger;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -70,56 +66,27 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         this.enableMark = enableMark;
     }
 
-    /** Resolves current DataSet values in physical JDBC placeholder order. */
-    private List<Object> resolvePreparedParameters(IParameters callbackParameters) {
-        List<Object> values = new ArrayList<>(preparedSql.getParameters().size());
-        int positionalIndex = 0;
-
-        for (Parameter parameter : preparedSql.getParameters()) {
-            Object value;
-            switch (parameter.getKind()) {
-                case POSITIONAL:
-                    value = callbackParameters.getParameter(positionalIndex++);
-                    break;
-                case NAMED:
-                    value = callbackParameters.getParameter(parameter.getName());
-                    break;
-                case NUMBERED:
-                    value = callbackParameters.getParameter(parameter.getNumber() - 1);
-                    break;
-                case LITERAL:
-                    value = legacyIntegralLiteral(parameter.getValue());
-                    break;
-                default:
-                    throw new IllegalStateException("Unknown parameter kind: " + parameter.getKind());
-            }
-            values.add(Jt2St.convert(value));
-        }
-        return values;
-    }
-
-    /** Preserve legacy JDBC types for automatically generated integer literals. */
-    private static Object legacyIntegralLiteral(Object value) {
-        if (!(value instanceof BigInteger))
-            return value;
-
-        BigInteger integer = (BigInteger) value;
-        if (integer.compareTo(BigInteger.valueOf(Integer.MIN_VALUE)) >= 0
-                && integer.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) <= 0)
-            return integer.intValue();
-        if (integer.compareTo(BigInteger.valueOf(Long.MIN_VALUE)) >= 0
-                && integer.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) <= 0)
-            return integer.longValue();
-        return integer;
-    }
-
-    /** */
+    /**
+     * Compatibility entry point. New internal code should resolve values
+     * before crossing the JDBCDataReader boundary.
+     */
     @Override
-    public synchronized void executeQuery( IParameters callbackParameters ) throws DataSetException {
+    public void executeQuery( IParameters callbackParameters ) throws DataSetException {
+        executeQuery( PreparedSqlValues.jdbc(preparedSql, callbackParameters) );
+    }
+
+    /** Execute with values already resolved in physical JDBC placeholder order. */
+    public synchronized void executeQuery( List<Object> jdbcValues ) throws DataSetException {
         try {
             doClose();
             rowCounter = 0;
-            final List<Object> pv = resolvePreparedParameters(callbackParameters);
+
+            if( jdbcValues == null
+                    || jdbcValues.size() != preparedSql.getParameters().size() )
+                throw new IllegalArgumentException(
+                        "PreparedSql parameters/value count mismatch");
+
+            final List<Object> pv = new ArrayList<>(jdbcValues);
 
             try {
                 statement = connection.prepareStatement( preparedSql.getSql() );
@@ -143,7 +110,8 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         }
         catch( Exception ex ) {
             doClose();
-            throw new DataSetException( Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
         }
     }
 

@@ -9,14 +9,11 @@ import ru.inversion.db.DBUniqueResult;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.db.StoredProc;
 import ru.inversion.tc.TaskContext;
-import ru.inversion.utils.Jt2St;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
-import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 
 import javax.persistence.NamedNativeQuery;
-import java.math.BigInteger;
 import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -137,7 +134,7 @@ public class XXIDsMarkerDao {
             PreparedSql sql,
             IParameters parameters
     ) {
-        List<Object> values = resolveParameters( sql, parameters );
+        List<Object> values = PreparedSqlValues.jdbc(sql, parameters);
 
         try( PreparedStatement statement = tc.getConnection().prepareStatement(sql.getSql()) ) {
             int index = 1;
@@ -151,54 +148,6 @@ public class XXIDsMarkerDao {
             try { tc.getConnection().rollback(); } catch( SQLException ignored ) { }
             throw new JInvDbException( th, sql.getSql(), values );
         }
-    }
-
-    private static List<Object> resolveParameters( PreparedSql sql, IParameters parameters ) {
-        List<Object> values = new ArrayList<>( sql.getParameters().size() );
-        int positionalIndex = 0;
-
-        for( Parameter parameter : sql.getParameters() ) {
-            Object value;
-
-            switch( parameter.getKind() ) {
-                case POSITIONAL:
-                    value = parameters.getParameter( positionalIndex++ );
-                    break;
-                case NAMED:
-                    value = parameters.getParameter( parameter.getName() );
-                    break;
-                case NUMBERED:
-                    value = parameters.getParameter( parameter.getNumber() - 1 );
-                    break;
-                case LITERAL:
-                    value = legacyIntegralLiteral( parameter.getValue() );
-                    break;
-                default:
-                    throw new IllegalStateException(
-                            "Unknown parameter kind: " + parameter.getKind() );
-            }
-
-            values.add( Jt2St.convert(value) );
-        }
-
-        return values;
-    }
-
-    private static Object legacyIntegralLiteral( Object value ) {
-        if( !(value instanceof BigInteger) )
-            return value;
-
-        BigInteger integer = (BigInteger)value;
-
-        if( integer.compareTo(BigInteger.valueOf(Integer.MIN_VALUE)) >= 0
-                && integer.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) <= 0 )
-            return integer.intValue();
-
-        if( integer.compareTo(BigInteger.valueOf(Long.MIN_VALUE)) >= 0
-                && integer.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) <= 0 )
-            return integer.longValue();
-
-        return integer;
     }
 
     /** */

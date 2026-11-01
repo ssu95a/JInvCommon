@@ -56,6 +56,23 @@ public class JDBCDataReaderPreparedSqlTest {
     }
 
     @Test
+    public void executesAlreadyResolvedJdbcValuesWithoutParameterInterpretation() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        PreparedSql sql = prepared(
+                "select ?, ?",
+                Parameter.named("ignored"),
+                Parameter.literal(new BigInteger("10"))
+        );
+
+        reader(jdbc, sql).executeQuery(Arrays.<Object>asList(17, 10));
+
+        assertEquals(
+                Arrays.asList(17, 10),
+                jdbc.statements.get(0).values()
+        );
+    }
+
+    @Test
     public void resolvesChangedRuntimeValuesOnEachExecution() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc();
         PreparedSql sql = prepared("select ?, ?", Parameter.named("id"), Parameter.literal("FIXED"));
