@@ -14,13 +14,15 @@ import java.time.temporal.Temporal;
  */
 public final class SqlValueFormatter {
 
-   static final private DateFormat dateFormatter      = new SimpleDateFormat("yyyy-MM-dd");
-   static final private DateFormat timestampFormatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-
    private SqlValueFormatter() {
    }
 
    public static String format( Object value ) {
+
+        // DateFormat is mutable and not thread-safe. This utility is static
+        // and can be called concurrently by independent DataSets.
+        DateFormat dateFormatter      = new SimpleDateFormat("yyyy-MM-dd");
+        DateFormat timestampFormatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
         if( value == null )
             return " NULL ";
