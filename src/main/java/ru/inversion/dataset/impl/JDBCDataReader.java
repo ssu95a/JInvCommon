@@ -72,7 +72,19 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
      */
     @Override
     public void executeQuery( IParameters callbackParameters ) throws DataSetException {
-        executeQuery( PreparedSqlValues.jdbc(preparedSql, callbackParameters) );
+        try {
+            executeQuery(
+                    PreparedSqlValues.jdbc(preparedSql, callbackParameters)
+            );
+        }
+        catch( DataSetException ex ) {
+            throw ex;
+        }
+        catch( Exception ex ) {
+            doClose();
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
+        }
     }
 
     /** Execute with values already resolved in physical JDBC placeholder order. */
