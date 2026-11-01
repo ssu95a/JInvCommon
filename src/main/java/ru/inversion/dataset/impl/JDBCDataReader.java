@@ -76,6 +76,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     }
 
     /** Execute with values already resolved in physical JDBC placeholder order. */
+    @Override
     public synchronized void executeQuery( List<Object> jdbcValues ) throws DataSetException {
         try {
             doClose();
