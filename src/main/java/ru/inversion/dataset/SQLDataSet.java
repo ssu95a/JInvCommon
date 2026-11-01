@@ -105,7 +105,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected ISQLDataReader<P> dataReader;
 
    /** Актуальный resolver значений, связанный с текущим PreparedSql. */
-   private IParameters preparedReaderParameters;
+   private NextSelectBuilder preparedReaderBuilder;
 
    /** Живое представление параметров DataSet. Явный null имеет приоритет. */
    protected final IParameters mainSqlParameters = new IParameters() {
@@ -830,7 +830,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected PreparedSql prepareDataQuery() throws DataSetException {
       NextSelectBuilder builder = createNextSelectBuilder( false );
       PreparedSql sql = builder.prepare();
-      preparedReaderParameters = builder.parameters(mainSqlParameters);
+      preparedReaderBuilder = builder;
       return sql;
    }
 
@@ -859,7 +859,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                   dataReader.close();
                   dataReader = null;
                }
-               preparedReaderParameters = null;
+               preparedReaderBuilder = null;
                PreparedSql sql = prepareDataQuery();
 
                dataReader = new JDBCDataReader<>(
@@ -869,8 +869,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                needReCreateReader.setValue(false);
             }
 
-            dataReader.executeQuery(
-                    preparedReaderParameters == null ? mainSqlParameters : preparedReaderParameters);
+            if( preparedReaderBuilder == null )
+               dataReader.executeQuery(mainSqlParameters);
+            else
+               dataReader.executeQuery(
+                       preparedReaderBuilder.jdbcValues(mainSqlParameters));
 
             clear( );
             swappingData( fetchAllRows );
@@ -886,7 +889,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             // Не оставляем открытый курсор/PreparedStatement после неудачной загрузки.
             ISQLDataReader<P> failedReader = dataReader;
             dataReader = null;
-            preparedReaderParameters = null;
+            preparedReaderBuilder = null;
             if (failedReader != null) {
                try {
                   failedReader.close();
@@ -1262,12 +1265,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       addPredicates(builder, false);
 
       PreparedSql preparedSql = builder.prepare();
-      IParameters parameters = builder.parameters(mainSqlParameters);
+      List<Object> values = builder.values(mainSqlParameters);
 
       SqlScanner scanner = SqlScannerFactory.create(dialect);
 
       String completed =
-              renderPreparedSql(preparedSql, parameters, scanner);
+              renderPreparedSql(preparedSql, values, scanner);
 
       if( !completed.startsWith(prefix) )
          throw new IllegalStateException(
@@ -1288,12 +1291,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       try {
          NextSelectBuilder builder = createNextSelectBuilder(false);
          PreparedSql preparedSql = builder.prepare();
-         IParameters parameters = builder.parameters(mainSqlParameters);
+         List<Object> values = builder.values(mainSqlParameters);
 
          SqlScanner scanner =
                  SqlScannerFactory.create(getTaskContextForUse().dialect());
 
-         return renderPreparedSql(preparedSql, parameters, scanner);
+         return renderPreparedSql(preparedSql, values, scanner);
       }
       catch( Exception ex ) {
          throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on getCompletedSQL", ex );
@@ -1306,6 +1309,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
            SqlScanner scanner
    ) {
       return PreparedSqlRenderer.render(preparedSql, parameters, scanner);
+   }
+
+   static String renderPreparedSql(
+           PreparedSql preparedSql,
+           List<?> values,
+           SqlScanner scanner
+   ) {
+      return PreparedSqlRenderer.render(preparedSql, values, scanner);
    }
 
    private transient String refreshCurrentRowSQL;
@@ -1765,7 +1776,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       NextSelectBuilder builder = createNextSelectBuilder( ignoreFilters );
       PreparedSql preparedSql = builder.prepare();
-      IParameters parameters = builder.parameters( mainSqlParameters );
+      List<Object> values = builder.jdbcValues(mainSqlParameters);
 
       JDBCDataReader<P> reader = new JDBCDataReader<>(
               getTaskContextForUse().getConnection(),
@@ -1774,7 +1785,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
               null,
               false
       );
-      reader.executeQuery( parameters );
+      reader.executeQuery(values);
 
       return IDataReader.iterator( reader, 50 );
    }

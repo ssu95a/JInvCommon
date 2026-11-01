@@ -20,57 +20,52 @@ public final class PreparedSqlRenderer {
             IParameters parameters,
             SqlScanner scanner
     ) {
+        return render(
+                preparedSql,
+                PreparedSqlValues.resolve(preparedSql, parameters),
+                scanner
+        );
+    }
+
+    /** Render already resolved raw values in physical JDBC order. */
+    public static String render(
+            PreparedSql preparedSql,
+            List<?> values,
+            SqlScanner scanner
+    ) {
         Objects.requireNonNull(preparedSql, "preparedSql");
-        Objects.requireNonNull(parameters, "parameters");
+        Objects.requireNonNull(values, "values");
         Objects.requireNonNull(scanner, "scanner");
 
-        String sql = preparedSql.getSql();
-        List<Parameter> parameterList = preparedSql.getParameters();
+        if (preparedSql.getParameters().size() != values.size())
+            throw new IllegalArgumentException(
+                    "PreparedSql parameters/value count mismatch");
 
+        String sql = preparedSql.getSql();
         StringBuilder result = new StringBuilder(sql.length() + 64);
+
         int copiedUntil = 0;
-        int parameterIndex = 0;
-        int positionalIndex = 0;
+        int valueIndex = 0;
 
         for( SqlScanner.Token token : scanner.scan(sql) ) {
             if( token.kind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
                 continue;
 
-            if( parameterIndex >= parameterList.size() )
+            if( valueIndex >= values.size() )
                 throw new IllegalStateException(
-                        "PreparedSql has more JDBC placeholders than parameters");
-
-            Parameter parameter = parameterList.get(parameterIndex++);
-            Object value;
-
-            switch( parameter.getKind() ) {
-                case POSITIONAL:
-                    value = parameters.getParameter(positionalIndex++);
-                    break;
-                case NAMED:
-                    value = parameters.getParameter(parameter.getName());
-                    break;
-                case NUMBERED:
-                    value = parameters.getParameter(parameter.getNumber() - 1);
-                    break;
-                case LITERAL:
-                    value = parameter.getValue();
-                    break;
-                default:
-                    throw new IllegalStateException(
-                            "Unknown parameter kind: " + parameter.getKind());
-            }
+                        "PreparedSql has more JDBC placeholders than values");
 
             result.append(sql, copiedUntil, token.start());
-            result.append(SqlValueFormatter.format(value));
+            result.append(SqlValueFormatter.format(values.get(valueIndex++)));
             copiedUntil = token.end();
         }
 
-        if( parameterIndex != parameterList.size() )
+        if( valueIndex != values.size() )
             throw new IllegalStateException(
-                    "PreparedSql has fewer JDBC placeholders than parameters");
+                    "PreparedSql has fewer JDBC placeholders than values");
 
         result.append(sql, copiedUntil, sql.length());
         return result.toString();
     }
+
 }

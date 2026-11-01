@@ -102,10 +102,37 @@ public class XXIDsMarkerDao {
             if( !savePrevMarkedRows )
                 unMarkAllRow( tc, markerID, markDescriptor );
 
-            executePrepared( tc, sql, parameters );
+            executePrepared(
+                    tc, sql, PreparedSqlValues.jdbc(sql, parameters) );
         }
         catch( Throwable th ) {
             throw new DataSetException( Tags.PRODUCT_LABEL + "markAllRow", th );
+        }
+    }
+
+    /** Already resolved JDBC values. */
+    static public void markAllRow (
+        TaskContext    tc,
+        Long           markerID,
+        MarkDescriptor markDescriptor,
+        PreparedSql    sql,
+        List<Object>   jdbcValues,
+        boolean        savePrevMarkedRows
+    )
+        throws DataSetException
+    {
+        if( U.containsNull(markerID, markDescriptor, sql)
+                || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
+            return;
+
+        try {
+            if( !savePrevMarkedRows )
+                unMarkAllRow(tc, markerID, markDescriptor);
+
+            executePrepared(tc, sql, jdbcValues);
+        }
+        catch( Throwable th ) {
+            throw new DataSetException(Tags.PRODUCT_LABEL + "markAllRow", th);
         }
     }
 
@@ -122,19 +149,43 @@ public class XXIDsMarkerDao {
             return;
 
         try {
-            executePrepared( tc, sql, parameters );
+            executePrepared(
+                    tc, sql, PreparedSqlValues.jdbc(sql, parameters) );
         }
         catch( Throwable th ) {
             throw new DataSetException( Tags.PRODUCT_LABEL + "unMarkAllRow", th );
         }
     }
 
+    /** Already resolved JDBC values. */
+    static public void unMarkAllRow (
+        TaskContext    tc,
+        MarkDescriptor markDescriptor,
+        PreparedSql    sql,
+        List<Object>   jdbcValues
+    )
+        throws DataSetException
+    {
+        if( U.containsNull(markDescriptor, sql)
+                || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
+            return;
+
+        try {
+            executePrepared(tc, sql, jdbcValues);
+        }
+        catch( Throwable th ) {
+            throw new DataSetException(Tags.PRODUCT_LABEL + "unMarkAllRow", th);
+        }
+    }
+
     private static void executePrepared(
             TaskContext tc,
             PreparedSql sql,
-            IParameters parameters
+            List<Object> values
     ) {
-        List<Object> values = PreparedSqlValues.jdbc(sql, parameters);
+        if( values == null || values.size() != sql.getParameters().size() )
+            throw new IllegalArgumentException(
+                    "PreparedSql parameters/value count mismatch");
 
         try( PreparedStatement statement = tc.getConnection().prepareStatement(sql.getSql()) ) {
             int index = 1;

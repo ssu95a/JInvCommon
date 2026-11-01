@@ -244,7 +244,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
             NextSelectBuilder builder = createNextSelectBuilder(false);
             PreparedSql preparedSql = builder.prepare();
-            IParameters parameters = builder.parameters(mainSqlParameters);
+            List<Object> values = builder.values(mainSqlParameters);
 
             final TaskContext tc = getTaskContextForUse();
             final String stmnt = "{? = call jf_pkg_util.Is_TrnFullScan(?,?)}";
@@ -258,7 +258,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             else
             {
                 strSql = SQLDataSet.renderPreparedSql(
-                        preparedSql, parameters, scanner
+                        preparedSql, values, scanner
                 );
             }
 
@@ -559,7 +559,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                     getOrCreateMarkerID(),
                     markDescriptor,
                     prepareMarkInsertSql(select),
-                    source.parameters(mainSqlParameters),
+                    source.jdbcValues(mainSqlParameters),
                     savePrevMarkedRows
                 );
 
@@ -592,7 +592,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                             getTaskContextForUse(),
                             markDescriptor,
                             prepareMarkClearSql(select),
-                            source.parameters(mainSqlParameters)
+                            source.jdbcValues(mainSqlParameters)
                     );
                 }
                 else
@@ -861,7 +861,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         JDBCDataReader<T> reader = new JDBCDataReader<>(
                 getTaskContextForUse().getConnection(),
                 sql, getRowMapperForUse(), null, false );
-        reader.executeQuery( builder.parameters(mainSqlParameters) );
+        reader.executeQuery(builder.jdbcValues(mainSqlParameters));
 
         return IDataReader.iterator( reader, 50 );
     }

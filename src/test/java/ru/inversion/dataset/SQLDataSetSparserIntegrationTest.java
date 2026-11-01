@@ -10,6 +10,7 @@ import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
 
 import java.math.BigInteger;
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.junit.Assert.*;
 
@@ -83,11 +84,16 @@ public class SQLDataSetSparserIntegrationTest {
         builder.addPredicate(ds.predicates().get(id).getExpression());
         PreparedSql prepared = builder.prepare();
         assertTrue(prepared.getSql().contains("branch = ?"));
-        assertEquals(9, builder.parameters(values(ds)).getParameter("branch"));
+        assertEquals(
+                Collections.<Object>singletonList(9),
+                builder.values(values(ds))
+        );
 
         ds.setParameter("branch", null);
-        assertTrue(builder.parameters(values(ds)).hasParameter("branch"));
-        assertNull(builder.parameters(values(ds)).getParameter("branch"));
+        assertEquals(
+                Collections.<Object>singletonList(null),
+                builder.values(values(ds))
+        );
     }
 
     @Test
@@ -104,7 +110,10 @@ public class SQLDataSetSparserIntegrationTest {
 
         NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         builder.addPredicate(ds.predicates().get(id).getExpression());
-        assertNull(builder.parameters(values(ds)).getParameter("branch"));
+        assertEquals(
+                Collections.<Object>singletonList(null),
+                builder.values(values(ds))
+        );
     }
 
     @Test

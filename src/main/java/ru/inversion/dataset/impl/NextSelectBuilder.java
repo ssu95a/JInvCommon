@@ -10,12 +10,11 @@ import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Сборка одного SELECT для DataSet.
@@ -130,80 +129,101 @@ public final class NextSelectBuilder {
     }
 
     /**
-     * Представление единого пространства параметров. primary — параметры SQLDataSet,
-     * включая callback приоритеты, предоставленные самим DataSet.
-     *
-     * ВАЖНО: hasParameter() должен различать отсутствие значения и явный null.
+     * Resolve runtime values directly in physical JDBC placeholder order.
+     * primary (DataSet/callback) has priority over ISQLExpression fallbacks.
      */
-    public IParameters parameters(final IParameters primary) {
+    public List<Object> values(IParameters primary) {
         Objects.requireNonNull(primary, "primary");
+
         PreparedSql plan = prepare();
-        final List<ISQLExpression> expressions = expressions();
-        final Map<Integer, List<ISQLExpression>> numberedOwners = numberedOwners();
-        final List<LocalPositional> localPositions = localPositionals(plan);
+        List<ISQLExpression> expressions = expressions();
+        List<ISQLExpression> sources = sourceExpressions();
+        Map<Integer, List<ISQLExpression>> numberedOwners = numberedOwners();
+        Map<Integer,Integer> localIndexes = new HashMap<>();
 
-        Set<String> namedReferences = new LinkedHashSet<>();
-        Set<Integer> indexedReferences = new LinkedHashSet<>();
+        List<Object> values = new ArrayList<>(plan.getParameters().size());
+        int positionalIndex = 0;
+
         for (Parameter parameter : plan.getParameters()) {
+            Object value;
+
             switch (parameter.getKind()) {
-                case NAMED: namedReferences.add(parameter.getName()); break;
-                case NUMBERED: indexedReferences.add(parameter.getNumber() - 1); break;
-                default: break;
-            }
-        }
-        for (int i = 0; i < localPositions.size(); i++)
-            if (localPositions.get(i) != null)
-                indexedReferences.add(i);
+                case LITERAL:
+                    value = parameter.getValue();
+                    break;
 
-        // Противоречивое состояние обнаруживаем до создания JDBC statement.
-        for (String name : namedReferences) {
-            if (!primary.hasParameter(name)) findUniqueNamed(expressions, name);
-        }
-        for (Integer index : indexedReferences) {
-            if (primary.hasParameter(index)) continue;
-            LocalPositional pos = index < localPositions.size()
-                    ? localPositions.get(index) : null;
-            if (pos != null) {
-                if (!pos.expression.hasParameter(pos.localIndex)) throw missing("?" + (index + 1));
-                requireNoNumberedConflict(numberedOwners, index, pos.expression);
-            } else {
-                findUniqueIndexed(expressions, index);
-            }
-        }
+                case NAMED:
+                    if (primary.hasParameter(parameter.getName()))
+                        value = primary.getParameter(parameter.getName());
+                    else
+                        value = findUniqueNamed(
+                                expressions, parameter.getName())
+                                .getParameter(parameter.getName());
+                    break;
 
-        return new IParameters() {
-            @Override public Object getParameter(String name) {
-                if (primary.hasParameter(name)) return primary.getParameter(name);
-                return findUniqueNamed(expressions, name).getParameter(name);
-            }
-
-            @Override public Object getParameter(int index) {
-                if (primary.hasParameter(index)) return primary.getParameter(index);
-                LocalPositional pos = index < localPositions.size()
-                        ? localPositions.get(index) : null;
-                if (pos != null) {
-                    if (!pos.expression.hasParameter(pos.localIndex)) throw missing("?" + (index + 1));
-                    requireNoNumberedConflict(numberedOwners, index, pos.expression);
-                    return pos.expression.getParameter(pos.localIndex);
+                case NUMBERED: {
+                    int index = parameter.getNumber() - 1;
+                    if (primary.hasParameter(index))
+                        value = primary.getParameter(index);
+                    else
+                        value = findUniqueIndexed(expressions, index)
+                                .getParameter(index);
+                    break;
                 }
-                return findUniqueIndexed(expressions, index).getParameter(index);
+
+                case POSITIONAL: {
+                    int index = positionalIndex++;
+                    ISQLExpression local = null;
+                    int localIndex = -1;
+
+                    if (parameter.getSourceId() != Parameter.GLOBAL_SOURCE) {
+                        int sourceId = parameter.getSourceId();
+                        if (sourceId < 0 || sourceId >= sources.size()
+                                || sources.get(sourceId) == null) {
+                            throw new IllegalStateException(
+                                    "Unknown local SQL parameter source: "
+                                            + sourceId);
+                        }
+
+                        local = sources.get(sourceId);
+                        Integer next = localIndexes.get(sourceId);
+                        localIndex = next == null ? 0 : next;
+                        localIndexes.put(sourceId, localIndex + 1);
+                    }
+
+                    if (primary.hasParameter(index)) {
+                        value = primary.getParameter(index);
+                    }
+                    else if (local != null) {
+                        if (!local.hasParameter(localIndex))
+                            throw missing("?" + (index + 1));
+
+                        requireNoNumberedConflict(
+                                numberedOwners, index, local);
+
+                        value = local.getParameter(localIndex);
+                    }
+                    else {
+                        value = findUniqueIndexed(expressions, index)
+                                .getParameter(index);
+                    }
+                    break;
+                }
+
+                default:
+                    throw new IllegalStateException(
+                            "Unknown parameter kind: " + parameter.getKind());
             }
 
-            @Override public boolean hasParameter(String name) {
-                if (primary.hasParameter(name)) return true;
-                for (ISQLExpression expr : expressions) if (expr.hasParameter(name)) return true;
-                return false;
-            }
+            values.add(value);
+        }
 
-            @Override public boolean hasParameter(int index) {
-                if (primary.hasParameter(index)) return true;
-                LocalPositional local = index < localPositions.size()
-                        ? localPositions.get(index) : null;
-                if (local != null) return local.expression.hasParameter(local.localIndex);
-                for (ISQLExpression expr : expressions) if (expr.hasParameter(index)) return true;
-                return false;
-            }
-        };
+        return Collections.unmodifiableList(values);
+    }
+
+    /** JDBC-ready values with legacy conversion preserved. */
+    public List<Object> jdbcValues(IParameters primary) {
+        return PreparedSqlValues.jdbc(prepare(), values(primary));
     }
 
     private SqlSelect createSelect() {
@@ -229,41 +249,6 @@ public final class NextSelectBuilder {
 
         if (mark != null) select.setMark(mark, "MARK");
         return select;
-    }
-
-    /**
-     * POSITIONAL parameters are indexed in final SQL order.
-     * sourceId tells which local ISQLExpression owns a particular '?'.
-     */
-    private List<LocalPositional> localPositionals(PreparedSql plan) {
-        List<ISQLExpression> sources = sourceExpressions();
-        List<LocalPositional> result = new ArrayList<>();
-        Map<Integer,Integer> localIndexes = new HashMap<>();
-
-        for (Parameter parameter : plan.getParameters()) {
-            if (parameter.getKind() != Parameter.Kind.POSITIONAL)
-                continue;
-
-            int sourceId = parameter.getSourceId();
-            if (sourceId == Parameter.GLOBAL_SOURCE) {
-                result.add(null);
-                continue;
-            }
-
-            if (sourceId < 0 || sourceId >= sources.size()
-                    || sources.get(sourceId) == null) {
-                throw new IllegalStateException(
-                        "Unknown local SQL parameter source: " + sourceId);
-            }
-
-            Integer localIndex = localIndexes.get(sourceId);
-            int index = localIndex == null ? 0 : localIndex;
-            localIndexes.put(sourceId, index + 1);
-
-            result.add(new LocalPositional(sources.get(sourceId), index));
-        }
-
-        return result;
     }
 
     private List<ISQLExpression> sourceExpressions() {
@@ -410,12 +395,4 @@ public final class NextSelectBuilder {
         }
     }
 
-    private static final class LocalPositional {
-        final ISQLExpression expression;
-        final int localIndex;
-        LocalPositional(ISQLExpression expression, int localIndex) {
-            this.expression = expression;
-            this.localIndex = localIndex;
-        }
-    }
 }

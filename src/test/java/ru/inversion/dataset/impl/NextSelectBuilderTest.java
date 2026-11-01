@@ -41,7 +41,7 @@ public class NextSelectBuilderTest {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = :id").set("id",10));
         b.addPredicate(new Expr("b = :id").set("id",20));
-        try {b.parameters(new Params()); fail("Missing conflict");}
+        try {b.values(new Params()); fail("Missing conflict");}
         catch (IllegalStateException e) {assertTrue(e.getMessage().contains("Conflicting SQL parameter :id"));}
     }
 
@@ -53,9 +53,7 @@ public class NextSelectBuilderTest {
         PreparedSql p = b.prepare();
         assertEquals(2, p.getParameters().size());
         assertEquals(Parameter.Kind.NAMED,p.getParameters().get(0).getKind());
-        IParameters merged = b.parameters(main);
-        assertTrue(merged.hasParameter("id"));
-        assertEquals(null, merged.getParameter("id"));
+        assertEquals(Arrays.<Object>asList(null, null), b.values(main));
     }
 
     @Test public void localQuestionMarksBecomeGlobalSequence() {
@@ -69,9 +67,7 @@ public class NextSelectBuilderTest {
         assertEquals(Parameter.Kind.POSITIONAL,p.getParameters().get(1).getKind());
         assertTrue(p.getSql().contains("a = ?"));
         assertTrue(p.getSql().contains("b = ?"));
-        IParameters merged=b.parameters(new Params());
-        assertEquals(10,merged.getParameter(0));
-        assertEquals(20,merged.getParameter(1));
+        assertEquals(Arrays.<Object>asList(10, 20), b.values(new Params()));
     }
 
     @Test public void mainQuestionMarkGetsFinalTextualPosition() {
@@ -79,16 +75,19 @@ public class NextSelectBuilderTest {
         b.addPredicate(new Expr("a = ?").set(0, 10));
         PreparedSql p = b.prepare();
         assertEquals(2, p.getParameters().size());
-        IParameters merged = b.parameters(new Params().set(1, 55));
-        assertEquals(10, merged.getParameter(0));
-        assertEquals(55, merged.getParameter(1));
+        assertEquals(
+                Arrays.<Object>asList(10, 55),
+                b.values(new Params().set(1, 55))
+        );
     }
 
     @Test public void datasetIndexedOverridesLocalExpression() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 10));
-        IParameters merged = b.parameters(new Params().set(0,null));
-        assertEquals(null, merged.getParameter(0));
+        assertEquals(
+                Collections.<Object>singletonList(null),
+                b.values(new Params().set(0, null))
+        );
     }
 
     @Test public void runtimeValuesAreReadAtExecutionWithoutRecompile() {
@@ -96,11 +95,10 @@ public class NextSelectBuilderTest {
         Expr x = new Expr("a = :name").set("name","x");
         b.addPredicate(x);
         PreparedSql first = b.prepare();
-        IParameters merged = b.parameters(new Params());
-        assertEquals("x", merged.getParameter("name"));
+        assertEquals("x", b.values(new Params()).get(0));
         x.set("name","y");
         assertTrue(first == b.prepare());
-        assertEquals("y", merged.getParameter("name"));
+        assertEquals("y", b.values(new Params()).get(0));
     }
 
     @Test public void questionMarkInsideStringIsBoundWithoutStealingPositionalSlot() {
@@ -114,7 +112,7 @@ public class NextSelectBuilderTest {
         assertEquals(Parameter.Kind.LITERAL, p.getParameters().get(0).getKind());
         assertEquals("?", p.getParameters().get(0).getValue());
         assertEquals(Parameter.Kind.POSITIONAL, p.getParameters().get(1).getKind());
-        assertEquals(77, b.parameters(new Params()).getParameter(0));
+        assertEquals(Arrays.<Object>asList("?", 77), b.values(new Params()));
     }
     @Test public void changeOfPredicateInvalidatesPlan() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
@@ -130,7 +128,7 @@ public class NextSelectBuilderTest {
         b.addPredicate(new Expr("a = $2").set(1,7));
         PreparedSql p=b.prepare();
         assertEquals(Parameter.Kind.NUMBERED,p.getParameters().get(0).getKind());
-        assertEquals(7,b.parameters(new Params()).getParameter(1));
+        assertEquals(Collections.<Object>singletonList(7), b.values(new Params()));
     }
 
     @Test public void formerInternalPrefixIsAnOrdinaryNamedParameter() {
@@ -140,14 +138,14 @@ public class NextSelectBuilderTest {
         PreparedSql prepared = b.prepare();
 
         assertEquals(Parameter.Kind.NAMED, prepared.getParameters().get(0).getKind());
-        assertEquals(42, b.parameters(new Params().set(name, 42)).getParameter(name));
+        assertEquals(Collections.<Object>singletonList(42), b.values(new Params().set(name, 42)));
     }
 
     @Test public void repeatSameExpressionDoesNotConflictWithItself() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         Expr one = new Expr("a = :id").set("id", 99);
         b.addPredicate(one).addPredicate(one);
-        assertEquals(99, b.parameters(new Params()).getParameter("id"));
+        assertEquals(Arrays.<Object>asList(99, 99), b.values(new Params()));
     }
 
     @Test public void generatedLiteralsKeepTheirParameterType() {
@@ -156,21 +154,21 @@ public class NextSelectBuilderTest {
         PreparedSql result = b.prepare();
         assertEquals(Parameter.Kind.POSITIONAL, result.getParameters().get(0).getKind());
         assertEquals(Parameter.Kind.LITERAL, result.getParameters().get(1).getKind());
-        assertEquals(100, b.parameters(new Params()).getParameter(0));
+        assertEquals(Arrays.<Object>asList(100, new java.math.BigInteger("42")), b.values(new Params()));
     }
 
     @Test public void conflictOnNumberedParameterIsDetected() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = $1").set(0,11));
         b.addPredicate(new Expr("b = $1").set(0,12));
-        try { b.parameters(new Params()); fail("Expected conflict"); }
+        try { b.values(new Params()); fail("Expected conflict"); }
         catch (IllegalStateException e) {assertTrue(e.getMessage().contains("Conflicting"));}
     }
     @Test public void numberedAndLocalPositionalCollisionThrows() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
-        try { b.parameters(new Params()); fail("Expected mixed positional conflict"); }
+        try { b.values(new Params()); fail("Expected mixed positional conflict"); }
         catch (IllegalStateException e) { assertTrue(e.getMessage().contains("Conflicting")); }
     }
 
@@ -178,8 +176,10 @@ public class NextSelectBuilderTest {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
-        IParameters p = b.parameters(new Params().set(0, null));
-        assertEquals(null, p.getParameter(0));
+        assertEquals(
+                Arrays.<Object>asList(null, 12),
+                b.values(new Params().set(0, null))
+        );
     }
 
     @Test public void orderByExpressionSupportsLocalQuestionMark() {
@@ -188,7 +188,7 @@ public class NextSelectBuilderTest {
         PreparedSql prepared = b.prepare();
         assertEquals(1, prepared.getParameters().size());
         assertEquals(Parameter.Kind.POSITIONAL, prepared.getParameters().get(0).getKind());
-        assertEquals(99, b.parameters(new Params()).getParameter(0));
+        assertEquals(Collections.<Object>singletonList(99), b.values(new Params()));
     }
 
     @Test public void sameExpressionInstanceCanSupplyNamedFromOrderByAndWhere() {
@@ -197,7 +197,7 @@ public class NextSelectBuilderTest {
         b.addPredicate(e);
         b.orderBy(new Expr("case when id = :id then 0 else 1 end"));
         // Второе expression не определяет параметр, первое обеспечивает fallback.
-        assertEquals(17, b.parameters(new Params()).getParameter("id"));
+        assertEquals(Arrays.<Object>asList(17, 17), b.values(new Params()));
     }
 
     @Test public void malformedPredicateDoesNotCorruptCachedPreparedSql() {
@@ -217,20 +217,14 @@ public class NextSelectBuilderTest {
         b.addPredicate(new Expr("b = ?").set(0, 20));
         b.orderBy(new Expr("id + ?").set(0, 30));
         PreparedSql plan = b.prepare();
-        IParameters values = b.parameters(new Params().set(2, 50).set("code", "X"));
+        List<Object> resolved =
+                b.values(new Params().set(2, 50).set("code", "X"));
 
-        List<Object> resolved = new ArrayList<>();
-        int positional = 0;
-        for (Parameter parameter : plan.getParameters()) {
-            switch (parameter.getKind()) {
-                case POSITIONAL: resolved.add(values.getParameter(positional++)); break;
-                case NAMED: resolved.add(values.getParameter(parameter.getName())); break;
-                case NUMBERED: resolved.add(values.getParameter(parameter.getNumber() - 1)); break;
-                case LITERAL: resolved.add(parameter.getValue()); break;
-            }
-        }
-        assertEquals(Arrays.<Object>asList(10, "A", 20, 50, "X", 30), resolved);
-        assertEquals(4, positional);
+        assertEquals(6, plan.getParameters().size());
+        assertEquals(
+                Arrays.<Object>asList(10, "A", 20, 50, "X", 30),
+                resolved
+        );
     }
 
     @Test public void changingSortingDropsOldBindings() {
