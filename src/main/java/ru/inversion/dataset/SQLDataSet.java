@@ -1384,32 +1384,35 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             refreshCurrentRowPreparedSql = builder.prepare();
          }
 
+         IParameters refreshParameters = new IParameters( ) {
+            @Override
+            public Object getParameter( String parameterName ) {
+               String key = parameterName.toUpperCase(Locale.ROOT);
+               return idValuesMap.containsKey(key)
+                       ? idValuesMap.get(key) : getParameterValue(parameterName);
+            }
+            @Override
+            public Object getParameter( int parameterIndex ) {
+               return getParameterValue( parameterIndex );
+            }
+            @Override
+            public boolean hasParameter( String parameterName ) {
+               return idValuesMap.containsKey(parameterName.toUpperCase(Locale.ROOT))
+                       || mainSqlParameters.hasParameter(parameterName);
+            }
+            @Override
+            public boolean hasParameter( int parameterIndex ) {
+               return mainSqlParameters.hasParameter(parameterIndex);
+            }
+         };
+
+         List<Object> refreshValues = PreparedSqlValues.jdbc(
+                 refreshCurrentRowPreparedSql, refreshParameters);
+
          try (JDBCDataReader<P> recordReader = new JDBCDataReader<>(
                  getTaskContextForUse().getConnection(), refreshCurrentRowPreparedSql,
                  getRowMapper(), getRowClass(), isSupportMark())) {
-            recordReader.executeQuery (
-                 new IParameters( ) {
-                    @Override
-                    public Object getParameter( String parameterName ) {
-                       String key = parameterName.toUpperCase(Locale.ROOT);
-                       return idValuesMap.containsKey(key)
-                               ? idValuesMap.get(key) : getParameterValue(parameterName);
-                    }
-                    @Override
-                    public Object getParameter( int parameterIndex ) {
-                       return getParameterValue( parameterIndex );
-                    }
-                    @Override
-                    public boolean hasParameter( String parameterName ) {
-                       return idValuesMap.containsKey(parameterName.toUpperCase(Locale.ROOT))
-                               || mainSqlParameters.hasParameter(parameterName);
-                    }
-                    @Override
-                    public boolean hasParameter( int parameterIndex ) {
-                       return mainSqlParameters.hasParameter(parameterIndex);
-                    }
-                 }
-         );
+            recordReader.executeQuery(refreshValues);
 
          List< P > item = recordReader.getNextPage(1);
 
@@ -1997,6 +2000,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       final private List<String> predicateList;
 
       private JDBCDataReader<Map<String,Object>> dataReader;
+      private PreparedSql preparedSql;
 
       final private boolean           ignoreFilter;
 
@@ -2031,6 +2035,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                if( dataReader != null )
                   try{ dataReader.close(); } catch( Exception ex ) {}
                dataReader = null;
+               preparedSql = null;
             }
          });
 
@@ -2080,7 +2085,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             .append( base.buildSql() )
             .append(") arslt");
 
-         PreparedSql preparedSql =
+         preparedSql =
                  new SqlSelect( sql.toString(), getTaskContextForUse().dialect() ).prepare();
 
          dataReader = new JDBCDataReader<>(
@@ -2116,17 +2121,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
          prepareReader( );
 
-         dataReader.executeQuery (
-                 new IParameters() {
-                    @Override
-                    public Object getParameter( String parameterName ) {
-                       return getParameterValue( parameterName );
-                    }
-                    @Override
-                    public Object getParameter( int parameterIndex ) {
-                       return getParameterValue( parameterIndex );
-                    }
-                 }
+         dataReader.executeQuery(
+                 PreparedSqlValues.jdbc(preparedSql, mainSqlParameters)
          );
 
          values = dataReader.getNextPage(1).get(0);

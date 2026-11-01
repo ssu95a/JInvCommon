@@ -3,6 +3,7 @@ package ru.inversion.dataset;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.JDBCDataReader;
 import ru.inversion.dataset.impl.NextSelectBuilder;
+import ru.inversion.dataset.impl.PreparedSqlValues;
 import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.dataset.impl.XXIDsMarkerDao;
 import ru.inversion.dataset.mark.IMarkable;
@@ -911,6 +912,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         final private String       aggrTable;
 
         private JDBCDataReader<Map<String,Object>> dataReader;
+        private PreparedSql preparedSql;
 
         /** */
         public MarkAggregator(
@@ -954,6 +956,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                         if( dataReader != null )
                             try{ dataReader.close(); } catch( Exception ex ) {}
                         dataReader = null;
+                        preparedSql = null;
                     }
                }
             });
@@ -1034,7 +1037,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                 sql.append(" AND (").append(markPredicate).append(')');
             }
 
-            PreparedSql preparedSql =
+            preparedSql =
                     new SqlSelect( sql.toString(), getTaskContextForUse().dialect() ).prepare();
 
             dataReader = new JDBCDataReader<>(
@@ -1063,7 +1066,9 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
             prepareReader( );
 
-            dataReader.executeQuery( mainSqlParameters );
+            dataReader.executeQuery(
+                    PreparedSqlValues.jdbc(preparedSql, mainSqlParameters)
+            );
 
             values = (Map<String,Object>)dataReader.getNextPage(-1).get(0);
 

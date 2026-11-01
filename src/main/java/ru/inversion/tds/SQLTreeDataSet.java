@@ -2,6 +2,7 @@ package ru.inversion.tds;
 
 import ru.inversion.dataset.*;
 import ru.inversion.dataset.impl.JDBCDataReader;
+import ru.inversion.dataset.impl.PreparedSqlValues;
 import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.dataset.impl.PreparedSqlRenderer;
 import ru.inversion.db.JInvDbException;
@@ -612,10 +613,11 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
                 }
             };
 
+            final PreparedSql preparedSql;
             final JDBCDataReader<P> recordReader;
 
             try {
-                PreparedSql preparedSql = new SqlSelect(
+                preparedSql = new SqlSelect(
                         refreshSql,
                         getTaskContextForUse().dialect()
                 ).prepare();
@@ -636,7 +638,9 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
 
             try( final JDBCDataReader<P> reader = recordReader )
             {
-                reader.executeQuery(prm);
+                reader.executeQuery(
+                        PreparedSqlValues.jdbc(preparedSql, prm)
+                );
                 items = reader.getNextPage(2);
             }
 
@@ -837,7 +841,9 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
                     getRowClass(),
                     isEnableMark() ))
             {
-                dataReader.executeQuery( getParameters() );
+                dataReader.executeQuery(
+                        PreparedSqlValues.jdbc(preparedSql, getParameters())
+                );
 
                 if(!predicates.isEmpty())
                     predicates.values().stream().filter(PredicateItem::isPending).forEach(PredicateItem::makeFinal);
