@@ -27,20 +27,25 @@ public final class SqlSelect {
 
     private final String source;
     private final SqlScanner scanner;
+
     private final List<SqlScanner.Token> sourceTokens;
+
     private final Layout layout;
 
     private List<String> predicates = Collections.emptyList();
 
     private String orderBy;
+
     private String markExpression;
+
     private String markAlias;
+
     private String builtSql;
 
     private PreparedSql preparedSql;
 
     /** Прикладной API: детали выбора lexer скрыты за диалектом. */
-    public SqlSelect(String sql, SqlDialect dialect) {
+    public SqlSelect( String sql, SqlDialect dialect ) {
         this(sql, SqlScannerFactory.create(dialect));
     }
 
@@ -53,16 +58,22 @@ public final class SqlSelect {
         this.layout = inspect();
     }
 
-    public void setPredicates(List<String> values) {
+    /** */
+    public void setPredicates( List<String> values )
+    {
         Objects.requireNonNull(values, "values");
+
         List<String> copy = new ArrayList<>(values.size());
-        for (String value : values) {
+
+        for( String value : values )
+        {
             String part = requiredFragment(value, "predicate");
             checkFragment(part);
             copy.add(part);
         }
         if (!copy.isEmpty() && layout.legacyWhereMarkerStart < 0)
             requireSimple("WHERE predicates");
+
         predicates = Collections.unmodifiableList(copy);
         invalidate();
     }
@@ -96,8 +107,8 @@ public final class SqlSelect {
             String actualAlias = alias.trim();
             List<SqlScanner.Token> aliasTokens = scanner.scan(actualAlias);
             if (aliasTokens.size() != 1 ||
-                    (aliasTokens.get(0).getKind() != WORD &&
-                     aliasTokens.get(0).getKind() != QUOTED_IDENTIFIER)) {
+                    (aliasTokens.get(0).kind() != WORD &&
+                     aliasTokens.get(0).kind() != QUOTED_IDENTIFIER)) {
                 throw new IllegalArgumentException("mark alias must be one SQL identifier");
             }
             markAlias = actualAlias;
@@ -146,7 +157,7 @@ public final class SqlSelect {
     }
 
     private void invalidate() {
-        builtSql = null;
+        builtSql    = null;
         preparedSql = null;
     }
 
@@ -233,9 +244,14 @@ public final class SqlSelect {
         if (depth != 0) throw new IllegalArgumentException("Unbalanced SQL fragment");
     }
 
-    private static String optionalFragment(String fragment) {
-        if (fragment == null) return null;
+    /** */
+    private static String optionalFragment( String fragment )
+    {
+        if( fragment == null)
+            return null;
+
         String trimmed = fragment.trim();
+
         return trimmed.isEmpty() ? null : trimmed;
     }
 
@@ -338,7 +354,7 @@ public final class SqlSelect {
         if (listLastToken < 0) throw new IllegalArgumentException("Empty SELECT list");
 
         Layout result = new Layout();
-        result.selectItemsEnd = sourceTokens.get(listLastToken).getEnd();
+        result.selectItemsEnd = sourceTokens.get(listLastToken).end();
         result.compound = compoundQuery;
         result.orderSiblings = siblings;
         result.markRestriction = markRestriction;
@@ -364,22 +380,22 @@ public final class SqlSelect {
             if (afterWhere >= firstFollowingWhere) {
                 throw new IllegalArgumentException("Empty WHERE clause");
             }
-            result.whereWordEnd = sourceTokens.get(where).getEnd();
+            result.whereWordEnd = sourceTokens.get(where).end();
             result.wherePredicateEnd = lastSignificantEnd(afterWhere, firstFollowingWhere);
         } else {
             // Граница уже найдена основным проходом по внешним SQL clauses.
             result.whereInsertion = firstWhereBoundary == statementEndIndex
-                    ? mainContentEnd : sourceTokens.get(firstWhereBoundary).getStart();
+                    ? mainContentEnd : sourceTokens.get(firstWhereBoundary).start();
         }
         if (order >= 0) {
             int actualEnd = firstFollowingOrder;
-            result.orderStart = sourceTokens.get(order).getStart();
+            result.orderStart = sourceTokens.get(order).start();
             int bodyStart = nextSignificant(order + (siblings ? 3 : 2));
             if (bodyStart >= actualEnd) throw new IllegalArgumentException("Empty ORDER BY clause");
             result.orderEnd = lastSignificantEnd(bodyStart, actualEnd);
         } else {
             result.orderInsertion = tail >= 0
-                    ? sourceTokens.get(tail).getStart() : mainContentEnd;
+                    ? sourceTokens.get(tail).start() : mainContentEnd;
         }
         return result;
     }
@@ -394,27 +410,27 @@ public final class SqlSelect {
             SqlScanner.Token word = sourceTokens.get(i + 1);
             SqlScanner.Token close = sourceTokens.get(i + 2);
 
-            if (open.getEnd() != word.getStart()
-                    || word.getEnd() != close.getStart()) {
+            if (open.end() != word.start()
+                    || word.end() != close.start()) {
                 continue;
             }
 
             boolean openBracket =
-                    (open.getKind() == SqlScanner.Kind.OPERATOR
-                            || open.getKind() == SqlScanner.Kind.SYMBOL)
+                    (open.kind() == SqlScanner.Kind.OPERATOR
+                            || open.kind() == SqlScanner.Kind.SYMBOL)
                     && "<".equals(open.text(source));
 
             boolean markerWord =
-                    word.getKind() == SqlScanner.Kind.WORD
+                    word.kind() == SqlScanner.Kind.WORD
                     && word.isWord(source, "W");
 
             boolean closeBracket =
-                    (close.getKind() == SqlScanner.Kind.OPERATOR
-                            || close.getKind() == SqlScanner.Kind.SYMBOL)
+                    (close.kind() == SqlScanner.Kind.OPERATOR
+                            || close.kind() == SqlScanner.Kind.SYMBOL)
                     && ">".equals(close.text(source));
 
             if (openBracket && markerWord && closeBracket) {
-                return new int[] { open.getStart(), close.getEnd() };
+                return new int[] { open.start(), close.end() };
             }
         }
         return null;
@@ -487,7 +503,7 @@ public final class SqlSelect {
     }
 
     private static boolean trivia(SqlScanner.Token token) {
-        switch (token.getKind()) {
+        switch (token.kind()) {
             case WHITESPACE:
             case COMMENT:
             case HINT:
@@ -509,11 +525,11 @@ public final class SqlSelect {
     private int lastSignificantEnd(int first, int exclusiveEnd) {
         int i = lastSignificant(first, exclusiveEnd);
         if (i < 0) throw new IllegalArgumentException("Missing SQL expression");
-        return sourceTokens.get(i).getEnd();
+        return sourceTokens.get(i).end();
     }
 
     private static boolean symbol(String sql, SqlScanner.Token token, String value) {
-        return token.getKind() == SYMBOL && token.text(sql).equals(value);
+        return token.kind() == SYMBOL && token.text(sql).equals(value);
     }
 
     /** */

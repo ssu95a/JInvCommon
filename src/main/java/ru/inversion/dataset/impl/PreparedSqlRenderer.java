@@ -33,7 +33,7 @@ public final class PreparedSqlRenderer {
         int positionalIndex = 0;
 
         for( SqlScanner.Token token : scanner.scan(sql) ) {
-            if( token.getKind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
+            if( token.kind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
                 continue;
 
             if( parameterIndex >= parameterList.size() )
@@ -61,9 +61,9 @@ public final class PreparedSqlRenderer {
                             "Unknown parameter kind: " + parameter.getKind());
             }
 
-            result.append(sql, copiedUntil, token.getStart());
+            result.append(sql, copiedUntil, token.start());
             result.append(SqlValueFormatter.format(value));
-            copiedUntil = token.getEnd();
+            copiedUntil = token.end();
         }
 
         if( parameterIndex != parameterList.size() )

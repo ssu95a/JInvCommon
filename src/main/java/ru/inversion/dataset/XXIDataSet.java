@@ -291,16 +291,16 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         int parameterIndex = 0;
 
         for( SqlScanner.Token token : scanner.scan(sql) ) {
-            if( token.getKind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
+            if( token.kind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
                 continue;
 
             if( parameterIndex >= preparedSql.getParameters().size() )
                 throw new IllegalStateException(
                         "PreparedSql has more JDBC placeholders than parameters");
 
-            result.append(sql, copiedUntil, token.getStart());
+            result.append(sql, copiedUntil, token.start());
             result.append(":p").append(++parameterIndex).append(' ');
-            copiedUntil = token.getEnd();
+            copiedUntil = token.end();
         }
 
         if( parameterIndex != preparedSql.getParameters().size() )

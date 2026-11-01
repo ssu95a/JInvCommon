@@ -50,9 +50,9 @@ public abstract class SqlScanner {
             this.end   = end;
         }
 
-        public Kind getKind() { return kind; }
-        public int getStart() { return start; }
-        public int getEnd() { return end; }
+        public Kind kind() { return kind; }
+        public int start() { return start;}
+        public int end()   { return end;  }
 
         /** Оригинальный текст лексемы, включая кавычки, маркеры и комментарии. */
         public String text(String source) {
@@ -111,12 +111,12 @@ public abstract class SqlScanner {
                         "Unsupported SQL syntax at offset " + offset
                         + ": '" + sql.charAt(offset) + "'");
 
-            if (token.getStart() != offset || token.getEnd() > sql.length() )
+            if (token.start() != offset || token.end() > sql.length() )
                 throw new IllegalStateException("Recognizer returned invalid token at " + offset + ": " + token);
 
             result.add(token);
 
-            offset = token.getEnd();
+            offset = token.end();
         }
         return Collections.unmodifiableList(result);
     }

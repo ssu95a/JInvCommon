@@ -156,8 +156,8 @@ public class EntitySelectBuilder extends SelectBuilder {
 
         List<SqlScanner.Token> tokens = scanner.scan(queryAlias);
         if( tokens.size() != 1
-                || (tokens.get(0).getKind() != SqlScanner.Kind.WORD
-                && tokens.get(0).getKind() != SqlScanner.Kind.QUOTED_IDENTIFIER) ) {
+                || (tokens.get(0).kind() != SqlScanner.Kind.WORD
+                && tokens.get(0).kind() != SqlScanner.Kind.QUOTED_IDENTIFIER) ) {
             throw new IllegalArgumentException(
                     "queryAlias must be one SQL identifier");
         }

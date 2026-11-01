@@ -408,7 +408,7 @@ public class SqlScannerTest {
 
     private static int count(List<SqlScanner.Token> tokens, SqlScanner.Kind kind) {
         int result = 0;
-        for (SqlScanner.Token token : tokens) if (token.getKind() == kind) result++;
+        for (SqlScanner.Token token : tokens) if (token.kind() == kind) result++;
         return result;
     }
 
@@ -416,7 +416,7 @@ public class SqlScannerTest {
                                  SqlScanner.Kind kind, String text) {
         int result = 0;
         for (SqlScanner.Token token : tokens) {
-            if (token.getKind() == kind && token.text(sql).equals(text)) result++;
+            if (token.kind() == kind && token.text(sql).equals(text)) result++;
         }
         return result;
     }
@@ -430,10 +430,10 @@ public class SqlScannerTest {
         StringBuilder result = new StringBuilder();
         int offset = 0;
         for (SqlScanner.Token token : tokens) {
-            assertEquals(offset, token.getStart());
-            assertTrue(token.getEnd() > token.getStart());
+            assertEquals(offset, token.start());
+            assertTrue(token.end() > token.start());
             result.append(token.text(sql));
-            offset = token.getEnd();
+            offset = token.end();
         }
         assertEquals(sql.length(), offset);
         return result.toString();

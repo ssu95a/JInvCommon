@@ -9,20 +9,23 @@ import java.time.temporal.Temporal;
 
 /**
  * Форматирование Java-значения как SQL literal для diagnostic/legacy text APIs.
- *
+ * <p>
  * Не используется для JDBC execution: выполнение должно работать через bind parameters.
  */
 public final class SqlValueFormatter {
 
-    private SqlValueFormatter() {
-    }
+   static final private DateFormat dateFormatter      = new SimpleDateFormat("yyyy-MM-dd");
+   static final private DateFormat timestampFormatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
-    public static String format( Object value ) {
+   private SqlValueFormatter() {
+   }
+
+   public static String format( Object value ) {
 
         if( value == null )
             return " NULL ";
 
-        Class clazz = value.getClass();
+        Class<?> clazz = value.getClass();
 
         if( clazz == String.class ) {
             String v = ((String)value).replace("'", "''");
@@ -37,24 +40,17 @@ public final class SqlValueFormatter {
         if( clazz == Boolean.class )
             return ((Boolean)value) ? "1" : "0";
 
-        DateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd");
-        DateFormat timestampFormatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-
         if( clazz == java.sql.Date.class )
             return " to_date('" + dateFormatter.format((java.sql.Date)value) + "','YYYY-MM-DD') ";
 
         if( clazz == LocalDate.class )
-            return " to_date('" + dateFormatter.format(
-                    TypeConverter.convert(value, java.util.Date.class)) + "','YYYY-MM-DD') ";
+            return " to_date('" + dateFormatter.format( TypeConverter.convert(value, java.util.Date.class)) + "','YYYY-MM-DD') ";
 
         if( value instanceof java.util.Date )
-            return " to_timestamp( '" + timestampFormatter.format(
-                    (java.util.Date)value) + "','YYYY-MM-DD HH24:MI:SS') ";
+            return " to_timestamp( '" + timestampFormatter.format( (java.util.Date)value) + "','YYYY-MM-DD HH24:MI:SS') ";
 
         if( value instanceof Temporal )
-            return " to_timestamp( '" + timestampFormatter.format(
-                    TypeConverter.convert(value, java.util.Date.class))
-                    + "','YYYY-MM-DD HH24:MI:SS') ";
+            return " to_timestamp( '" + timestampFormatter.format( TypeConverter.convert(value, java.util.Date.class)) + "','YYYY-MM-DD HH24:MI:SS') ";
 
         return cleanupLegacyMarkers(value.toString());
     }

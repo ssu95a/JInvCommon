@@ -189,18 +189,18 @@ public class SqlScannerTest {
         String sql = "SeLeCt customer FROM orders WHERE \"order\" = 1";
         List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
 
-        assertEquals(WORD, tokens.get(0).getKind());
+        assertEquals(WORD, tokens.get(0).kind());
         assertEquals(SqlKeyword.SELECT, tokens.get(0).keyword(sql));
 
         SqlScanner.Token customer = tokens.get(2);
-        assertEquals(WORD, customer.getKind());
+        assertEquals(WORD, customer.kind());
         assertNull(customer.keyword(sql));
 
         assertEquals(SqlKeyword.FROM, tokens.get(4).keyword(sql));
         assertEquals(SqlKeyword.WHERE, tokens.get(8).keyword(sql));
 
         SqlScanner.Token quotedOrder = tokens.get(10);
-        assertEquals(QUOTED_IDENTIFIER, quotedOrder.getKind());
+        assertEquals(QUOTED_IDENTIFIER, quotedOrder.kind());
         assertNull(quotedOrder.keyword(sql));
     }
 
@@ -454,7 +454,7 @@ public class SqlScannerTest {
 
     private static int count(List<SqlScanner.Token> tokens, SqlScanner.Kind kind) {
         int result = 0;
-        for (SqlScanner.Token token : tokens) if (token.getKind() == kind) result++;
+        for (SqlScanner.Token token : tokens) if (token.kind() == kind) result++;
         return result;
     }
 
@@ -462,7 +462,7 @@ public class SqlScannerTest {
                                  SqlScanner.Kind kind, String text) {
         int result = 0;
         for (SqlScanner.Token token : tokens) {
-            if (token.getKind() == kind && token.text(sql).equals(text)) result++;
+            if (token.kind() == kind && token.text(sql).equals(text)) result++;
         }
         return result;
     }
@@ -476,10 +476,10 @@ public class SqlScannerTest {
         StringBuilder result = new StringBuilder();
         int offset = 0;
         for (SqlScanner.Token token : tokens) {
-            assertEquals(offset, token.getStart());
-            assertTrue(token.getEnd() > token.getStart());
+            assertEquals(offset, token.start());
+            assertTrue(token.end() > token.start());
             result.append(token.text(sql));
-            offset = token.getEnd();
+            offset = token.end();
         }
         assertEquals(sql.length(), offset);
         return result.toString();

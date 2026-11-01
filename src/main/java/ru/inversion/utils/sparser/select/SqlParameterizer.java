@@ -48,7 +48,7 @@ final class SqlParameterizer {
 
         for (int i = 0; i < tokens.size(); i++) {
             SqlScanner.Token current = tokens.get(i);
-            SqlScanner.Kind kind = current.getKind();
+            SqlScanner.Kind kind = current.kind();
             String text = current.text(source);
 
             // Директивы — обычные SQL-комментарии для драйвера, но управляющие
@@ -226,7 +226,7 @@ final class SqlParameterizer {
     }
 
     private boolean isIdentifier(SqlScanner.Token lexeme) {
-        return lexeme.getKind() == WORD || lexeme.getKind() == QUOTED_IDENTIFIER;
+        return lexeme.kind() == WORD || lexeme.kind() == QUOTED_IDENTIFIER;
     }
 
     /**
@@ -248,7 +248,7 @@ final class SqlParameterizer {
 
         // B'...', X'...' and other prefix forms that scanner represents
         // as WORD immediately followed by a plain STRING token.
-        if (prev.getKind() == WORD && prev.getEnd() == token.getStart())
+        if (prev.kind() == WORD && prev.end() == token.start())
             return false;
 
         if (in(keyword(prev), DATE, TIME, TIMESTAMP, INTERVAL))
@@ -310,13 +310,13 @@ final class SqlParameterizer {
 
     private int nextSignificant(List<SqlScanner.Token> tokens, int from) {
         int i = from;
-        while (i < tokens.size() && isTrivia(tokens.get(i).getKind())) i++;
+        while (i < tokens.size() && isTrivia(tokens.get(i).kind())) i++;
         return i;
     }
 
     private int previousSignificant(List<SqlScanner.Token> tokens, int from) {
         int i = from;
-        while (i >= 0 && isTrivia(tokens.get(i).getKind())) i--;
+        while (i >= 0 && isTrivia(tokens.get(i).kind())) i--;
         return i;
     }
 
@@ -362,7 +362,7 @@ final class SqlParameterizer {
             if (opening >= 0) {
                 throw new IllegalArgumentException(
                         "Unpaired Oracle legacy ~ marker at offset "
-                        + tokens.get(opening).getStart());
+                        + tokens.get(opening).start());
             }
             return markers;
         }
@@ -417,7 +417,7 @@ final class SqlParameterizer {
         // Require adjacency: do not reinterpret PostgreSQL's regex operator
         // when a standalone ~ happens to precede a WHERE keyword.
         if (i + 1 < tokens.size()
-                && tokens.get(i).getEnd() == tokens.get(i + 1).getStart()
+                && tokens.get(i).end() == tokens.get(i + 1).start()
                 && keywordAt(tokens, i + 1, WHERE)) {
             return true;
         }
@@ -425,7 +425,7 @@ final class SqlParameterizer {
         int previous = previousSignificant(tokens, i - 1);
         if (previous < 0) return true;
         SqlScanner.Token p = tokens.get(previous);
-        return p.getKind() == SqlScanner.Kind.OPERATOR
+        return p.kind() == SqlScanner.Kind.OPERATOR
                 || symbol(p, "(") || symbol(p, ",") || symbol(p, "=")
                 || keyword(p, BY) || keyword(p, WHERE) || keyword(p, AND)
                 || keyword(p, OR) || keyword(p, SELECT) || keyword(p, HAVING);
@@ -435,7 +435,7 @@ final class SqlParameterizer {
         int next = nextSignificant(tokens, i + 1);
         if (next == tokens.size()) return true;
         SqlScanner.Token n = tokens.get(next);
-        return n.getKind() == SqlScanner.Kind.OPERATOR
+        return n.kind() == SqlScanner.Kind.OPERATOR
                 || symbol(n, ")") || symbol(n, ",") || symbol(n, ";")
                 || in(
                         keyword(n),
@@ -449,7 +449,7 @@ final class SqlParameterizer {
     }
 
     private boolean symbol(SqlScanner.Token token, String expected) {
-        SqlScanner.Kind kind = token.getKind();
+        SqlScanner.Kind kind = token.kind();
         return (kind == SYMBOL || kind == OPERATOR) && token.text(source).equals(expected);
     }
 

@@ -258,12 +258,12 @@ public final class NextSelectBuilder {
         int copied = 0;
         int index = 0;
         for (SqlScanner.Token token : scanner.scan(sql)) {
-            if (token.getKind() != SqlScanner.Kind.POSITIONAL_PARAMETER) continue;
+            if (token.kind() != SqlScanner.Kind.POSITIONAL_PARAMETER) continue;
             String name = LOCAL_PARAMETER_PREFIX + partId + "_" + index;
-            text.append(sql, copied, token.getStart());
+            text.append(sql, copied, token.start());
             text.append(':').append(name);
             bindings.put(name, new LocalPositional(part.expression, index));
-            copied = token.getEnd();
+            copied = token.end();
             index++;
         }
         text.append(sql, copied, sql.length());
@@ -283,7 +283,7 @@ public final class NextSelectBuilder {
         int depth = 0;
 
         for (SqlScanner.Token token : scanner.scan(source)) {
-            if (token.getKind() == SqlScanner.Kind.SYMBOL) {
+            if (token.kind() == SqlScanner.Kind.SYMBOL) {
                 String text = token.text(source);
                 if ("(".equals(text)) {
                     depth++;
@@ -296,11 +296,11 @@ public final class NextSelectBuilder {
             }
 
             if (depth == 0
-                    && token.getKind() == SqlScanner.Kind.WORD
+                    && token.kind() == SqlScanner.Kind.WORD
                     && token.isWord(source, "SELECT")) {
-                return source.substring(0, token.getEnd())
+                return source.substring(0, token.end())
                         + " /*" + optimizerHint + "*/ "
-                        + source.substring(token.getEnd());
+                        + source.substring(token.end());
             }
         }
 
@@ -311,8 +311,8 @@ public final class NextSelectBuilder {
     private void validateAlias(String alias) {
         List<SqlScanner.Token> tokens = scanner.scan(alias);
         if (tokens.size() != 1
-                || (tokens.get(0).getKind() != SqlScanner.Kind.WORD
-                && tokens.get(0).getKind() != SqlScanner.Kind.QUOTED_IDENTIFIER)) {
+                || (tokens.get(0).kind() != SqlScanner.Kind.WORD
+                && tokens.get(0).kind() != SqlScanner.Kind.QUOTED_IDENTIFIER)) {
             throw new IllegalArgumentException("queryAlias must be one SQL identifier");
         }
     }
@@ -326,7 +326,7 @@ public final class NextSelectBuilder {
 
     private void checkReserved(String sql) {
         for (SqlScanner.Token token : scanner.scan(sql)) {
-            if (token.getKind() == SqlScanner.Kind.NAMED_PARAMETER
+            if (token.kind() == SqlScanner.Kind.NAMED_PARAMETER
                     && token.text(sql).substring(1).startsWith(LOCAL_PARAMETER_PREFIX)) {
                 throw new IllegalArgumentException("Reserved SQL parameter prefix " + LOCAL_PARAMETER_PREFIX);
             }
@@ -354,7 +354,7 @@ public final class NextSelectBuilder {
         for (Part part : parts) {
             if (part.expression == null) continue;
             for (SqlScanner.Token token : scanner.scan(part.sql)) {
-                if (token.getKind() != SqlScanner.Kind.NUMBERED_PARAMETER) continue;
+                if (token.kind() != SqlScanner.Kind.NUMBERED_PARAMETER) continue;
                 int number = Integer.parseInt(token.text(part.sql).substring(1));
                 if (number <= 0) throw new IllegalArgumentException("Invalid numbered parameter $" + number);
                 int index = number - 1;

@@ -21,6 +21,6 @@ final class OptimizerHintRecognizer implements TokenRecognizer {
             return null;
         }
         SqlScanner.Token comment = blockComment.recognize(sql, at);
-        return new SqlScanner.Token(HINT, at, comment.getEnd());
+        return new SqlScanner.Token(HINT, at, comment.end());
     }
 }

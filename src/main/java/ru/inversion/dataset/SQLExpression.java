@@ -32,7 +32,7 @@ public class SQLExpression implements ISQLExpression {
     public SQLExpression( String strSQL) {
 		this.strSQL = strSQL;
 	}
-	
+
 	@Override
 	public String getSQL() {
 		return strSQL;
@@ -40,13 +40,13 @@ public class SQLExpression implements ISQLExpression {
 	public void setSQL( String strSQL ) {
 		this.strSQL = strSQL;
 	}
-	
+
     /** */
 	@Override
 	public Object getParameter( int index ) {
 		return parameterIndexMap == null ? null : parameterIndexMap.get(index);
 	}
-	
+
     /** */
     @Override
 	public void setParameter( int index, Object value ) {
@@ -57,43 +57,43 @@ public class SQLExpression implements ISQLExpression {
 
     /** */
 	public void setParameters( List<Object> parameters ) {
-		
+
         if( parameters == null || parameters.isEmpty() )
             return;
-        
+
         if( parameterIndexMap == null )
 			parameterIndexMap = new TreeMap<>();
-        
+
         U.forEachWithIndex( parameters, ( v, i) -> parameterIndexMap.put(i, v) );
 	}
-	
+
     /** */
 	@Override
 	public Object getParameter( String parameterName ) {
 		return parameterNamedMap == null ? null : parameterNamedMap.get(parameterName);
 	}
-    
+
 	/** */
     @Override
 	public void setParameter( String parameterName, Object value ) {
-		
+
         if( parameterNamedMap == null ) {
 			parameterNamedMap = new HashMap<>();
 		}
-        
+
 		parameterNamedMap.put( parameterName, value );
 	}
-    
+
 	/** */
 	public void setParameters( Map<String,Object> parameters ) {
-        
+
         if( parameters == null || parameters.isEmpty() )
             return;
-        
+
 		if( parameterNamedMap == null ) {
 			parameterNamedMap = new HashMap<>();
 		}
-        
+
 		parameterNamedMap.putAll(parameters);
 	}
 
@@ -129,7 +129,7 @@ public class SQLExpression implements ISQLExpression {
         for( SqlScanner.Token token : scanner.scan(strSQL) ) {
             Object value;
 
-            switch( token.getKind() ) {
+            switch( token.kind() ) {
                 case POSITIONAL_PARAMETER:
                     value = getParameter(positionalIndex++);
                     break;
@@ -144,9 +144,9 @@ public class SQLExpression implements ISQLExpression {
                     continue;
             }
 
-            result.append(strSQL, copiedUntil, token.getStart());
+            result.append(strSQL, copiedUntil, token.start());
             result.append(SqlValueFormatter.format(value));
-            copiedUntil = token.getEnd();
+            copiedUntil = token.end();
         }
 
         result.append(strSQL, copiedUntil, strSQL.length());
@@ -168,7 +168,7 @@ public class SQLExpression implements ISQLExpression {
     /** */
     @Override
     public void getParametersList( List<Object> valueList ) {
-        
+
         if( valueList != null && parameterIndexMap != null ) {
             parameterIndexMap.forEach((Integer t, Object u) -> { valueList.add(u); });
         }
@@ -177,11 +177,11 @@ public class SQLExpression implements ISQLExpression {
     /** */
     @Override
     public List<Object> getParametersList( ) {
-        
+
         List<Object> retList = new ArrayList<>( );
-        
+
         getParametersList(retList);
-        
+
         return retList;
     }
 
@@ -190,10 +190,10 @@ public class SQLExpression implements ISQLExpression {
 
         if( parameterNamedMap == null || valueMap == null )
             return;
-        
+
         if( onlyDef )
             parameterNamedMap.forEach( (String t, Object u) -> { if( valueMap.containsKey(t) ) valueMap.put( t, u ); });
-        else 
+        else
             valueMap.putAll(parameterNamedMap);
     }
 
