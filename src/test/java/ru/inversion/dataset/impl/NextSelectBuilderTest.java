@@ -133,12 +133,14 @@ public class NextSelectBuilderTest {
         assertEquals(7,b.parameters(new Params()).getParameter(1));
     }
 
-    @Test public void reservedNamesInOriginalSqlAreRejected() {
+    @Test public void formerInternalPrefixIsAnOrdinaryNamedParameter() {
+        String name = "__sparser_local_pos_0_0";
         NextSelectBuilder b = new NextSelectBuilder(
-                "select id from t where x = :__sparser_local_pos_0_0", SqlDialectFactory.POSTGRES);
-        b.addPredicate(new Expr("a = ?").set(0,11));
-        try {b.prepare(); fail("Expected reserved-name error");}
-        catch (IllegalArgumentException e) {assertTrue(e.getMessage().contains("Reserved"));}
+                "select id from t where x = :" + name, SqlDialectFactory.POSTGRES);
+        PreparedSql prepared = b.prepare();
+
+        assertEquals(Parameter.Kind.NAMED, prepared.getParameters().get(0).getKind());
+        assertEquals(42, b.parameters(new Params().set(name, 42)).getParameter(name));
     }
 
     @Test public void repeatSameExpressionDoesNotConflictWithItself() {

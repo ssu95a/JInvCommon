@@ -10,9 +10,7 @@ import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -29,8 +27,6 @@ import java.util.Set;
  */
 public final class NextSelectBuilder {
 
-    private static final String LOCAL_PARAMETER_PREFIX = "__sparser_local_pos_";
-
     private final String sourceSql;
     private final SqlDialect dialect;
     private final SqlScanner scanner;
@@ -41,8 +37,6 @@ public final class NextSelectBuilder {
     private String optimizerHint;
 
     private PreparedSql prepared;
-    // Ключ — индекс среди POSITIONAL в финальном PreparedSql, а НЕ JDBC position.
-    private Map<Integer, LocalPositional> localPositionals = Collections.emptyMap();
 
     public NextSelectBuilder(String sql, SqlDialect dialect) {
         this.sourceSql = Objects.requireNonNull(sql, "sql");
@@ -121,7 +115,7 @@ public final class NextSelectBuilder {
 
     /** Вернуть собранный текст без замены литералов и параметров. */
     public String buildSql() {
-        return createSelect(false, new LinkedHashMap<String, LocalPositional>()).buildSql();
+        return createSelect().buildSql();
     }
 
     /**
@@ -129,34 +123,10 @@ public final class NextSelectBuilder {
      * Значения IParameters считываются только при выполнении запроса.
      */
     public PreparedSql prepare() {
-        if (prepared != null) return prepared;
+        if (prepared == null)
+            prepared = createSelect().prepare();
 
-        checkReservedParameters();
-        Map<String, LocalPositional> locals = new LinkedHashMap<>();
-        SqlSelect select = createSelect(true, locals);
-        PreparedSql compiled = select.prepare();
-        List<Parameter> parameters = new ArrayList<>(compiled.getParameters().size());
-        Map<Integer, LocalPositional> positions = new HashMap<>();
-        int positionalIndex = 0;
-
-        for (Parameter parameter : compiled.getParameters()) {
-            if (parameter.getKind() == Parameter.Kind.POSITIONAL) {
-                parameters.add(parameter);
-                positionalIndex++;
-            } else if (parameter.getKind() == Parameter.Kind.NAMED
-                    && locals.containsKey(parameter.getName())) {
-                positions.put(positionalIndex++, locals.get(parameter.getName()));
-                parameters.add(Parameter.positional());
-            } else {
-                parameters.add(parameter);
-            }
-        }
-
-        // Commit only after compilation succeeded.
-        PreparedSql result = new PreparedSql(compiled.getSql(), parameters);
-        localPositionals = Collections.unmodifiableMap(positions);
-        prepared = result;
-        return result;
+        return prepared;
     }
 
     /**
@@ -168,9 +138,9 @@ public final class NextSelectBuilder {
     public IParameters parameters(final IParameters primary) {
         Objects.requireNonNull(primary, "primary");
         PreparedSql plan = prepare();
-        final Map<Integer, LocalPositional> localPositions = localPositionals;
         final List<ISQLExpression> expressions = expressions();
         final Map<Integer, List<ISQLExpression>> numberedOwners = numberedOwners();
+        final List<LocalPositional> localPositions = localPositionals(plan);
 
         Set<String> namedReferences = new LinkedHashSet<>();
         Set<Integer> indexedReferences = new LinkedHashSet<>();
@@ -181,7 +151,9 @@ public final class NextSelectBuilder {
                 default: break;
             }
         }
-        for (Integer localIndex : localPositions.keySet()) indexedReferences.add(localIndex);
+        for (int i = 0; i < localPositions.size(); i++)
+            if (localPositions.get(i) != null)
+                indexedReferences.add(i);
 
         // Противоречивое состояние обнаруживаем до создания JDBC statement.
         for (String name : namedReferences) {
@@ -189,8 +161,9 @@ public final class NextSelectBuilder {
         }
         for (Integer index : indexedReferences) {
             if (primary.hasParameter(index)) continue;
-            if (localPositions.containsKey(index)) {
-                LocalPositional pos = localPositions.get(index);
+            LocalPositional pos = index < localPositions.size()
+                    ? localPositions.get(index) : null;
+            if (pos != null) {
                 if (!pos.expression.hasParameter(pos.localIndex)) throw missing("?" + (index + 1));
                 requireNoNumberedConflict(numberedOwners, index, pos.expression);
             } else {
@@ -206,7 +179,8 @@ public final class NextSelectBuilder {
 
             @Override public Object getParameter(int index) {
                 if (primary.hasParameter(index)) return primary.getParameter(index);
-                LocalPositional pos = localPositions.get(index);
+                LocalPositional pos = index < localPositions.size()
+                        ? localPositions.get(index) : null;
                 if (pos != null) {
                     if (!pos.expression.hasParameter(pos.localIndex)) throw missing("?" + (index + 1));
                     requireNoNumberedConflict(numberedOwners, index, pos.expression);
@@ -223,7 +197,8 @@ public final class NextSelectBuilder {
 
             @Override public boolean hasParameter(int index) {
                 if (primary.hasParameter(index)) return true;
-                LocalPositional local = localPositions.get(index);
+                LocalPositional local = index < localPositions.size()
+                        ? localPositions.get(index) : null;
                 if (local != null) return local.expression.hasParameter(local.localIndex);
                 for (ISQLExpression expr : expressions) if (expr.hasParameter(index)) return true;
                 return false;
@@ -231,43 +206,73 @@ public final class NextSelectBuilder {
         };
     }
 
-    private SqlSelect createSelect(boolean withLocalBindings,
-                                   Map<String, LocalPositional> bindings) {
+    private SqlSelect createSelect() {
         SqlSelect select = new SqlSelect(sourceForSelect(), dialect);
         List<String> predicatesSql = new ArrayList<>(predicates.size());
-        int id = 0;
-        for (Part part : predicates) {
-            predicatesSql.add(withLocalBindings ? localize(part, id, bindings) : part.sql);
-            id++;
+        List<Integer> sourceIds = new ArrayList<>(predicates.size());
+
+        for (int i = 0; i < predicates.size(); i++) {
+            Part part = predicates.get(i);
+            predicatesSql.add(part.sql);
+            sourceIds.add(part.expression == null ? Parameter.GLOBAL_SOURCE : i);
         }
-        select.setPredicates(predicatesSql);
-        select.setOrderBy(sorting == null ? null :
-                (withLocalBindings ? localize(sorting, id, bindings) : sorting.sql));
+
+        select.setPredicates(predicatesSql, sourceIds);
+
+        if (sorting == null) {
+            select.setOrderBy(null);
+        } else {
+            int sourceId = sorting.expression == null
+                    ? Parameter.GLOBAL_SOURCE : predicates.size();
+            select.setOrderBy(sorting.sql, sourceId);
+        }
+
         if (mark != null) select.setMark(mark, "MARK");
         return select;
     }
 
     /**
-     * Временные служебные имена создаются только для локальных ? во время сборки.
-     * В финальном PreparedSql остаётся только обычный POSITIONAL.
+     * POSITIONAL parameters are indexed in final SQL order.
+     * sourceId tells which local ISQLExpression owns a particular '?'.
      */
-    private String localize(Part part, int partId, Map<String, LocalPositional> bindings) {
-        if (part.expression == null) return part.sql;
-        String sql = part.sql;
-        StringBuilder text = new StringBuilder(sql.length() + 32);
-        int copied = 0;
-        int index = 0;
-        for (SqlScanner.Token token : scanner.scan(sql)) {
-            if (token.kind() != SqlScanner.Kind.POSITIONAL_PARAMETER) continue;
-            String name = LOCAL_PARAMETER_PREFIX + partId + "_" + index;
-            text.append(sql, copied, token.start());
-            text.append(':').append(name);
-            bindings.put(name, new LocalPositional(part.expression, index));
-            copied = token.end();
-            index++;
+    private List<LocalPositional> localPositionals(PreparedSql plan) {
+        List<ISQLExpression> sources = sourceExpressions();
+        List<LocalPositional> result = new ArrayList<>();
+        Map<Integer,Integer> localIndexes = new HashMap<>();
+
+        for (Parameter parameter : plan.getParameters()) {
+            if (parameter.getKind() != Parameter.Kind.POSITIONAL)
+                continue;
+
+            int sourceId = parameter.getSourceId();
+            if (sourceId == Parameter.GLOBAL_SOURCE) {
+                result.add(null);
+                continue;
+            }
+
+            if (sourceId < 0 || sourceId >= sources.size()
+                    || sources.get(sourceId) == null) {
+                throw new IllegalStateException(
+                        "Unknown local SQL parameter source: " + sourceId);
+            }
+
+            Integer localIndex = localIndexes.get(sourceId);
+            int index = localIndex == null ? 0 : localIndex;
+            localIndexes.put(sourceId, index + 1);
+
+            result.add(new LocalPositional(sources.get(sourceId), index));
         }
-        text.append(sql, copied, sql.length());
-        return text.toString();
+
+        return result;
+    }
+
+    private List<ISQLExpression> sourceExpressions() {
+        List<ISQLExpression> result = new ArrayList<>(predicates.size() + 1);
+        for (Part part : predicates)
+            result.add(part.expression);
+        if (sorting != null)
+            result.add(sorting.expression);
+        return result;
     }
 
     private String sourceForSelect() {
@@ -314,22 +319,6 @@ public final class NextSelectBuilder {
                 || (tokens.get(0).kind() != SqlScanner.Kind.WORD
                 && tokens.get(0).kind() != SqlScanner.Kind.QUOTED_IDENTIFIER)) {
             throw new IllegalArgumentException("queryAlias must be one SQL identifier");
-        }
-    }
-
-    private void checkReservedParameters() {
-        checkReserved(sourceForSelect());
-        for (Part part : predicates) checkReserved(part.sql);
-        if (sorting != null) checkReserved(sorting.sql);
-        if (mark != null) checkReserved(mark);
-    }
-
-    private void checkReserved(String sql) {
-        for (SqlScanner.Token token : scanner.scan(sql)) {
-            if (token.kind() == SqlScanner.Kind.NAMED_PARAMETER
-                    && token.text(sql).substring(1).startsWith(LOCAL_PARAMETER_PREFIX)) {
-                throw new IllegalArgumentException("Reserved SQL parameter prefix " + LOCAL_PARAMETER_PREFIX);
-            }
         }
     }
 
@@ -410,7 +399,6 @@ public final class NextSelectBuilder {
 
     private void invalidate() {
         prepared = null;
-        localPositionals = Collections.emptyMap();
     }
 
     private static final class Part {

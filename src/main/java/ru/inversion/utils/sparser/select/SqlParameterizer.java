@@ -11,6 +11,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.IntUnaryOperator;
 
 import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.*;
 import static ru.inversion.utils.sparser.lexer.SqlKeyword.*;
@@ -24,15 +25,31 @@ final class SqlParameterizer {
     private final String source;
     private final List<SqlScanner.Token> tokens;
     private final boolean oracle;
+    private final IntUnaryOperator sourceIdAt;
 
-    private SqlParameterizer(String source, List<SqlScanner.Token> tokens, boolean oracle) {
+    private SqlParameterizer(
+            String source,
+            List<SqlScanner.Token> tokens,
+            boolean oracle,
+            IntUnaryOperator sourceIdAt
+    ) {
         this.source = Objects.requireNonNull(source, "source");
         this.tokens = Objects.requireNonNull(tokens, "tokens");
         this.oracle = oracle;
+        this.sourceIdAt = Objects.requireNonNull(sourceIdAt, "sourceIdAt");
     }
 
     static PreparedSql prepare(String source, List<SqlScanner.Token> tokens, boolean oracle) {
-        return new SqlParameterizer(source, tokens, oracle).compile();
+        return prepare(source, tokens, oracle, p -> Parameter.GLOBAL_SOURCE);
+    }
+
+    static PreparedSql prepare(
+            String source,
+            List<SqlScanner.Token> tokens,
+            boolean oracle,
+            IntUnaryOperator sourceIdAt
+    ) {
+        return new SqlParameterizer(source, tokens, oracle, sourceIdAt).compile();
     }
 
     private PreparedSql compile() {
@@ -50,6 +67,7 @@ final class SqlParameterizer {
             SqlScanner.Token current = tokens.get(i);
             SqlScanner.Kind kind = current.kind();
             String text = current.text(source);
+            int sourceId = sourceIdAt.applyAsInt(current.start());
 
             // Директивы — обычные SQL-комментарии для драйвера, но управляющие
             // маркеры для нашей автопараметризации.
@@ -94,15 +112,15 @@ final class SqlParameterizer {
             switch (kind) {
                 case POSITIONAL_PARAMETER:
                     sql.append('?');
-                    parameters.add(Parameter.positional());
+                    parameters.add(Parameter.positional(sourceId));
                     break;
                 case NAMED_PARAMETER:
                     sql.append('?');
-                    parameters.add(Parameter.named(text.substring(1)));
+                    parameters.add(Parameter.named(text.substring(1), sourceId));
                     break;
                 case NUMBERED_PARAMETER:
                     sql.append('?');
-                    parameters.add(Parameter.numbered(parseNumberedPosition(text)));
+                    parameters.add(Parameter.numbered(parseNumberedPosition(text), sourceId));
                     break;
                 case STRING:
                     if (enabled && !legacyOff && typeScopes.isEmpty()
@@ -111,7 +129,7 @@ final class SqlParameterizer {
                         Object literal = literalValue(kind, text);
                         if (literal != null) {
                             sql.append('?');
-                            parameters.add(Parameter.literal(literal));
+                            parameters.add(Parameter.literal(literal, sourceId));
                             break;
                         }
                     }
@@ -123,7 +141,7 @@ final class SqlParameterizer {
                         Object literal = literalValue(kind, text);
                         if (literal != null) {
                             sql.append('?');
-                            parameters.add(Parameter.literal(literal));
+                            parameters.add(Parameter.literal(literal, sourceId));
                             break;
                         }
                     }

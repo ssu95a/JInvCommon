@@ -10,6 +10,9 @@ import java.util.Objects;
  */
 public final class Parameter {
 
+    /** Parameter belongs to the original/global SQL rather than a local fragment. */
+    public static final int GLOBAL_SOURCE = -1;
+
     public enum Kind {
         /** Исходный анонимный параметр {@code ?}. */
         POSITIONAL,
@@ -28,12 +31,17 @@ public final class Parameter {
     private final String name;
     private final int number;
     private final Object value;
+    private final int sourceId;
 
-    private Parameter(Kind kind, String name, int number, Object value) {
+    private Parameter(Kind kind, String name, int number, Object value, int sourceId) {
+        if (sourceId < GLOBAL_SOURCE)
+            throw new IllegalArgumentException("Invalid parameter sourceId: " + sourceId);
+
         this.kind = kind;
         this.name = name;
         this.number = number;
         this.value = value;
+        this.sourceId = sourceId;
     }
 
     /**
@@ -41,25 +49,37 @@ public final class Parameter {
      * потребитель нумерует только POSITIONAL с нуля в порядке итогового списка.
      */
     public static Parameter positional() {
-        return new Parameter(Kind.POSITIONAL, null, 0, null);
+        return positional(GLOBAL_SOURCE);
+    }
+
+    public static Parameter positional(int sourceId) {
+        return new Parameter(Kind.POSITIONAL, null, 0, null, sourceId);
     }
 
     /** Имя без префикса {@code :}; сохраняется без нормализации. */
     public static Parameter named(String name) {
+        return named(name, GLOBAL_SOURCE);
+    }
+
+    public static Parameter named(String name, int sourceId) {
         Objects.requireNonNull(name, "name");
         if (name.isEmpty() || name.charAt(0) == ':') {
             throw new IllegalArgumentException(
                     "Parameter name must be non-empty and without ':' prefix");
         }
-        return new Parameter(Kind.NAMED, name, 0, null);
+        return new Parameter(Kind.NAMED, name, 0, null, sourceId);
     }
 
     /** Исходный номер {@code n} из {@code $n}, начиная с единицы. */
     public static Parameter numbered(int number) {
+        return numbered(number, GLOBAL_SOURCE);
+    }
+
+    public static Parameter numbered(int number, int sourceId) {
         if (number < 1) {
             throw new IllegalArgumentException("Parameter number must be positive");
         }
-        return new Parameter(Kind.NUMBERED, null, number, null);
+        return new Parameter(Kind.NUMBERED, null, number, null, sourceId);
     }
 
     /**
@@ -68,12 +88,16 @@ public final class Parameter {
      * Значение null не допускается.
      */
     public static Parameter literal(Object value) {
+        return literal(value, GLOBAL_SOURCE);
+    }
+
+    public static Parameter literal(Object value, int sourceId) {
         Objects.requireNonNull(value, "value");
         Class<?> type = value.getClass();
         if (type != String.class && type != BigInteger.class && type != BigDecimal.class) {
             throw new IllegalArgumentException("Unsupported literal type: " + type.getName());
         }
-        return new Parameter(Kind.LITERAL, null, 0, value);
+        return new Parameter(Kind.LITERAL, null, 0, value, sourceId);
     }
 
     public Kind getKind() {
@@ -96,6 +120,14 @@ public final class Parameter {
     public Object getValue() {
         requireKind(Kind.LITERAL);
         return value;
+    }
+
+    /**
+     * Opaque origin assigned by the SQL assembler.
+     * GLOBAL_SOURCE means the original/global SQL.
+     */
+    public int getSourceId() {
+        return sourceId;
     }
 
     private void requireKind(Kind expected) {

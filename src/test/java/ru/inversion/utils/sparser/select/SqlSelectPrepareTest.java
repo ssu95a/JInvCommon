@@ -32,6 +32,22 @@ public class SqlSelectPrepareTest {
         assertTrue(p.getParameters().isEmpty());
     }
 
+    @Test public void insertedFragmentsPreserveParameterSourceId() {
+        SqlSelect select = pg("select id from t where root = ?");
+        select.setPredicates(
+                Arrays.asList("a = ?", "b = :name"),
+                Arrays.asList(7, 8)
+        );
+        select.setOrderBy("id + ?", 9);
+
+        PreparedSql prepared = select.prepare();
+
+        assertEquals(7, prepared.getParameters().get(0).getSourceId());
+        assertEquals(8, prepared.getParameters().get(1).getSourceId());
+        assertEquals(Parameter.GLOBAL_SOURCE, prepared.getParameters().get(2).getSourceId());
+        assertEquals(9, prepared.getParameters().get(3).getSourceId());
+    }
+
     @Test public void mixedParameterSourcesAndRepeatedNames() {
         PreparedSql p = pg("select * from t where a=? and b=:userId and c=$2 and d='OPEN' and e=:userId and f=15 and g=?").prepare();
         assertEquals("select * from t where a=? and b=? and c=? and d=? and e=? and f=? and g=?", p.getSql());
