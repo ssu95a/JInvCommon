@@ -70,6 +70,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
      * Compatibility entry point. New internal code should resolve values
      * before crossing the JDBCDataReader boundary.
      */
+    @Deprecated
     @Override
     public void executeQuery( IParameters callbackParameters ) throws DataSetException {
         try {

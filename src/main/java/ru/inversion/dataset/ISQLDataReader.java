@@ -11,16 +11,16 @@ import java.util.List;
  * @author sulimoff
  */
 public interface ISQLDataReader<T> extends IDataReader<T> {
-	/**
-     * Выполняет SQL запрос к БД для получения данных.
+    /**
+     * Legacy execution entry point where the reader still resolves SQL parameters.
      * <p>
-     * Которые можно затем получить методом {@link #getNextPage(int) }
-     * @param callbackParameters
-     *          параметры для SQL выражения
-     * @throws DataSetException 
-     *          если были ошибки при выполнении запроса
+     * New DataSet code must resolve values before the JDBC boundary and call
+     * {@link #executeQuery(List)} instead.
+     *
+     * @deprecated resolve parameters at DataSet/builder level.
      */
-	void executeQuery( IParameters callbackParameters ) throws DataSetException;
+    @Deprecated
+    void executeQuery( IParameters callbackParameters ) throws DataSetException;
 
     /**
      * Выполняет SQL с уже разрешёнными значениями в физическом JDBC-порядке.
