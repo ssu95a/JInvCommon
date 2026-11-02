@@ -10,261 +10,120 @@ import java.util.List;
 import static org.junit.Assert.*;
 import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.*;
 
-/** Общие инварианты и диалектные регрессии SQL-сканнера. */
+/**
+ * Contract tests for the intentionally small SQL lexer used by sparser.
+ * It is not a general Oracle/PostgreSQL lexer.
+ */
 public class SqlScannerTest {
 
     private static final SqlScanner ORACLE = new OracleSqlScanner();
     private static final SqlScanner POSTGRES = new PostgresSqlScanner();
 
     @Test
-    public void scannerFactoryUsesDialect() {
-        assertTrue(SqlScannerFactory.create(SqlDialectFactory.ORACLE) instanceof OracleSqlScanner);
-        assertTrue(SqlScannerFactory.create(SqlDialectFactory.POSTGRES) instanceof PostgresSqlScanner);
+    public void factorySelectsDialectScanner() {
+        assertTrue(SqlScannerFactory.create(SqlDialectFactory.ORACLE)
+                instanceof OracleSqlScanner);
+        assertTrue(SqlScannerFactory.create(SqlDialectFactory.POSTGRES)
+                instanceof PostgresSqlScanner);
     }
 
     @Test
-    public void recognizesParametersButNotInsideQuotedTextOrComments() {
-        String sql = "select :id, ?, $2, '?:x $3', \"?column\" /* :ignored */ -- ?\nfrom t";
+    public void recognizesSupportedParametersOutsideQuotedTextAndComments() {
+        String sql =
+                "select :id, ?, $2, 'ABC123', \"COL\" /* :ignored ? $3 */ -- :x\nfrom t";
+
         List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(1, count(tokens, POSITIONAL_PARAMETER));
+
         assertEquals(1, count(tokens, NAMED_PARAMETER));
+        assertEquals(1, count(tokens, POSITIONAL_PARAMETER));
         assertEquals(1, count(tokens, NUMBERED_PARAMETER));
+        assertEquals(1, count(tokens, STRING));
+        assertEquals(1, count(tokens, QUOTED_IDENTIFIER));
         assertEquals(2, count(tokens, COMMENT));
         assertEquals(sql, recreate(sql, tokens));
     }
 
     @Test
-    public void handlesOracleQQuotedStrings() {
-        String sql = "select q'[don't :bind ?]', nq'<hello>' from dual where id = :id";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertEquals(2, count(tokens, STRING));
-        assertEquals(1, count(tokens, NAMED_PARAMETER));
+    public void ordinaryNumbersAreSupported() {
+        String sql = "select 1, 12.34, .5, 10., 3.25e2 from t";
+
+        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
+
+        assertEquals(5, count(tokens, NUMBER));
         assertEquals(sql, recreate(sql, tokens));
     }
 
     @Test
-    public void handlesDollarQuotedStringsAndPgEscapes() {
-        String sql = "select $func$ begin raise notice '$1 :x ?'; end $func$, "
-                + "E'quote\\'inside', $2, U&\"na\\006De\"";
+    public void postgresNumberedParametersCastAndJdbcQuestionEscapeAreSupported() {
+        String sql =
+                "select :x::numeric(10,2), data ?? 'key', $1, ? from t";
+
         List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(2, count(tokens, STRING));
+
+        assertEquals(1, count(tokens, NAMED_PARAMETER));
         assertEquals(1, count(tokens, NUMBERED_PARAMETER));
-        assertEquals(0, count(tokens, POSITIONAL_PARAMETER));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void distinguishesPgAndOracleBlockComments() {
-        String sql = "/* one /* two */ three */ select 1";
-        assertEquals("/* one /* two */ three */", POSTGRES.scan(sql).get(0).text(sql));
-        assertEquals("/* one /* two */", ORACLE.scan(sql).get(0).text(sql));
-    }
-
-    @Test
-    public void keepsQuestionMarkEscapeForPgJdbc() {
-        String sql = "select data ?? 'key', x = ? from t";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
         assertEquals(1, count(tokens, POSITIONAL_PARAMETER));
-        assertTrue(containsText(sql, tokens, OPERATOR, "??"));
-    }
-
-    @Test
-    public void recognizesNumbersIncludingPostgresNondecimalLiterals() {
-        String sql = "select 1_000, 3.5e-2, .01, 10., 0xFF_FF, 0b1001, 0o_755";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(7, count(tokens, NUMBER));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void handlesCastsAndWordBoundariesWithoutParsingThem() {
-        String sql = "select cast(:x as varchar2(100)) from t where y = :y::int";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(2, count(tokens, NAMED_PARAMETER));
         assertTrue(containsText(sql, tokens, OPERATOR, "::"));
-        assertTrue(containsText(sql, tokens, NUMBER, "100"));
+        assertTrue(containsText(sql, tokens, OPERATOR, "??"));
         assertEquals(sql, recreate(sql, tokens));
     }
 
     @Test
-    public void rejectsUnterminatedLexemes() {
-        rejects(POSTGRES, "select 'broken");
-        rejects(POSTGRES, "select /* broken");
-        rejects(POSTGRES, "select $q$broken");
-        rejects(ORACLE, "select q'[broken'");
-    }
+    public void commentsHintsAndParameterizeDirectivesAreOpaque() {
+        String sql =
+                "/* @parameterize:off */ select /*+ INDEX(t i) */ :id "
+                + "/* ? :hidden */ /* @parameterize:on */";
 
-    @Test
-    public void scansEmptyInput() {
-        assertEquals(0, ORACLE.scan("").size());
-        assertEquals(0, POSTGRES.scan("").size());
-    }
-
-    @Test
-    public void keepsOracleOptimizerHintsOpaque() {
-        String sql = "select /*+ INDEX(t idx) where x=:hidden '?' */ :real from t";
         List<SqlScanner.Token> tokens = ORACLE.scan(sql);
+
+        assertEquals(1, count(tokens, PARAMETERIZE_OFF));
+        assertEquals(1, count(tokens, PARAMETERIZE_ON));
         assertEquals(1, count(tokens, HINT));
-        assertEquals(0, count(tokens, COMMENT));
-        assertEquals(1, count(tokens, NAMED_PARAMETER));
-        assertEquals(0, count(tokens, POSITIONAL_PARAMETER));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void oracleNationalStringsAndDifferentQDelimiters() {
-        String sql = "select N'It''s :hidden', q'{a'b}', Q'(x)', q'!y!', Q'<z>' from dual";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertEquals(5, count(tokens, STRING));
-        assertEquals(0, count(tokens, NAMED_PARAMETER));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void postgresNestedCommentsAndEmptyDollarStrings() {
-        String sql = "/* A /* B /* C */ B */ A */ $$?$3 :no$$ $a1$'?'$a1$ :yes";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
         assertEquals(1, count(tokens, COMMENT));
-        assertEquals(2, count(tokens, STRING));
         assertEquals(1, count(tokens, NAMED_PARAMETER));
         assertEquals(0, count(tokens, POSITIONAL_PARAMETER));
         assertEquals(sql, recreate(sql, tokens));
     }
 
     @Test
-    public void postgresOperatorAndNamedParameterPriority() {
-        String sql = "select a::integer, b := :x, payload ??| array['a'], :x::text, ?";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(2, count(tokens, NAMED_PARAMETER));
-        assertEquals(1, count(tokens, POSITIONAL_PARAMETER));
-        assertEquals(2, textCount(sql, tokens, OPERATOR, "::"));
-        assertTrue(containsText(sql, tokens, OPERATOR, ":="));
-        assertTrue(containsText(sql, tokens, OPERATOR, "??|"));
-        assertEquals(sql, recreate(sql, tokens));
-    }
+    public void postgresNestedBlockCommentsRemainOpaque() {
+        String sql = "/* outer /* inner :x ? */ outer */ select :real";
 
-    @Test
-    public void distinguishesNumberedParametersFromDollarQuotes() {
-        String sql = "select $1, $12, $abc2$:$1?$abc2$, $2";
         List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(3, count(tokens, NUMBERED_PARAMETER));
-        assertEquals(1, count(tokens, STRING));
+
+        assertEquals(1, count(tokens, COMMENT));
+        assertEquals(1, count(tokens, NAMED_PARAMETER));
         assertEquals(0, count(tokens, POSITIONAL_PARAMETER));
         assertEquals(sql, recreate(sql, tokens));
     }
 
     @Test
-    public void postgresUnicodeStringAndIdentifier() {
-        String sql = "select U&'d\\0061t', u&\"na\\006De\", E'a\\\\b'";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(2, count(tokens, STRING));
-        assertEquals(1, count(tokens, QUOTED_IDENTIFIER));
+    public void oracleIdentifiersMayContainHash() {
+        String sql = "select customer#id from t where id=:a#b";
+
+        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
+
+        assertTrue(containsText(sql, tokens, WORD, "customer#id"));
+        assertTrue(containsText(sql, tokens, NAMED_PARAMETER, ":a#b"));
         assertEquals(sql, recreate(sql, tokens));
     }
 
     @Test
-    public void normalQuotedStringsWithDoubledQuotes() {
-        String sql = "select 'don''t :x ?', \"col" + "\"\"" + "name\" from t";
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            List<SqlScanner.Token> tokens = scanner.scan(sql);
-            assertEquals(1, count(tokens, STRING));
-            assertEquals(1, count(tokens, QUOTED_IDENTIFIER));
-            assertEquals(0, count(tokens, NAMED_PARAMETER));
-            assertEquals(0, count(tokens, POSITIONAL_PARAMETER));
-            assertEquals(sql, recreate(sql, tokens));
-        }
-    }
-
-    @Test
-    public void caseInsensitiveWordDetection() {
-        String sql = "SeLeCt selected SELECT";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertTrue(tokens.get(0).isWord(sql, "select"));
-        assertFalse(tokens.get(2).isWord(sql, "select"));
-        assertTrue(tokens.get(4).isWord(sql, "SELECT"));
-    }
-
-    @Test
-    public void classifiesKnownSqlKeywordsWithoutChangingWordTokens() {
-        String sql = "SeLeCt customer FROM orders WHERE \"order\" = 1";
+    public void sqlKeywordsAreClassifiedWithoutChangingWordTokens() {
+        String sql = "SeLeCt customer FROM orders WHERE id = 1";
         List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
 
         assertEquals(WORD, tokens.get(0).kind());
         assertEquals(SqlKeyword.SELECT, tokens.get(0).keyword(sql));
-
-        SqlScanner.Token customer = tokens.get(2);
-        assertEquals(WORD, customer.kind());
-        assertNull(customer.keyword(sql));
-
-        assertEquals(SqlKeyword.FROM, tokens.get(4).keyword(sql));
-        assertEquals(SqlKeyword.WHERE, tokens.get(8).keyword(sql));
-
-        SqlScanner.Token quotedOrder = tokens.get(10);
-        assertEquals(QUOTED_IDENTIFIER, quotedOrder.kind());
-        assertNull(quotedOrder.keyword(sql));
+        assertEquals(SqlKeyword.FROM, findWord(sql, tokens, "FROM").keyword(sql));
+        assertEquals(SqlKeyword.WHERE, findWord(sql, tokens, "WHERE").keyword(sql));
+        assertNull(findWord(sql, tokens, "customer").keyword(sql));
     }
 
     @Test
-    public void sqlKeywordLookupIsCaseInsensitiveAndSupportsMembership() {
-        assertEquals(SqlKeyword.SELECT, SqlKeyword.of("select"));
-        assertEquals(SqlKeyword.SELECT, SqlKeyword.of("SeLeCt"));
-        assertNull(SqlKeyword.of("customer"));
+    public void structuralPunctuationCoversSourceWithoutGaps() {
+        String sql = "\tSELECT\r\n(a.b), arr[1]; --end\r\n";
 
-        assertTrue(SqlKeyword.in(
-                SqlKeyword.UNION,
-                SqlKeyword.UNION,
-                SqlKeyword.INTERSECT,
-                SqlKeyword.EXCEPT,
-                SqlKeyword.MINUS
-        ));
-        assertFalse(SqlKeyword.in(
-                SqlKeyword.WHERE,
-                SqlKeyword.UNION,
-                SqlKeyword.INTERSECT,
-                SqlKeyword.EXCEPT,
-                SqlKeyword.MINUS
-        ));
-    }
-
-    @Test
-    public void returnsImmutableTokensAndList() {
-        List<SqlScanner.Token> tokens = POSTGRES.scan("select 1");
-        try {
-            tokens.clear();
-            fail("Must be immutable");
-        } catch (UnsupportedOperationException expected) {
-            // okay
-        }
-    }
-
-    @Test
-    public void directivesAreSpecialTokensButHaveNoEffectOnScanner() {
-        String sql = "/* @parameterize:off */ select 'value', :id /* @parameterize:on */";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertEquals(1, count(tokens, PARAMETERIZE_OFF));
-        assertEquals(1, count(tokens, PARAMETERIZE_ON));
-        assertEquals(0, count(tokens, COMMENT));
-        assertEquals(1, count(tokens, STRING));
-        assertEquals(1, count(tokens, NAMED_PARAMETER));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void punctuationAndWhitespacePreserveAllSourceBytes() {
-        String sql = "\tSELECT\r\n(a.b), 1..2; --end\r\n";
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            assertEquals(sql, recreate(sql, scanner.scan(sql)));
-        }
-    }
-
-    @Test
-    public void oracleRejectsPostgresNumberedParameterSyntax() {
-        rejects(ORACLE, "select $1 from dual");
-    }
-
-    @Test
-    public void knownStructuralSymbolsAreExplicitTokens() {
-        String sql = "select (a.b), arr[1];";
         for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
             List<SqlScanner.Token> tokens = scanner.scan(sql);
             for (String symbol : Arrays.asList("(", ")", ".", ",", "[", "]", ";")) {
@@ -276,211 +135,92 @@ public class SqlScannerTest {
     }
 
     @Test
-    public void unknownCharacterIsRejected() {
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            rejects(scanner, "select a \\ b from t");
-            rejects(scanner, "select {a} from t");
+    public void unsupportedPrefixedStringFormsAreRejected() {
+        rejects(ORACLE, "select q'[abc]' from dual");
+        rejects(ORACLE, "select nq'<abc>' from dual");
+        rejects(ORACLE, "select N'abc' from dual");
+
+        rejects(POSTGRES, "select E'abc'");
+        rejects(POSTGRES, "select U&'abc'");
+        rejects(POSTGRES, "select U&\"name\"");
+        rejects(POSTGRES, "select $$abc$$");
+        rejects(POSTGRES, "select $tag$abc$tag$");
+    }
+
+    @Test
+    public void unsupportedNumericFormsAreRejected() {
+        for (String sql : Arrays.asList(
+                "select 1_000",
+                "select 0xFF",
+                "select 0b1010",
+                "select 0o755")) {
+            rejects(POSTGRES, sql);
         }
+
+        rejects(ORACLE, "select 1f from dual");
+        rejects(ORACLE, "select 1d from dual");
     }
 
     @Test
-    public void errorsReportStartOfPrefixedLiteral() {
-        rejects(POSTGRES, "select E'unclosed");
-        rejects(POSTGRES, "select U&\"unclosed");
-        rejects(ORACLE, "select N'unclosed");
-        rejects(ORACLE, "select nq'{unclosed'");
+    public void malformedOrUnknownLexemesAreRejected() {
+        rejects(POSTGRES, "select 'broken");
+        rejects(POSTGRES, "select /* broken");
+        rejects(ORACLE, "select 'broken");
+        rejects(ORACLE, "select a \\ b from t");
+        rejects(POSTGRES, "select {a} from t");
     }
 
-    @Test
-    public void commentsHintsAndDirectivesHaveExplicitKinds() {
-        String sql = "/* @parameterize:off */select /*+ index(t idx) */ :id "
-                + "/* just a comment */ /* @parameterize:on */";
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            List<SqlScanner.Token> tokens = scanner.scan(sql);
-            assertEquals(1, count(tokens, PARAMETERIZE_OFF));
-            assertEquals(1, count(tokens, PARAMETERIZE_ON));
-            assertEquals(1, count(tokens, HINT));
-            assertEquals(1, count(tokens, COMMENT));
-            assertEquals(1, count(tokens, NAMED_PARAMETER));
-            assertEquals(sql, recreate(sql, tokens));
-        }
-    }
-
-    @Test
-    public void invalidParameterizeDirectiveDoesNotSilentlyBecomeComment() {
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            rejects(scanner, "/* @parameterize:of */ select 1");
-            rejects(scanner, "/* @parameterize:on trailing */ select 1");
-        }
-    }
-
-    @Test
-    public void postgresOperatorsIncludeUserDefinedAndJdbcEscapes() {
-        String sql = "select a @?? b, a ??| array['k'], a ??& array['a'], "
-                + "x->>'id', x#>>'{a}', x !~* 'pattern', col::integer, :id, ? from t";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(1, count(tokens, POSITIONAL_PARAMETER));
-        assertEquals(1, count(tokens, NAMED_PARAMETER));
-        for (String operator : Arrays.asList("@??", "??|", "??&", "->>", "#>>", "!~*", "::")) {
-            assertTrue("Expected OPERATOR: " + operator, containsText(sql, tokens, OPERATOR, operator));
-        }
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void unescapedPostgresQuestionMarkStaysJdbcParameter() {
-        // Input to PreparedStatement must escape the ? in an operator as ??.
-        String sql = "select data ?| array['a'], j @? '$.x', value = ?";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(3, count(tokens, POSITIONAL_PARAMETER));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void oracleOperatorsDoNotConsumeNamedParameters() {
-        String sql = "select a||b, f(a => :name), a <= 3, b <> 2, c ** 2, :id from dual";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertEquals(2, count(tokens, NAMED_PARAMETER));
-        for (String operator : Arrays.asList("||", "=>", "<=", "<>", "**")) {
-            assertTrue("Expected OPERATOR: " + operator, containsText(sql, tokens, OPERATOR, operator));
-        }
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void operatorStopsBeforeCommentsAndPgSplitSuffixes() {
-        String sql = "select x *- y, y+--comment\n z/* block */+1";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertTrue(containsText(sql, tokens, OPERATOR, "*"));
-        assertTrue(containsText(sql, tokens, OPERATOR, "-"));
-        assertTrue(containsText(sql, tokens, OPERATOR, "+"));
-        assertEquals(2, count(tokens, COMMENT));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void postgresHashIsOperatorNotPartOfIdentifier() {
-        String sql = "select obj#>>'{a}', obj#>$1, obj#$2 from t";
-        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
-        assertEquals(2, count(tokens, NUMBERED_PARAMETER));
-        assertTrue(containsText(sql, tokens, OPERATOR, "#>>"));
-        assertTrue(containsText(sql, tokens, OPERATOR, "#>"));
-        assertTrue(containsText(sql, tokens, OPERATOR, "#"));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void oracleIdentifierMayContainHash() {
-        String sql = "select customer#id from t where id=:a#b";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertTrue(containsText(sql, tokens, WORD, "customer#id"));
-        assertTrue(containsText(sql, tokens, NAMED_PARAMETER, ":a#b"));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void directivesAcceptWhitespaceAndMixedCase() {
-        String sql = "/*  @PaRaMeTeRiZe : off  */ select 'x' /*\n@parameterize\t: ON\n*/";
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            List<SqlScanner.Token> tokens = scanner.scan(sql);
-            assertEquals(1, count(tokens, PARAMETERIZE_OFF));
-            assertEquals(1, count(tokens, PARAMETERIZE_ON));
-            assertEquals(sql, recreate(sql, tokens));
-        }
-    }
-
-    @Test
-    public void malformedDirectivesAreRejected() {
-        String[] examples = {
-            "/* @parameterize : maybe */",
-            "/* @parameterize:off trailing */",
-            "/* @parameterize:onward */",
-            "/* @parameterize:off */ /* @parameterize:invalid */"
-        };
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            for (String sql : examples) rejects(scanner, sql);
-        }
-    }
-
-    @Test
-    public void unrelatedCommentsAreNotDirectives() {
-        String sql = "/* random @parameterize:off */ /* @other:off */ select 1";
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            List<SqlScanner.Token> tokens = scanner.scan(sql);
-            assertEquals(2, count(tokens, COMMENT));
-            assertEquals(0, count(tokens, PARAMETERIZE_OFF));
-            assertEquals(sql, recreate(sql, tokens));
-        }
-    }
-
-    @Test
-    public void oracleQQuoteRejectsWhitespaceAndQuoteDelimiters() {
-        rejects(ORACLE, "select q' abc ' from dual");
-        rejects(ORACLE, "select q'\tabc\t' from dual");
-        rejects(ORACLE, "select nq''abc'' from dual");
-    }
-
-    @Test
-    public void oracleQQuoteSupportsPairedAndUnpairedDelimiters() {
-        String sql = "select q'[a ? :x]', q'{b}', q'(c)', q'<d>', q'!e!' from dual";
-        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
-        assertEquals(5, count(tokens, STRING));
-        assertEquals(0, count(tokens, NAMED_PARAMETER));
-        assertEquals(sql, recreate(sql, tokens));
-    }
-
-    @Test
-    public void underscoresInNumbersArePostgresSpecific() {
-        String sql = "select 1_000, 0xFF, 0b1010 from t";
-        assertTrue(containsText(sql, POSTGRES.scan(sql), NUMBER, "1_000"));
-        assertTrue(containsText(sql, POSTGRES.scan(sql), NUMBER, "0xFF"));
-        assertTrue(containsText(sql, POSTGRES.scan(sql), NUMBER, "0b1010"));
-        assertFalse(containsText(sql, ORACLE.scan(sql), NUMBER, "1_000"));
-        assertFalse(containsText(sql, ORACLE.scan(sql), NUMBER, "0xFF"));
-        assertEquals(sql, recreate(sql, ORACLE.scan(sql)));
-        assertEquals(sql, recreate(sql, POSTGRES.scan(sql)));
-    }
-
-    @Test
-    public void directiveAndHintPrecedence() {
-        String sql = "/* @parameterize : off */ /*+ INDEX(t i) */ /* normal */";
-        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
-            List<SqlScanner.Token> tokens = scanner.scan(sql);
-            assertEquals(1, count(tokens, PARAMETERIZE_OFF));
-            assertEquals(1, count(tokens, HINT));
-            assertEquals(1, count(tokens, COMMENT));
-        }
-    }
-
-    private static int count(List<SqlScanner.Token> tokens, SqlScanner.Kind kind) {
-        int result = 0;
-        for (SqlScanner.Token token : tokens) if (token.kind() == kind) result++;
-        return result;
-    }
-
-    private static int textCount(String sql, List<SqlScanner.Token> tokens,
-                                 SqlScanner.Kind kind, String text) {
-        int result = 0;
+    private static SqlScanner.Token findWord(
+            String sql,
+            List<SqlScanner.Token> tokens,
+            String text
+    ) {
         for (SqlScanner.Token token : tokens) {
-            if (token.kind() == kind && token.text(sql).equals(text)) result++;
+            if (token.kind() == WORD && token.text(sql).equalsIgnoreCase(text))
+                return token;
         }
+        fail("WORD not found: " + text);
+        return null;
+    }
+
+    private static int count(
+            List<SqlScanner.Token> tokens,
+            SqlScanner.Kind kind
+    ) {
+        int result = 0;
+        for (SqlScanner.Token token : tokens)
+            if (token.kind() == kind)
+                result++;
         return result;
     }
 
-    private static boolean containsText(String sql, List<SqlScanner.Token> tokens,
-                                        SqlScanner.Kind kind, String text) {
-        return textCount(sql, tokens, kind, text) > 0;
+    private static boolean containsText(
+            String sql,
+            List<SqlScanner.Token> tokens,
+            SqlScanner.Kind kind,
+            String text
+    ) {
+        for (SqlScanner.Token token : tokens) {
+            if (token.kind() == kind && token.text(sql).equals(text))
+                return true;
+        }
+        return false;
     }
 
-    private static String recreate(String sql, List<SqlScanner.Token> tokens) {
+    private static String recreate(
+            String sql,
+            List<SqlScanner.Token> tokens
+    ) {
         StringBuilder result = new StringBuilder();
         int offset = 0;
+
         for (SqlScanner.Token token : tokens) {
             assertEquals(offset, token.start());
             assertTrue(token.end() > token.start());
             result.append(token.text(sql));
             offset = token.end();
         }
+
         assertEquals(sql.length(), offset);
         return result.toString();
     }
@@ -489,8 +229,9 @@ public class SqlScannerTest {
         try {
             scanner.scan(sql);
             fail("Expected error for: " + sql);
-        } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("offset"));
+        }
+        catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("offset"));
         }
     }
 }

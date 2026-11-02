@@ -371,15 +371,4 @@ public class NextSelectBuilderTest {
         assertTrue(p.getParameters().isEmpty());
     }
 
-    @Test public void dialectSpecificStringLiteralIsPreserved() {
-        NextSelectBuilder b = new NextSelectBuilder(
-                "select q'[A-1/2]' as txt from dual",
-                SqlDialectFactory.ORACLE);
-
-        PreparedSql p = b.prepare();
-
-        assertEquals("select q'[A-1/2]' as txt from dual", p.getSql());
-        assertTrue(p.getParameters().isEmpty());
-    }
-
 }

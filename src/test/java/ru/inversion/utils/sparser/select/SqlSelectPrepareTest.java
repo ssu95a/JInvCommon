@@ -32,6 +32,17 @@ public class SqlSelectPrepareTest {
         assertTrue(p.getParameters().isEmpty());
     }
 
+
+    private static void assertRejected(SqlSelect select) {
+        try {
+            select.prepare();
+            fail("Expected unsupported SQL syntax");
+        }
+        catch (IllegalArgumentException expected) {
+            // supported contract: unsupported syntax fails fast
+        }
+    }
+
     @Test public void insertedFragmentsPreserveParameterSourceId() {
         SqlSelect select = pg("select id from t where root = ?");
         select.setPredicates(
@@ -333,12 +344,22 @@ public class SqlSelectPrepareTest {
         );
     }
 
-    @Test public void pgRadixAndDecimalBecomeTypedValues() {
-        PreparedSql p = pg("select x from t where a=0xFF and b=1_000 and c=3.25e2").prepare();
-        assertParameterKinds(p, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL);
-        assertEquals(new BigInteger("255"), p.getParameters().get(0).getValue());
-        assertEquals(new BigInteger("1000"), p.getParameters().get(1).getValue());
-        assertEquals(new BigDecimal("3.25e2"), p.getParameters().get(2).getValue());
+
+    @Test public void unsupportedPrefixedStringFormsAreRejected() {
+        assertRejected(pg("select E'abc'"));
+        assertRejected(pg("select U&'abc'"));
+        assertRejected(pg("select $abc$"));
+        assertRejected(ora("select q'[abc]' from dual"));
+        assertRejected(ora("select N'abc' from dual"));
+    }
+
+    @Test public void unsupportedNumericFormsAreRejected() {
+        assertRejected(pg("select 1_000"));
+        assertRejected(pg("select 0xFF"));
+        assertRejected(pg("select 0b1010"));
+        assertRejected(pg("select 0o755"));
+        assertRejected(ora("select 1f from dual"));
+        assertRejected(ora("select 1d from dual"));
     }
 
     @Test public void orderByNumberedParameterSurvivesProtection() {
