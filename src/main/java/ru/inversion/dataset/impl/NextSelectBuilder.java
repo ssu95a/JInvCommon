@@ -11,9 +11,7 @@ import ru.inversion.utils.sparser.select.SqlSelect;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -148,9 +146,6 @@ public final class NextSelectBuilder {
 
         PreparedSql plan = prepare();
         List<ISQLExpression> expressions = expressions();
-        List<ISQLExpression> sources = sourceExpressions();
-        Map<Integer, List<ISQLExpression>> numberedOwners = numberedOwners();
-        Map<Integer,Integer> localIndexes = new HashMap<>();
 
         List<Object> values = new ArrayList<>(plan.getParameters().size());
         int positionalIndex = 0;
@@ -184,40 +179,13 @@ public final class NextSelectBuilder {
 
                 case POSITIONAL: {
                     int index = positionalIndex++;
-                    ISQLExpression local = null;
-                    int localIndex = -1;
 
-                    if (parameter.getSourceId() != Parameter.GLOBAL_SOURCE) {
-                        int sourceId = parameter.getSourceId();
-                        if (sourceId < 0 || sourceId >= sources.size()
-                                || sources.get(sourceId) == null) {
-                            throw new IllegalStateException(
-                                    "Unknown local SQL parameter source: "
-                                            + sourceId);
-                        }
-
-                        local = sources.get(sourceId);
-                        Integer next = localIndexes.get(sourceId);
-                        localIndex = next == null ? 0 : next;
-                        localIndexes.put(sourceId, localIndex + 1);
-                    }
-
-                    if (primary.hasParameter(index)) {
+                    if (primary.hasParameter(index))
                         value = primary.getParameter(index);
-                    }
-                    else if (local != null) {
-                        if (!local.hasParameter(localIndex))
-                            throw missing("?" + (index + 1));
-
-                        requireNoNumberedConflict(
-                                numberedOwners, index, local);
-
-                        value = local.getParameter(localIndex);
-                    }
-                    else {
+                    else
                         value = findUniqueIndexed(expressions, index)
                                 .getParameter(index);
-                    }
+
                     break;
                 }
 
@@ -240,37 +208,18 @@ public final class NextSelectBuilder {
     private SqlSelect createSelect() {
         SqlSelect select = new SqlSelect(sourceForSelect(), dialect);
         List<String> predicatesSql = new ArrayList<>(predicates.size());
-        List<Integer> sourceIds = new ArrayList<>(predicates.size());
 
-        for (int i = 0; i < predicates.size(); i++) {
-            Part part = predicates.get(i);
+        for (Part part : predicates)
             predicatesSql.add(part.sql);
-            sourceIds.add(part.expression == null ? Parameter.GLOBAL_SOURCE : i);
-        }
 
-        select.setPredicates(predicatesSql, sourceIds);
-
-        if (sorting == null) {
-            select.setOrderBy(null);
-        } else {
-            int sourceId = sorting.expression == null
-                    ? Parameter.GLOBAL_SOURCE : predicates.size();
-            select.setOrderBy(sorting.sql, sourceId);
-        }
-
+        select.setPredicates(predicatesSql);
+        select.setOrderBy(sorting == null ? null : sorting.sql);
         select.setRowLimit(rowLimit);
 
-        if (mark != null) select.setMark(mark, "MARK");
-        return select;
-    }
+        if (mark != null)
+            select.setMark(mark, "MARK");
 
-    private List<ISQLExpression> sourceExpressions() {
-        List<ISQLExpression> result = new ArrayList<>(predicates.size() + 1);
-        for (Part part : predicates)
-            result.add(part.expression);
-        if (sorting != null)
-            result.add(sorting.expression);
-        return result;
+        return select;
     }
 
     private String sourceForSelect() {
@@ -331,36 +280,6 @@ public final class NextSelectBuilder {
         if (candidate == null) return;
         for (ISQLExpression existing : values) if (existing == candidate) return;
         values.add(candidate);
-    }
-
-    /** Только явно использующие $n expressions могут конфликтовать с локальным ? в этой позиции. */
-    private Map<Integer, List<ISQLExpression>> numberedOwners() {
-        Map<Integer, List<ISQLExpression>> result = new HashMap<>();
-        List<Part> parts = new ArrayList<>(predicates);
-        if (sorting != null) parts.add(sorting);
-        for (Part part : parts) {
-            if (part.expression == null) continue;
-            for (SqlScanner.Token token : scanner.scan(part.sql)) {
-                if (token.kind() != SqlScanner.Kind.NUMBERED_PARAMETER) continue;
-                int number = Integer.parseInt(token.text(part.sql).substring(1));
-                if (number <= 0) throw new IllegalArgumentException("Invalid numbered parameter $" + number);
-                int index = number - 1;
-                List<ISQLExpression> owners = result.computeIfAbsent(index, k -> new ArrayList<>());
-                addIfAbsent(owners, part.expression);
-            }
-        }
-        return result;
-    }
-
-    private static void requireNoNumberedConflict(Map<Integer, List<ISQLExpression>> numbered,
-                                                   int globalIndex, ISQLExpression local) {
-        List<ISQLExpression> owners = numbered.get(globalIndex);
-        if (owners == null) return;
-        for (ISQLExpression owner : owners) {
-            if (owner != local && owner.hasParameter(globalIndex)) {
-                throw conflict("? / $" + (globalIndex + 1));
-            }
-        }
     }
 
     private static ISQLExpression findUniqueNamed(List<ISQLExpression> expressions, String name) {

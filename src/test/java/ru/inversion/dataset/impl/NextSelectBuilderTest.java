@@ -56,18 +56,37 @@ public class NextSelectBuilderTest {
         assertEquals(Arrays.<Object>asList(null, null), b.values(main));
     }
 
-    @Test public void localQuestionMarksBecomeGlobalSequence() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
-        Expr a = new Expr("a = ?").set(0, 10);
-        Expr c = new Expr("b = ?").set(0, 20);
-        b.addPredicate(a).addPredicate(c);
-        PreparedSql p = b.prepare();
-        assertEquals(2,p.getParameters().size());
-        assertEquals(Parameter.Kind.POSITIONAL,p.getParameters().get(0).getKind());
-        assertEquals(Parameter.Kind.POSITIONAL,p.getParameters().get(1).getKind());
-        assertTrue(p.getSql().contains("a = ?"));
-        assertTrue(p.getSql().contains("b = ?"));
-        assertEquals(Arrays.<Object>asList(10, 20), b.values(new Params()));
+    @Test public void positionalParametersUseGlobalIndexes() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from t",
+                SqlDialectFactory.POSTGRES
+        );
+
+        b.addPredicate(new Expr("a = ?").set(0, 10));
+        b.addPredicate(new Expr("b = ?").set(1, 20));
+
+        assertEquals(
+                Arrays.<Object>asList(10, 20),
+                b.values(new Params())
+        );
+    }
+
+    @Test public void duplicatedPositionalParameterWithoutDatasetThrows() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from t",
+                SqlDialectFactory.POSTGRES
+        );
+
+        b.addPredicate(new Expr("a = ?").set(0, 10));
+        b.addPredicate(new Expr("b = ?").set(0, 20));
+
+        try {
+            b.values(new Params());
+            fail("Missing positional conflict");
+        }
+        catch (IllegalStateException e) {
+            assertTrue(e.getMessage().contains("Conflicting SQL parameter"));
+        }
     }
 
     @Test public void mainQuestionMarkGetsFinalTextualPosition() {
@@ -81,7 +100,7 @@ public class NextSelectBuilderTest {
         );
     }
 
-    @Test public void datasetIndexedOverridesLocalExpression() {
+    @Test public void datasetIndexedOverridesPredicateFallback() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 10));
         assertEquals(
@@ -164,7 +183,7 @@ public class NextSelectBuilderTest {
         try { b.values(new Params()); fail("Expected conflict"); }
         catch (IllegalStateException e) {assertTrue(e.getMessage().contains("Conflicting"));}
     }
-    @Test public void numberedAndLocalPositionalCollisionThrows() {
+    @Test public void numberedAndPositionalDuplicateThrows() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
@@ -182,7 +201,7 @@ public class NextSelectBuilderTest {
         );
     }
 
-    @Test public void orderByExpressionSupportsLocalQuestionMark() {
+    @Test public void orderByExpressionUsesGlobalPositionalIndex() {
         NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.orderBy(new Expr("case when id = ? then 0 else 1 end").set(0, 99));
         PreparedSql prepared = b.prepare();
@@ -214,8 +233,8 @@ public class NextSelectBuilderTest {
         NextSelectBuilder b = new NextSelectBuilder(
                 "select id from t where root = ? and code = :code", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ? and state = 'A'").set(0, 10));
-        b.addPredicate(new Expr("b = ?").set(0, 20));
-        b.orderBy(new Expr("id + ?").set(0, 30));
+        b.addPredicate(new Expr("b = ?").set(1, 20));
+        b.orderBy(new Expr("id + ?").set(3, 30));
         PreparedSql plan = b.prepare();
         List<Object> resolved =
                 b.values(new Params().set(2, 50).set("code", "X"));

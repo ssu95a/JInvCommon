@@ -33,10 +33,8 @@ public final class SqlSelect {
     private final Layout layout;
 
     private List<String> predicates = Collections.emptyList();
-    private List<Integer> predicateSourceIds = Collections.emptyList();
 
     private String orderBy;
-    private int orderBySourceId = ru.inversion.utils.sparser.jdbc.Parameter.GLOBAL_SOURCE;
 
     private Integer rowLimit;
 
@@ -45,7 +43,6 @@ public final class SqlSelect {
     private String markAlias;
 
     private String builtSql;
-    private List<OriginRange> builtOrigins = Collections.emptyList();
 
     private PreparedSql preparedSql;
 
@@ -65,59 +62,60 @@ public final class SqlSelect {
 
     /** */
     public void setPredicates( List<String> values ) {
-        setPredicates(values, null);
-    }
-
-    /**
-     * sourceIds are opaque fragment origins used only to preserve bind ownership.
-     * null means all predicates belong to the global parameter source.
-     */
-    public void setPredicates( List<String> values, List<Integer> sourceIds )
-    {
         Objects.requireNonNull(values, "values");
-        if (sourceIds != null && sourceIds.size() != values.size())
-            throw new IllegalArgumentException("predicate sourceIds size mismatch");
 
         List<String> copy = new ArrayList<>(values.size());
-        List<Integer> origins = new ArrayList<>(values.size());
 
-        for( int i = 0; i < values.size(); i++ )
-        {
-            String part = requiredFragment(values.get(i), "predicate");
+        for( String value : values ) {
+            String part = requiredFragment(value, "predicate");
             checkFragment(part);
             copy.add(part);
-            origins.add(sourceIds == null
-                    ? ru.inversion.utils.sparser.jdbc.Parameter.GLOBAL_SOURCE
-                    : sourceIds.get(i));
         }
+
         if (!copy.isEmpty() && layout.legacyWhereMarkerStart < 0)
             requireSimple("WHERE predicates");
 
         predicates = Collections.unmodifiableList(copy);
-        predicateSourceIds = Collections.unmodifiableList(origins);
         invalidate();
+    }
+
+    /**
+     * Compatibility overload. Parameter ownership is global now;
+     * sourceIds are ignored.
+     */
+    @Deprecated
+    public void setPredicates(List<String> values, List<Integer> sourceIds) {
+        Objects.requireNonNull(values, "values");
+
+        if (sourceIds != null && sourceIds.size() != values.size())
+            throw new IllegalArgumentException("predicate sourceIds size mismatch");
+
+        setPredicates(values);
     }
 
     /** null означает отсутствие runtime-сортировки: исходный ORDER BY сохраняется. */
     public void setOrderBy(String expression) {
-        setOrderBy(expression, ru.inversion.utils.sparser.jdbc.Parameter.GLOBAL_SOURCE);
-    }
-
-    public void setOrderBy(String expression, int sourceId) {
         String value = optionalFragment(expression);
+
         if (value != null) {
             requireSimple("ORDER BY replacement");
+
             if (layout.orderSiblings) {
                 throw new UnsupportedOperationException(
                         "Replacing ORDER SIBLINGS BY is not supported");
             }
+
             checkFragment(value);
         }
+
         orderBy = value;
-        orderBySourceId = value == null
-                ? ru.inversion.utils.sparser.jdbc.Parameter.GLOBAL_SOURCE
-                : sourceId;
         invalidate();
+    }
+
+    /** Compatibility overload. Parameter ownership is global now. */
+    @Deprecated
+    public void setOrderBy(String expression, int sourceId) {
+        setOrderBy(expression);
     }
 
     /**
@@ -170,38 +168,27 @@ public final class SqlSelect {
         if (builtSql != null) return builtSql;
         if (predicates.isEmpty() && orderBy == null && rowLimit == null
                 && markExpression == null && layout.legacyWhereMarkerStart < 0) {
-            builtOrigins = Collections.emptyList();
             return builtSql = source;
         }
 
         List<Edit> edits = edits();
         StringBuilder result = new StringBuilder(source.length() + 128);
-        List<OriginRange> origins = new ArrayList<>();
         int copiedUntil = 0;
         for (Edit edit : edits) {
             if (edit.start < copiedUntil) {
                 throw new IllegalStateException("Overlapping SQL edits at " + edit.start);
             }
             result.append(source, copiedUntil, edit.start);
-
-            int base = result.length();
-            result.append(edit.replacement.text);
-            for (OriginRange range : edit.replacement.origins) {
-                origins.add(new OriginRange(
-                        base + range.start,
-                        base + range.end,
-                        range.sourceId
-                ));
-            }
+            result.append(edit.replacement);
             copiedUntil = edit.end;
         }
+
         result.append(source, copiedUntil, source.length());
-        builtOrigins = Collections.unmodifiableList(origins);
         return builtSql = result.toString();
     }
 
     /**
-     * Готовит SQL для JDBC. Результат (SQL + порядок источников значений)
+     * Готовит SQL для JDBC. Результат (SQL + порядок параметров)
      * неизменяем и кешируется до любой структурной правки.
      * Runtime-значения IParameters не хранятся и не разрешаются здесь.
      */
@@ -211,8 +198,7 @@ public final class SqlSelect {
             preparedSql = SqlParameterizer.prepare(
                     sql,
                     scanner.scan(sql),
-                    scanner instanceof OracleSqlScanner,
-                    this::sourceIdAt
+                    scanner instanceof OracleSqlScanner
             );
         }
         return preparedSql;
@@ -220,53 +206,77 @@ public final class SqlSelect {
 
     private void invalidate() {
         builtSql = null;
-        builtOrigins = Collections.emptyList();
         preparedSql = null;
-    }
-
-    private int sourceIdAt(int offset) {
-        for (OriginRange range : builtOrigins) {
-            if (offset >= range.start && offset < range.end)
-                return range.sourceId;
-        }
-        return ru.inversion.utils.sparser.jdbc.Parameter.GLOBAL_SOURCE;
     }
 
     /** Структурные изменения исходного SQL. */
     private List<Edit> edits() {
         List<Edit> edits = new ArrayList<>(5);
+
         if (markExpression != null) {
-            edits.add(new Edit(layout.selectItemsEnd, layout.selectItemsEnd,
-                    TaggedText.plain(", (" + markExpression + "\n) AS " + markAlias + " "), 0));
+            edits.add(new Edit(
+                    layout.selectItemsEnd,
+                    layout.selectItemsEnd,
+                    ", (" + markExpression + "\n) AS " + markAlias + " ",
+                    0
+            ));
         }
 
         if (layout.legacyWhereMarkerStart >= 0) {
             edits.add(new Edit(
                     layout.legacyWhereMarkerStart,
                     layout.legacyWhereMarkerEnd,
-                    predicates.isEmpty() ? TaggedText.plain("") : joinLegacyWherePredicates(),
+                    predicates.isEmpty() ? "" : joinLegacyWherePredicates(),
                     10
             ));
         }
         else if (!predicates.isEmpty()) {
-            TaggedText joined = joinPredicates();
+            String joined = joinPredicates();
+
             if (layout.whereWordEnd >= 0) {
-                edits.add(new Edit(layout.whereWordEnd, layout.whereWordEnd,
-                        TaggedText.wrap(" (", joined, ") AND ("), 10));
-                edits.add(new Edit(layout.wherePredicateEnd, layout.wherePredicateEnd, TaggedText.plain(") "), 10));
-            } else {
-                edits.add(new Edit(layout.whereInsertion, layout.whereInsertion,
-                        TaggedText.wrap(" WHERE (", joined, ")\n"), 10));
+                edits.add(new Edit(
+                        layout.whereWordEnd,
+                        layout.whereWordEnd,
+                        " (" + joined + ") AND (",
+                        10
+                ));
+
+                edits.add(new Edit(
+                        layout.wherePredicateEnd,
+                        layout.wherePredicateEnd,
+                        ") ",
+                        10
+                ));
+            }
+            else {
+                edits.add(new Edit(
+                        layout.whereInsertion,
+                        layout.whereInsertion,
+                        " WHERE (" + joined + ")\n",
+                        10
+                ));
             }
         }
 
         if (orderBy != null) {
+            String clause = (layout.orderStart >= 0 ? "ORDER BY " : " ORDER BY ")
+                    + orderBy + "\n";
+
             if (layout.orderStart >= 0) {
-                edits.add(new Edit(layout.orderStart, layout.orderEnd,
-                        TaggedText.fragment("ORDER BY ", orderBy, "\n", orderBySourceId), 20));
-            } else {
-                edits.add(new Edit(layout.orderInsertion, layout.orderInsertion,
-                        TaggedText.fragment(" ORDER BY ", orderBy, "\n", orderBySourceId), 20));
+                edits.add(new Edit(
+                        layout.orderStart,
+                        layout.orderEnd,
+                        clause,
+                        20
+                ));
+            }
+            else {
+                edits.add(new Edit(
+                        layout.orderInsertion,
+                        layout.orderInsertion,
+                        clause,
+                        20
+                ));
             }
         }
 
@@ -277,7 +287,7 @@ public final class SqlSelect {
                 edits.add(new Edit(
                         layout.rowLimitStart,
                         layout.rowLimitEnd,
-                        TaggedText.plain(clause),
+                        clause,
                         30
                 ));
             }
@@ -285,14 +295,18 @@ public final class SqlSelect {
                 edits.add(new Edit(
                         layout.rowLimitInsertion,
                         layout.rowLimitInsertion,
-                        TaggedText.plain(" " + clause + " "),
+                        " " + clause + " ",
                         30
                 ));
             }
         }
 
-        Collections.sort(edits, Comparator.comparingInt((Edit e) -> e.start)
-                .thenComparingInt(e -> e.priority));
+        Collections.sort(
+                edits,
+                Comparator.comparingInt((Edit edit) -> edit.start)
+                        .thenComparingInt(edit -> edit.priority)
+        );
+
         return edits;
     }
 
@@ -302,26 +316,32 @@ public final class SqlSelect {
                 : "LIMIT " + value;
     }
 
-    private TaggedText joinPredicates() {
-        TaggedText.Builder result = new TaggedText.Builder();
+    private String joinPredicates() {
+        StringBuilder result = new StringBuilder();
+
         for (int i = 0; i < predicates.size(); i++) {
-            if (i > 0) result.text(" AND ");
-            result.text("(")
-                  .fragment(predicates.get(i), predicateSourceIds.get(i))
-                  .text("\n)");
+            if (i > 0)
+                result.append(" AND ");
+
+            result.append("(")
+                  .append(predicates.get(i))
+                  .append("\n)");
         }
-        return result.build();
+
+        return result.toString();
     }
 
     /** Legacy <w> replacement used by former SQLSelectBuilder. */
-    private TaggedText joinLegacyWherePredicates() {
-        TaggedText.Builder result = new TaggedText.Builder();
-        for (int i = 0; i < predicates.size(); i++) {
-            result.text(" AND (")
-                  .fragment(predicates.get(i), predicateSourceIds.get(i))
-                  .text("\n)");
+    private String joinLegacyWherePredicates() {
+        StringBuilder result = new StringBuilder();
+
+        for (String predicate : predicates) {
+            result.append(" AND (")
+                  .append(predicate)
+                  .append("\n)");
         }
-        return result.build();
+
+        return result.toString();
     }
 
     private void requireSimple(String action) {
@@ -736,11 +756,11 @@ public final class SqlSelect {
       final int start;
       final int end;
 
-      final TaggedText replacement;
+      final String replacement;
 
       final int priority;
 
-        Edit( int start, int end, TaggedText replacement, int priority )
+        Edit( int start, int end, String replacement, int priority )
         {
             this.start = start;
             this.end = end;
@@ -749,80 +769,5 @@ public final class SqlSelect {
         }
     }
 
-   private static final class OriginRange {
-      final int start;
-      final int end;
-      final int sourceId;
 
-      OriginRange(int start, int end, int sourceId) {
-         this.start = start;
-         this.end = end;
-         this.sourceId = sourceId;
-      }
-   }
-
-   private static final class TaggedText {
-      final String text;
-      final List<OriginRange> origins;
-
-      private TaggedText(String text, List<OriginRange> origins) {
-         this.text = text;
-         this.origins = origins;
-      }
-
-      static TaggedText plain(String text) {
-         return new TaggedText(text, Collections.<OriginRange>emptyList());
-      }
-
-      static TaggedText wrap(String prefix, TaggedText middle, String suffix) {
-         Builder builder = new Builder();
-         builder.text(prefix);
-         int offset = prefix.length();
-         builder.text.append(middle.text);
-         for (OriginRange range : middle.origins) {
-            builder.origins.add(new OriginRange(
-                    offset + range.start,
-                    offset + range.end,
-                    range.sourceId
-            ));
-         }
-         builder.text(suffix);
-         return builder.build();
-      }
-
-      static TaggedText fragment(String prefix, String fragment, String suffix, int sourceId) {
-         return new Builder()
-                 .text(prefix)
-                 .fragment(fragment, sourceId)
-                 .text(suffix)
-                 .build();
-      }
-
-      static final class Builder {
-         final StringBuilder text = new StringBuilder();
-         final List<OriginRange> origins = new ArrayList<>();
-
-         Builder text(String value) {
-            text.append(value);
-            return this;
-         }
-
-         Builder fragment(String value, int sourceId) {
-            int start = text.length();
-            text.append(value);
-            if (sourceId >= 0 && text.length() > start)
-               origins.add(new OriginRange(start, text.length(), sourceId));
-            return this;
-         }
-
-         TaggedText build() {
-            return new TaggedText(
-                    text.toString(),
-                    origins.isEmpty()
-                            ? Collections.<OriginRange>emptyList()
-                            : Collections.unmodifiableList(new ArrayList<>(origins))
-            );
-         }
-      }
-   }
 }
