@@ -119,21 +119,25 @@ public class SqlSelectPrepareTest {
         PreparedSql p = pg(
                 "select cast(42 as numeric(10,2)), "
                 + "cast('Hello' as varchar(32)), "
+                + "cast('101' as bit varying(16)), "
                 + "x::numeric(12,5) from t where id=7").prepare();
 
         assertTrue(p.getSql(), p.getSql().contains("cast(? as numeric(10,2))"));
         assertTrue(p.getSql(), p.getSql().contains("cast(? as varchar(32))"));
+        assertTrue(p.getSql(), p.getSql().contains("cast(? as bit varying(16))"));
         assertTrue(p.getSql(), p.getSql().contains("x::numeric(12,5)"));
         assertTrue(p.getSql(), p.getSql().contains("where id=?"));
 
         assertParameterKinds(p,
                 Parameter.Kind.LITERAL,
                 Parameter.Kind.LITERAL,
+                Parameter.Kind.LITERAL,
                 Parameter.Kind.LITERAL);
 
         assertEquals(new BigInteger("42"), p.getParameters().get(0).getValue());
         assertEquals("Hello", p.getParameters().get(1).getValue());
-        assertEquals(new BigInteger("7"), p.getParameters().get(2).getValue());
+        assertEquals("101", p.getParameters().get(2).getValue());
+        assertEquals(new BigInteger("7"), p.getParameters().get(3).getValue());
     }
 
     @Test public void nestedOrderScopeDoesNotSwallowOuterWhereAndLimit() {
@@ -144,6 +148,40 @@ public class SqlSelectPrepareTest {
         assertEquals(new BigInteger("5"), p.getParameters().get(0).getValue());
         assertEquals(new BigInteger("10"), p.getParameters().get(1).getValue());
         assertEquals(new BigInteger("20"), p.getParameters().get(2).getValue());
+    }
+
+
+    @Test public void windowOrderScopeEndsAtClosingParenthesis() {
+        PreparedSql p = pg(
+                "select row_number() over (order by 1) rn from t where id=10"
+        ).prepare();
+
+        assertTrue(p.getSql(), p.getSql().contains("order by 1"));
+        assertTrue(p.getSql(), p.getSql().contains("where id=?"));
+        assertParameterKinds(p, Parameter.Kind.LITERAL);
+        assertEquals(new BigInteger("10"), p.getParameters().get(0).getValue());
+    }
+
+    @Test public void ordinaryFunctionArgumentsAreValues() {
+        PreparedSql p = pg(
+                "select year(2025), custom_fn(10) from t where id=7"
+        ).prepare();
+
+        assertTrue(p.getSql(), p.getSql().contains("year(?)"));
+        assertTrue(p.getSql(), p.getSql().contains("custom_fn(?)"));
+        assertTrue(p.getSql(), p.getSql().contains("where id=?"));
+        assertParameterKinds(
+                p,
+                Parameter.Kind.LITERAL,
+                Parameter.Kind.LITERAL,
+                Parameter.Kind.LITERAL
+        );
+    }
+
+    @Test public void currentTimestampPrecisionIsRejected() {
+        assertRejected(() -> pg(
+                "select current_timestamp(3) from t"
+        ).prepare());
     }
 
     @Test public void allFragmentsParticipateInSharedProtectionState() {
