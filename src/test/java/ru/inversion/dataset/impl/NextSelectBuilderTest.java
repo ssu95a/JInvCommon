@@ -306,6 +306,34 @@ public class NextSelectBuilderTest {
                 .optimizerHint("+ bad */ delete");
     }
 
+
+    @Test public void rowLimitIsAppliedAndParameterized() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from client order by id",
+                SqlDialectFactory.POSTGRES);
+
+        PreparedSql p = b.rowLimit(10).prepare();
+
+        assertTrue(p.getSql(), p.getSql().contains("LIMIT ?"));
+        assertEquals(1, p.getParameters().size());
+        assertEquals(
+                Parameter.Kind.LITERAL,
+                p.getParameters().get(0).getKind()
+        );
+        assertEquals(
+                new java.math.BigInteger("10"),
+                p.getParameters().get(0).getValue()
+        );
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void rowLimitRejectsNegativeValue() {
+        new NextSelectBuilder(
+                "select id from client",
+                SqlDialectFactory.POSTGRES
+        ).rowLimit(-1);
+    }
+
     @Test public void ordinaryStringLiteralWithPunctuationIsBound() {
         NextSelectBuilder b = new NextSelectBuilder(
                 "select id from t where code = 'A-1/2'",

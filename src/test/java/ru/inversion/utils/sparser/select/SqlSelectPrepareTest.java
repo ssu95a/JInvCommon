@@ -303,6 +303,36 @@ public class SqlSelectPrepareTest {
         assertEquals("select id from t where id=:id and x=1", select.buildSql());
     }
 
+
+    @Test public void generatedPostgresRowLimitIsParameterized() {
+        SqlSelect select = pg("select id from t order by id");
+        select.setRowLimit(10);
+
+        PreparedSql p = select.prepare();
+
+        assertTrue(p.getSql(), p.getSql().contains("LIMIT ?"));
+        assertParameterKinds(p, Parameter.Kind.LITERAL);
+        assertEquals(
+                new BigInteger("10"),
+                p.getParameters().get(0).getValue()
+        );
+    }
+
+    @Test public void generatedOracleRowLimitIsParameterized() {
+        SqlSelect select = ora("select id from t order by id");
+        select.setRowLimit(10);
+
+        PreparedSql p = select.prepare();
+
+        assertTrue(p.getSql(), p.getSql().contains(
+                "FETCH FIRST ? ROWS ONLY"));
+        assertParameterKinds(p, Parameter.Kind.LITERAL);
+        assertEquals(
+                new BigInteger("10"),
+                p.getParameters().get(0).getValue()
+        );
+    }
+
     @Test public void pgRadixAndDecimalBecomeTypedValues() {
         PreparedSql p = pg("select x from t where a=0xFF and b=1_000 and c=3.25e2").prepare();
         assertParameterKinds(p, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL, Parameter.Kind.LITERAL);

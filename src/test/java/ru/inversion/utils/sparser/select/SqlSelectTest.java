@@ -61,6 +61,78 @@ public class SqlSelectTest {
         assertTrue(sql, sql.indexOf("ORDER BY") < sql.indexOf("limit 10"));
     }
 
+
+    @Test public void addsPostgresRowLimitBeforeOffset() {
+        SqlSelect select = pg("select id from t order by id offset 20");
+        select.setRowLimit(10);
+
+        String sql = select.buildSql();
+
+        assertTrue(sql, sql.contains("LIMIT 10"));
+        assertTrue(sql, sql.indexOf("LIMIT 10") < sql.indexOf("offset 20"));
+    }
+
+    @Test public void replacesPostgresRowLimitAndKeepsOffset() {
+        SqlSelect select = pg("select id from t limit 50 offset 20");
+        select.setRowLimit(10);
+
+        String sql = select.buildSql();
+
+        assertTrue(sql, sql.contains("LIMIT 10"));
+        assertFalse(sql, sql.contains("limit 50"));
+        assertTrue(sql, sql.contains("offset 20"));
+    }
+
+    @Test public void addsOracleRowLimitAfterOffset() {
+        SqlSelect select = ora("select id from t order by id offset 20 rows");
+        select.setRowLimit(10);
+
+        String sql = select.buildSql();
+
+        assertTrue(sql, sql.contains("FETCH FIRST 10 ROWS ONLY"));
+        assertTrue(sql, sql.indexOf("offset 20 rows")
+                < sql.indexOf("FETCH FIRST 10 ROWS ONLY"));
+    }
+
+    @Test public void replacesOracleRowLimitAndKeepsOffset() {
+        SqlSelect select = ora(
+                "select id from t offset 20 rows fetch first 50 rows only");
+        select.setRowLimit(10);
+
+        String sql = select.buildSql();
+
+        assertTrue(sql, sql.contains("FETCH FIRST 10 ROWS ONLY"));
+        assertFalse(sql, sql.contains("fetch first 50 rows only"));
+        assertTrue(sql, sql.contains("offset 20 rows"));
+    }
+
+    @Test public void rowLimitDoesNotTouchNestedLimit() {
+        SqlSelect select = pg(
+                "select id from (select id from t limit 3) q");
+        select.setRowLimit(10);
+
+        String sql = select.buildSql();
+
+        assertTrue(sql, sql.contains("limit 3"));
+        assertTrue(sql, sql.contains("LIMIT 10"));
+    }
+
+    @Test public void removingRowLimitOverrideRestoresSource() {
+        String source = "select id from t limit 50";
+        SqlSelect select = pg(source);
+
+        select.setRowLimit(10);
+        assertNotEquals(source, select.buildSql());
+
+        select.setRowLimit(null);
+        assertEquals(source, select.buildSql());
+    }
+
+    @Test public void invalidRowLimitIsRejected() {
+        assertInvalid(() -> pg("select id from t").setRowLimit(-1));
+        assertInvalid(() -> ora("select id from t for update").setRowLimit(1));
+    }
+
     @Test public void insertsSortingBeforePostgresRowLock() {
         SqlSelect select = pg("select id from t for key share");
         select.setOrderBy("id desc");
@@ -153,6 +225,7 @@ public class SqlSelectTest {
         assertUnsupported(() -> select.setOrderBy("id"));
         assertUnsupported(() -> select.setPredicates(Collections.singletonList("id > 1")));
         assertUnsupported(() -> select.setMark("1", "mark"));
+        assertUnsupported(() -> select.setRowLimit(10));
     }
 
     @Test public void replacingOrderSiblingsIsRejected() {

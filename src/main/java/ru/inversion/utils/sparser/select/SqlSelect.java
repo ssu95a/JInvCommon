@@ -38,6 +38,8 @@ public final class SqlSelect {
     private String orderBy;
     private int orderBySourceId = ru.inversion.utils.sparser.jdbc.Parameter.GLOBAL_SOURCE;
 
+    private Integer rowLimit;
+
     private String markExpression;
 
     private String markAlias;
@@ -118,6 +120,25 @@ public final class SqlSelect {
         invalidate();
     }
 
+    /**
+     * Ограничить количество строк внешнего SELECT.
+     * null снимает override и сохраняет row limit исходного SQL.
+     */
+    public void setRowLimit(Integer value) {
+        if( value != null ) {
+            if( value < 0 )
+                throw new IllegalArgumentException("rowLimit must be >= 0");
+
+            requireSimple("row limit");
+
+            if( layout.rowLimitRestriction != null )
+                throw new IllegalArgumentException(layout.rowLimitRestriction);
+        }
+
+        rowLimit = value;
+        invalidate();
+    }
+
     /** Mark всегда добавляется последним элементом SELECT list. null удаляет mark. */
     public void setMark(String expression, String alias) {
         String value = optionalFragment(expression);
@@ -147,8 +168,8 @@ public final class SqlSelect {
     /** Исходная строка возвращается byte-for-byte, пока не задано изменений. */
     public String buildSql() {
         if (builtSql != null) return builtSql;
-        if (predicates.isEmpty() && orderBy == null && markExpression == null
-                && layout.legacyWhereMarkerStart < 0) {
+        if (predicates.isEmpty() && orderBy == null && rowLimit == null
+                && markExpression == null && layout.legacyWhereMarkerStart < 0) {
             builtOrigins = Collections.emptyList();
             return builtSql = source;
         }
@@ -213,7 +234,7 @@ public final class SqlSelect {
 
     /** Структурные изменения исходного SQL. */
     private List<Edit> edits() {
-        List<Edit> edits = new ArrayList<>(4);
+        List<Edit> edits = new ArrayList<>(5);
         if (markExpression != null) {
             edits.add(new Edit(layout.selectItemsEnd, layout.selectItemsEnd,
                     TaggedText.plain(", (" + markExpression + "\n) AS " + markAlias + " "), 0));
@@ -248,9 +269,37 @@ public final class SqlSelect {
                         TaggedText.fragment(" ORDER BY ", orderBy, "\n", orderBySourceId), 20));
             }
         }
+
+        if( rowLimit != null ) {
+            String clause = rowLimitClause(rowLimit);
+
+            if( layout.rowLimitStart >= 0 ) {
+                edits.add(new Edit(
+                        layout.rowLimitStart,
+                        layout.rowLimitEnd,
+                        TaggedText.plain(clause),
+                        30
+                ));
+            }
+            else {
+                edits.add(new Edit(
+                        layout.rowLimitInsertion,
+                        layout.rowLimitInsertion,
+                        TaggedText.plain(" " + clause + " "),
+                        30
+                ));
+            }
+        }
+
         Collections.sort(edits, Comparator.comparingInt((Edit e) -> e.start)
                 .thenComparingInt(e -> e.priority));
         return edits;
+    }
+
+    private String rowLimitClause(int value) {
+        return scanner instanceof OracleSqlScanner
+                ? "FETCH FIRST " + value + " ROWS ONLY"
+                : "LIMIT " + value;
     }
 
     private TaggedText joinPredicates() {
@@ -349,6 +398,7 @@ public final class SqlSelect {
         }
 
         int where = -1, order = -1, tail = -1;
+        int limit = -1, fetch = -1, offset = -1, rowLock = -1;
         boolean hasGroupBy = false;
         int firstFollowingWhere = statementEndIndex;
         int firstFollowingOrder = statementEndIndex;
@@ -368,6 +418,7 @@ public final class SqlSelect {
             }
             boolean orderClause = orderClauseAt(i);
             boolean groupClause = keywords(i, GROUP, BY);
+            boolean rowLockClause = rowLockClauseAt(i);
             boolean whereBoundary = orderClause || groupClause || keyword(i, HAVING) ||
                     keyword(i, WINDOW) || keyword(i, QUALIFY) ||
                     keywords(i, START, WITH) ||
@@ -387,6 +438,10 @@ public final class SqlSelect {
                 order = i;
                 siblings = keywords(i, ORDER, SIBLINGS, BY);
             }
+            if (keyword(i, LIMIT) && limit < 0) limit = i;
+            if (keyword(i, FETCH) && fetch < 0) fetch = i;
+            if (keyword(i, OFFSET) && offset < 0) offset = i;
+            if (rowLockClause && rowLock < 0) rowLock = i;
             if (tailAt(i) && tail < 0) tail = i;
             if (where >= 0 && i > where && whereBoundary) {
                 firstFollowingWhere = Math.min(firstFollowingWhere, i);
@@ -417,6 +472,10 @@ public final class SqlSelect {
         result.orderEnd = -1;
         result.whereInsertion = -1;
         result.orderInsertion = -1;
+        result.rowLimitStart = -1;
+        result.rowLimitEnd = -1;
+        result.rowLimitInsertion = -1;
+        result.rowLimitRestriction = null;
         result.legacyWhereMarkerStart = -1;
         result.legacyWhereMarkerEnd = -1;
 
@@ -450,6 +509,57 @@ public final class SqlSelect {
             result.orderInsertion = tail >= 0
                     ? sourceTokens.get(tail).start() : mainContentEnd;
         }
+
+        boolean oracle = scanner instanceof OracleSqlScanner;
+
+        if( oracle ) {
+            if( limit >= 0 )
+                result.rowLimitRestriction =
+                        "Oracle LIMIT clause is not supported";
+
+            if( rowLock >= 0 )
+                result.rowLimitRestriction =
+                        "Oracle row limit with row locking is not supported";
+
+            if( fetch >= 0 ) {
+                result.rowLimitStart = sourceTokens.get(fetch).start();
+
+                int end = rowLock > fetch ? rowLock : statementEndIndex;
+                result.rowLimitEnd = lastSignificantEnd(fetch, end);
+            }
+            else {
+                result.rowLimitInsertion = rowLock >= 0
+                        ? sourceTokens.get(rowLock).start()
+                        : mainContentEnd;
+            }
+        }
+        else {
+            if( limit >= 0 && fetch >= 0 )
+                result.rowLimitRestriction =
+                        "Multiple row limit clauses are not supported";
+
+            int existing = limit >= 0 ? limit : fetch;
+
+            if( existing >= 0 ) {
+                result.rowLimitStart = sourceTokens.get(existing).start();
+
+                int end = statementEndIndex;
+                if( offset > existing )
+                    end = Math.min(end, offset);
+                if( rowLock > existing )
+                    end = Math.min(end, rowLock);
+
+                result.rowLimitEnd = lastSignificantEnd(existing, end);
+            }
+            else {
+                result.rowLimitInsertion = offset >= 0
+                        ? sourceTokens.get(offset).start()
+                        : rowLock >= 0
+                        ? sourceTokens.get(rowLock).start()
+                        : mainContentEnd;
+            }
+        }
+
         return result;
     }
 
@@ -516,12 +626,16 @@ public final class SqlSelect {
         return keywords(i, ORDER, BY) || keywords(i, ORDER, SIBLINGS, BY);
     }
 
-    private boolean tailAt(int i) {
-        return in(keyword(i), LIMIT, OFFSET, FETCH)
-                || keywords(i, FOR, UPDATE)
+    private boolean rowLockClauseAt(int i) {
+        return keywords(i, FOR, UPDATE)
                 || keywords(i, FOR, SHARE)
                 || keywords(i, FOR, KEY)
                 || keywords(i, FOR, NO);
+    }
+
+    private boolean tailAt(int i) {
+        return in(keyword(i), LIMIT, OFFSET, FETCH)
+                || rowLockClauseAt(i);
     }
 
     private boolean keywords(int i, SqlKeyword ... keywords) {
@@ -603,6 +717,12 @@ public final class SqlSelect {
         int orderEnd;
 
         int orderInsertion;
+
+        int rowLimitStart;
+        int rowLimitEnd;
+        int rowLimitInsertion;
+
+        String rowLimitRestriction;
 
         boolean compound;
         boolean orderSiblings;

@@ -31,6 +31,7 @@ public final class NextSelectBuilder {
     private final SqlScanner scanner;
     private final List<Part> predicates = new ArrayList<>();
     private Part sorting;
+    private Integer rowLimit;
     private String mark;
     private String queryAlias;
     private String optimizerHint;
@@ -101,6 +102,16 @@ public final class NextSelectBuilder {
         String sql = Objects.requireNonNull(expression.getSQL(), "orderBy.sql");
         if (sql.trim().isEmpty()) throw new IllegalArgumentException("Empty ORDER BY expression");
         sorting = new Part(sql, expression);
+        invalidate();
+        return this;
+    }
+
+    /** Ограничить количество строк внешнего SELECT. null снимает override. */
+    public NextSelectBuilder rowLimit(Integer value) {
+        if( value != null && value < 0 )
+            throw new IllegalArgumentException("rowLimit must be >= 0");
+
+        rowLimit = value;
         invalidate();
         return this;
     }
@@ -246,6 +257,8 @@ public final class NextSelectBuilder {
                     ? Parameter.GLOBAL_SOURCE : predicates.size();
             select.setOrderBy(sorting.sql, sourceId);
         }
+
+        select.setRowLimit(rowLimit);
 
         if (mark != null) select.setMark(mark, "MARK");
         return select;
