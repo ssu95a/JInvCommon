@@ -123,29 +123,17 @@ final class SqlParameterizer {
                     parameters.add(Parameter.numbered(parseNumberedPosition(text), sourceId));
                     break;
                 case STRING:
-                    if (enabled && !legacyOff && typeScopes.isEmpty()
-                            && orderScopes.isEmpty()
-                            && canParameterizeString(i, current, text)) {
-                        Object literal = literalValue(kind, text);
-                        if (literal != null) {
-                            sql.append('?');
-                            parameters.add(Parameter.literal(literal, sourceId));
-                            break;
-                        }
-                    }
-                    sql.append(text);
-                    break;
                 case NUMBER:
-                    if (enabled && !legacyOff && typeScopes.isEmpty()
+                    if (enabled && !legacyOff
+                            && typeScopes.isEmpty()
                             && orderScopes.isEmpty()) {
-                        Object literal = literalValue(kind, text);
-                        if (literal != null) {
-                            sql.append('?');
-                            parameters.add(Parameter.literal(literal, sourceId));
-                            break;
-                        }
+                        sql.append('?');
+                        parameters.add(Parameter.literal(
+                                literalValue(kind, text), sourceId));
                     }
-                    sql.append(text);
+                    else {
+                        sql.append(text);
+                    }
                     break;
                 default:
                     sql.append(text);
@@ -247,76 +235,23 @@ final class SqlParameterizer {
         return lexeme.kind() == WORD || lexeme.kind() == QUOTED_IDENTIFIER;
     }
 
-    /**
-     * Параметризуем только обычный SQL literal '...'.
-     * Typed literals (DATE '...', TIMESTAMP '...', INTERVAL '...')
-     * оставляем byte-for-byte: bind на их месте может изменить SQL grammar.
-     */
-    private boolean canParameterizeString(int index, SqlScanner.Token token, String text) {
-        if (text.length() < 2 || text.charAt(0) != '\''
-                || text.charAt(text.length() - 1) != '\'') {
-            return false;
-        }
-
-        int previous = previousSignificant(tokens, index - 1);
-        if (previous < 0) return true;
-
-        SqlScanner.Token prev = tokens.get(previous);
-
-        if (in(keyword(prev), DATE, TIME, TIMESTAMP, INTERVAL))
-            return false;
-
-        return !isPrecisionTypedString(previous);
-    }
-
-    /**
-     * TIMESTAMP(3) '...', TIME(6) '...' and similar typed literals
-     * keep their SQL grammar intact.
-     */
-    private boolean isPrecisionTypedString(int previous) {
-        if (previous < 0 || !symbol(tokens.get(previous), ")"))
-            return false;
-
-        int depth = 0;
-
-        for (int i = previous; i >= 0; i = previousSignificant(tokens, i - 1)) {
-            SqlScanner.Token token = tokens.get(i);
-
-            if (symbol(token, ")")) {
-                depth++;
-            }
-            else if (symbol(token, "(")) {
-                depth--;
-                if (depth == 0) {
-                    int typeName = previousSignificant(tokens, i - 1);
-                    return isTypePrecisionName(tokens, typeName);
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /** Decode a plain SQL string literal to the JDBC value it represents. */
+    /** Decode a supported SQL literal to the JDBC value it represents. */
     private static Object literalValue(SqlScanner.Kind kind, String text) {
-        if (kind == NUMBER) {
-            try {
-                return text.indexOf('.') >= 0
-                        || text.indexOf('e') >= 0
-                        || text.indexOf('E') >= 0
-                        ? new BigDecimal(text)
-                        : new BigInteger(text);
-            }
-            catch (NumberFormatException ex) {
-                throw new IllegalArgumentException(
-                        "Invalid numeric literal: " + text, ex);
-            }
+        if (kind == STRING)
+            return text.substring(1, text.length() - 1)
+                    .replace("''", "'");
+
+        try {
+            return text.indexOf('.') >= 0
+                    || text.indexOf('e') >= 0
+                    || text.indexOf('E') >= 0
+                    ? new BigDecimal(text)
+                    : new BigInteger(text);
         }
-        if (text.length() < 2 || text.charAt(0) != '\''
-                || text.charAt(text.length() - 1) != '\'') {
-            return null;
+        catch (NumberFormatException ex) {
+            throw new IllegalArgumentException(
+                    "Invalid numeric literal: " + text, ex);
         }
-        return text.substring(1, text.length() - 1).replace("''", "'");
     }
 
     private int nextSignificant(List<SqlScanner.Token> tokens, int from) {

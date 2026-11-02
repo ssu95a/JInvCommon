@@ -26,13 +26,6 @@ public class SqlSelectPrepareTest {
         }
     }
 
-    private static void assertPreserved(SqlSelect select, String sql) {
-        PreparedSql p = select.prepare();
-        assertEquals(sql, p.getSql());
-        assertTrue(p.getParameters().isEmpty());
-    }
-
-
     private static void assertRejected(Runnable action) {
         try {
             action.run();
@@ -192,16 +185,15 @@ public class SqlSelectPrepareTest {
         assertEquals("Y", p.getParameters().get(0).getValue());
     }
 
-    @Test public void typedStringLiteralsWithNonTextContentArePreserved() {
-        String date = "select id from t where dt >= date '2026-01-01'";
-        String time = "select id from t where tm > time '12:00'";
-        String timestamp = "select id from t where ts > timestamp '2026-01-01 12:00:00'";
-        String interval = "select id from t where a > interval '1' day";
-
-        assertPreserved(pg(date), date);
-        assertPreserved(pg(time), time);
-        assertPreserved(pg(timestamp), timestamp);
-        assertPreserved(pg(interval), interval);
+    @Test public void typedStringLiteralsAreRejected() {
+        assertRejected(() -> pg(
+                "select id from t where dt >= date '2026-01-01'").prepare());
+        assertRejected(() -> pg(
+                "select id from t where tm > time '12:00'").prepare());
+        assertRejected(() -> pg(
+                "select id from t where ts > timestamp '2026-01-01 12:00:00'").prepare());
+        assertRejected(() -> pg(
+                "select id from t where a > interval '1' day").prepare());
     }
 
     @Test public void plainStringWithBackslashIsBound() {
@@ -409,11 +401,10 @@ public class SqlSelectPrepareTest {
         assertEquals(new BigInteger("7"), p.getParameters().get(1).getValue());
     }
 
-    @Test public void precisionTypedStringIsPreserved() {
-        String timestamp =
-                "select x from t where ts > timestamp(3) '2026-01-01 12:00:00'";
-
-        assertPreserved(pg(timestamp), timestamp);
+    @Test public void precisionTypedStringIsRejected() {
+        assertRejected(() -> pg(
+                "select x from t where ts > timestamp(3) '2026-01-01 12:00:00'")
+                .prepare());
     }
 
 }

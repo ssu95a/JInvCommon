@@ -358,17 +358,12 @@ public class NextSelectBuilderTest {
         assertEquals("O'Brien", p.getParameters().get(0).getValue());
     }
 
-    @Test public void typedStringLiteralIsPreserved() {
-        NextSelectBuilder b = new NextSelectBuilder(
+    @Test(expected = IllegalArgumentException.class)
+    public void typedStringLiteralIsRejected() {
+        new NextSelectBuilder(
                 "select id from t where d = DATE '2026-10-26'",
-                SqlDialectFactory.ORACLE);
-
-        PreparedSql p = b.prepare();
-
-        assertEquals(
-                "select id from t where d = DATE '2026-10-26'",
-                p.getSql());
-        assertTrue(p.getParameters().isEmpty());
+                SqlDialectFactory.ORACLE)
+                .prepare();
     }
 
 }
