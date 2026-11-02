@@ -68,6 +68,21 @@ public class SqlScannerTest {
         assertEquals(sql, recreate(sql, tokens));
     }
 
+
+    @Test
+    public void postgresOperatorsPreserveLegacyConcatMarkers() {
+        String sql =
+                "select ~||name||~, value ~ :pattern, data ?? 'key' from t";
+
+        List<SqlScanner.Token> tokens = POSTGRES.scan(sql);
+
+        assertTrue(containsText(sql, tokens, OPERATOR, "~||"));
+        assertTrue(containsText(sql, tokens, OPERATOR, "||~"));
+        assertTrue(containsText(sql, tokens, OPERATOR, "~"));
+        assertTrue(containsText(sql, tokens, OPERATOR, "??"));
+        assertEquals(sql, recreate(sql, tokens));
+    }
+
     @Test
     public void commentsHintsAndParameterizeDirectivesAreOpaque() {
         String sql =

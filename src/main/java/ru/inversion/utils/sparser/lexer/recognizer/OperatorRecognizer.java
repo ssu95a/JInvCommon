@@ -10,16 +10,15 @@ import static ru.inversion.utils.sparser.lexer.SqlScanner.Kind.OPERATOR;
  * операторов в БД.
  *
  * Oracle: известные символьные комбинации.
- * PostgreSQL: операторные символы по правилам SQL; пользовательские
- * операторы не требуют обновления списка известных имён.
+ * PostgreSQL: scanner only separates operator text from parameters/comments.
+ * It does not validate whether a particular custom operator exists.
  *
- * ВАЖНО: вход — SQL для JDBC. Одинарный ? всегда позиционный параметр.
- * Знаки ? внутри операторов PostgreSQL должны быть удвоены (pgJDBC: ??).
+ * Input is JDBC SQL. A single ? is always a positional parameter.
+ * Question marks inside PostgreSQL operators must use pgJDBC escaping (??).
  */
 final class OperatorRecognizer implements TokenRecognizer {
 
     private static final String PG_CHARS = "+-*/<>=~!@#%^&|`?";
-    private static final String PG_SPECIAL = "~!@#%^&|`?";
     private static final String ORACLE_SINGLE = "+-*/<>=";
     private static final String[] ORACLE_DOUBLE = {
             "<=", ">=", "<>", "!=", "^=", "~=", "||", "**", "=>"
@@ -54,38 +53,32 @@ final class OperatorRecognizer implements TokenRecognizer {
     private static SqlScanner.Token postgresOperator(String sql, int at) {
         if (!operatorChar(sql.charAt(at))) return null;
 
-        // ? without doubling is a JDBC parameter, not an SQL operator.
-        if (sql.charAt(at) == '?' && !ScanChars.follows(sql, at, '?')) return null;
+        // A single ? belongs to CommonRecognizers.Parameter.
+        if (sql.charAt(at) == '?' && !ScanChars.follows(sql, at, '?'))
+            return null;
 
-        int i = at;
-        boolean hasSpecial = false;
-        while (i < sql.length() && operatorChar(sql.charAt(i))) {
-            char ch = sql.charAt(i);
+        int end = at;
 
-            // SQL comment start wins over an operator continuation.
-            if (ch == '-' && ScanChars.follows(sql, i, '-')) break;
-            if (ch == '/' && ScanChars.follows(sql, i, '*')) break;
+        while (end < sql.length() && operatorChar(sql.charAt(end))) {
+            char ch = sql.charAt(end);
+
+            // Comment recognizers have priority over operator continuation.
+            if (ch == '-' && ScanChars.follows(sql, end, '-')) break;
+            if (ch == '/' && ScanChars.follows(sql, end, '*')) break;
 
             if (ch == '?') {
-                // pgJDBC escape is always ??, including within custom operators.
-                if (!ScanChars.follows(sql, i, '?')) break;
-                hasSpecial = true;
-                i += 2;
+                // pgJDBC represents one SQL operator ? as ??.
+                if (!ScanChars.follows(sql, end, '?')) break;
+                end += 2;
                 continue;
             }
-            if (PG_SPECIAL.indexOf(ch) >= 0) hasSpecial = true;
-            i++;
-        }
-        if (i == at) return null;
 
-        // PostgreSQL does not allow a multi-character non-special operator
-        // to end in + or - (e.g. '*-' is '*' followed by '-').
-        if (!hasSpecial) {
-            while (i - at > 1 && (sql.charAt(i - 1) == '+' || sql.charAt(i - 1) == '-')) {
-                i--;
-            }
+            end++;
         }
-        return new SqlScanner.Token(OPERATOR, at, i);
+
+        return end == at
+                ? null
+                : new SqlScanner.Token(OPERATOR, at, end);
     }
 
     private static boolean operatorChar(char ch) {
