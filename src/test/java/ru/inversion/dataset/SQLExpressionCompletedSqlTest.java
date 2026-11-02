@@ -30,15 +30,13 @@ public class SQLExpressionCompletedSqlTest {
                 expression.getCompletedSQL(SqlDialectFactory.POSTGRES));
     }
 
-    @Test
-    public void oracleQQuotedStringsAreNotInterpretedAsParameters() {
+    @Test(expected = IllegalArgumentException.class)
+    public void unsupportedOracleQQuotedStringIsRejected() {
         SQLExpression expression = new SQLExpression(
                 "text = q'[?:name]' and id = :id");
         expression.setParameter("id", 5);
 
-        assertEquals(
-                "text = q'[?:name]' and id = 5",
-                expression.getCompletedSQL(SqlDialectFactory.ORACLE));
+        expression.getCompletedSQL(SqlDialectFactory.ORACLE);
     }
 
     @Test

@@ -33,13 +33,13 @@ public class SqlSelectPrepareTest {
     }
 
 
-    private static void assertRejected(SqlSelect select) {
+    private static void assertRejected(Runnable action) {
         try {
-            select.prepare();
+            action.run();
             fail("Expected unsupported SQL syntax");
         }
         catch (IllegalArgumentException expected) {
-            // supported contract: unsupported syntax fails fast
+            // supported contract: unsupported syntax may fail during scan or prepare
         }
     }
 
@@ -346,20 +346,20 @@ public class SqlSelectPrepareTest {
 
 
     @Test public void unsupportedPrefixedStringFormsAreRejected() {
-        assertRejected(pg("select E'abc'"));
-        assertRejected(pg("select U&'abc'"));
-        assertRejected(pg("select $abc$"));
-        assertRejected(ora("select q'[abc]' from dual"));
-        assertRejected(ora("select N'abc' from dual"));
+        assertRejected(() -> pg("select E'abc'").prepare());
+        assertRejected(() -> pg("select U&'abc'").prepare());
+        assertRejected(() -> pg("select $abc$").prepare());
+        assertRejected(() -> ora("select q'[abc]' from dual").prepare());
+        assertRejected(() -> ora("select N'abc' from dual").prepare());
     }
 
     @Test public void unsupportedNumericFormsAreRejected() {
-        assertRejected(pg("select 1_000"));
-        assertRejected(pg("select 0xFF"));
-        assertRejected(pg("select 0b1010"));
-        assertRejected(pg("select 0o755"));
-        assertRejected(ora("select 1f from dual"));
-        assertRejected(ora("select 1d from dual"));
+        assertRejected(() -> pg("select 1_000").prepare());
+        assertRejected(() -> pg("select 0xFF").prepare());
+        assertRejected(() -> pg("select 0b1010").prepare());
+        assertRejected(() -> pg("select 0o755").prepare());
+        assertRejected(() -> ora("select 1f from dual").prepare());
+        assertRejected(() -> ora("select 1d from dual").prepare());
     }
 
     @Test public void orderByNumberedParameterSurvivesProtection() {
