@@ -209,17 +209,18 @@ final class SqlParameterizer {
         while (i >= 0) {
             SqlScanner.Token token = tokens.get(i);
 
+            if (symbol(token, "::") || keyword(token, AS))
+                return true;
+
             if (symbol(token, ".") || isIdentifier(token)) {
                 i = previousSignificant(i - 1);
                 continue;
             }
 
-            break;
+            return false;
         }
 
-        return i >= 0
-                && (symbol(tokens.get(i), "::")
-                || keyword(tokens.get(i), AS));
+        return false;
     }
 
     /**
