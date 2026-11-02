@@ -26,7 +26,7 @@ final class NumberRecognizer implements TokenRecognizer {
         int end = decimalEnd(sql, at);
 
         if( end < sql.length()
-                && ScanChars.identifierPart(sql.charAt(end)) ) {
+                && ScanChars.identifierPart(sql.charAt(end), false) ) {
             throw new IllegalArgumentException(
                     "Unsupported numeric literal at offset " + at);
         }

@@ -79,24 +79,18 @@ final class CommonRecognizers {
     /** Структурная пунктуация, которую scanner умеет пропускать безопасно. */
     static final class Symbol implements TokenRecognizer {
 
-       private static final char[] SYMBOLS = "()[],.;~".toCharArray();
+       private static final String SYMBOLS = "()[],.;~";
 
         @Override
         public SqlScanner.Token recognize( String sql, int at )
         {
-           for( char ch : SYMBOLS )
-               if( ch == sql.charAt(at) )
-                   return new SqlScanner.Token( SYMBOL, at, at + 1);
-
-           return null;
+           return SYMBOLS.indexOf(sql.charAt(at)) >= 0
+                   ? new SqlScanner.Token(SYMBOL, at, at + 1)
+                   : null;
         }
     }
 
     /** Только явные JDBC-параметры: ? и :name. */
-    private static boolean identifierPart(char ch, boolean oracle) {
-        return ScanChars.identifierPart(ch) && (oracle || ch != '#');
-    }
-
     static final class Parameter implements TokenRecognizer {
         private final boolean oracle;
 
@@ -113,7 +107,7 @@ final class CommonRecognizers {
             if (ch != ':' || at + 1 == sql.length()
                     || !ScanChars.identifierStart(sql.charAt(at + 1))) return null;
             int end = at + 2;
-            while (end < sql.length() && identifierPart(sql.charAt(end), oracle)) end++;
+            while (end < sql.length() && ScanChars.identifierPart(sql.charAt(end), oracle)) end++;
             return new SqlScanner.Token(NAMED_PARAMETER, at, end);
         }
     }
@@ -129,7 +123,7 @@ final class CommonRecognizers {
         public SqlScanner.Token recognize(String sql, int at) {
             if (!ScanChars.identifierStart(sql.charAt(at))) return null;
             int end = at + 1;
-            while (end < sql.length() && identifierPart(sql.charAt(end), oracle)) end++;
+            while (end < sql.length() && ScanChars.identifierPart(sql.charAt(end), oracle)) end++;
 
             if( end < sql.length() && sql.charAt(end) == '\'' )
                 throw new IllegalArgumentException(

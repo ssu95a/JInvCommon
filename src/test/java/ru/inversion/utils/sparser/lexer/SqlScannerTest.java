@@ -123,6 +123,36 @@ public class SqlScannerTest {
         assertEquals(sql, recreate(sql, tokens));
     }
 
+
+    @Test
+    public void ordinaryQuotedTextSupportsDoubledQuotes() {
+        String sql =
+                "select 'O''Brien :hidden ?', \"A\"\"B\" from t where id=:id";
+
+        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
+            List<SqlScanner.Token> tokens = scanner.scan(sql);
+
+            assertEquals(1, count(tokens, STRING));
+            assertEquals(1, count(tokens, QUOTED_IDENTIFIER));
+            assertEquals(1, count(tokens, NAMED_PARAMETER));
+            assertEquals(0, count(tokens, POSITIONAL_PARAMETER));
+            assertEquals(sql, recreate(sql, tokens));
+        }
+    }
+
+    @Test
+    public void hashIsIdentifierCharacterOnlyForOracle() {
+        String oracleSql = "select customer#id from t";
+        String postgresSql = "select customer#>>'id' from t";
+
+        assertTrue(containsText(
+                oracleSql, ORACLE.scan(oracleSql), WORD, "customer#id"));
+
+        List<SqlScanner.Token> postgres = POSTGRES.scan(postgresSql);
+        assertTrue(containsText(postgresSql, postgres, WORD, "customer"));
+        assertTrue(containsText(postgresSql, postgres, OPERATOR, "#>>"));
+    }
+
     @Test
     public void sqlKeywordsAreClassifiedWithoutChangingWordTokens() {
         String sql = "SeLeCt customer FROM orders WHERE id = 1";
