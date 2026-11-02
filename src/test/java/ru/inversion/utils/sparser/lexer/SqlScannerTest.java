@@ -196,6 +196,7 @@ public class SqlScannerTest {
                 "select TIMESTAMP(3) WITH TIME ZONE '2026-01-01 12:00:00'");
         rejects(ORACLE, "select DATE '2026-01-01' from dual");
         rejects(POSTGRES, "select $abc$");
+        rejects(POSTGRES, "select $abc$");
         rejects(POSTGRES, "select $tag$abc$tag$");
     }
 
