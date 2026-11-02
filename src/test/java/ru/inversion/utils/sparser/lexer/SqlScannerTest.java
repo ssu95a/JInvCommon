@@ -186,6 +186,8 @@ public class SqlScannerTest {
         rejects(ORACLE, "select N'abc' from dual");
 
         rejects(POSTGRES, "select E'abc'");
+        rejects(POSTGRES, "select B'1010'");
+        rejects(POSTGRES, "select X'AB'");
         rejects(POSTGRES, "select U&'abc'");
         rejects(POSTGRES, "select U&\"name\"");
         rejects(POSTGRES, "select $$abc$$");
