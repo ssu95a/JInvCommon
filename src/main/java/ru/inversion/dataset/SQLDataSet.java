@@ -70,6 +70,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    private   String        orderBYExpression;
 
    /**
+    * Ограничение количества строк внешнего SELECT.
+    * null означает отсутствие runtime override.
+    */
+   private Integer rowLimit;
+
+   /**
     * Alias внешнего SELECT.
     */
    protected String        queryAlias;
@@ -362,6 +368,31 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** Fluent version of setOptimizerHint. */
    public SQLDataSet<P> optimizerHint( String optimizerHint ) {
       setOptimizerHint(optimizerHint);
+      return this;
+   }
+
+   /**
+    * Устанавливает ограничение количества строк внешнего SELECT.
+    * null снимает runtime override и сохраняет row limit исходного SQL.
+    */
+   public void setRowLimit( Integer value ) {
+      if( value != null && value < 0 )
+         throw new IllegalArgumentException("rowLimit must be >= 0");
+
+      if( !Objects.equals(rowLimit, value) ) {
+         rowLimit = value;
+         needReCreateReader();
+      }
+   }
+
+   /** Возвращает runtime row limit или null, если override не задан. */
+   public Integer getRowLimit() {
+      return rowLimit;
+   }
+
+   /** Fluent version of setRowLimit(Integer). */
+   public SQLDataSet<P> rowLimit( Integer value ) {
+      setRowLimit(value);
       return this;
    }
 
@@ -797,6 +828,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       builder.optimizerHint(getOptimizerHint());
       addPredicates(builder, ignoreFilters);
       builder.orderBy(getOrderBy());
+      builder.rowLimit(getRowLimit());
 
       if (isSupportMark()) {
          String mark = getMarkSQLPart();

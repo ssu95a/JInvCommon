@@ -262,6 +262,50 @@ class SQLDataSetLifecycleTest {
 
         assertTrue(ds.readerNeedsRecreation());
     }
+
+
+    @Test
+    void rowLimitInvalidatesReaderOnlyWhenChanged() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+
+        ds.useReader(reader);
+        ds.setRowLimit(10);
+
+        assertEquals(Integer.valueOf(10), ds.getRowLimit());
+        assertTrue(ds.readerNeedsRecreation());
+
+        ds.useReader(reader);
+        ds.setRowLimit(10);
+        assertFalse(ds.readerNeedsRecreation());
+
+        ds.setRowLimit(null);
+        assertNull(ds.getRowLimit());
+        assertTrue(ds.readerNeedsRecreation());
+    }
+
+    @Test
+    void rowLimitFluentApiReturnsSameDataSet() {
+        TestDataSet ds = new TestDataSet();
+
+        assertSame(ds, ds.rowLimit(25));
+        assertEquals(Integer.valueOf(25), ds.getRowLimit());
+    }
+
+    @Test
+    void negativeRowLimitIsRejectedWithoutChangingState() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        ds.useReader(reader);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ds.setRowLimit(-1)
+        );
+
+        assertNull(ds.getRowLimit());
+        assertFalse(ds.readerNeedsRecreation());
+    }
     @Test
     void findRowCanPopulateUntilMatch() throws DataSetException {
         PagingDataSet ds = new PagingDataSet();
