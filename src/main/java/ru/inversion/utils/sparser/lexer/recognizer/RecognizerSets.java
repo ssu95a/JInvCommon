@@ -1,10 +1,14 @@
 package ru.inversion.utils.sparser.lexer.recognizer;
 
 import ru.inversion.utils.sparser.lexer.TokenRecognizer;
+
 import java.util.Arrays;
 import java.util.List;
 
-/** Состав и порядок лексических правил каждого диалекта. */
+/**
+ * Small fixed lexer rule sets used by sparser.
+ * They intentionally do not cover the complete Oracle/PostgreSQL grammar.
+ */
 public final class RecognizerSets {
     private RecognizerSets() { }
 
@@ -15,13 +19,11 @@ public final class RecognizerSets {
                 new ParameterizeDirectiveRecognizer(),
                 new OptimizerHintRecognizer(false),
                 new CommonRecognizers.BlockComment(false),
-                new OracleRecognizers.QQuotedString(),
-                new OracleRecognizers.NationalString(),
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),
                 new OperatorRecognizer(false),
                 new CommonRecognizers.Parameter(true),
-                new NumberRecognizer(false),
+                new NumberRecognizer(),
                 new CommonRecognizers.Word(true),
                 new CommonRecognizers.Symbol()
         );
@@ -34,15 +36,12 @@ public final class RecognizerSets {
                 new ParameterizeDirectiveRecognizer(),
                 new OptimizerHintRecognizer(true),
                 new CommonRecognizers.BlockComment(true),
-                new PostgresRecognizers.EscapeString(),
-                new PostgresRecognizers.UnicodeQuoted(),
-                new PostgresRecognizers.DollarQuoted(),
                 new PostgresRecognizers.NumberedParameter(),
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),
                 new OperatorRecognizer(true),
                 new CommonRecognizers.Parameter(false),
-                new NumberRecognizer(true),
+                new NumberRecognizer(),
                 new CommonRecognizers.Word(false),
                 new CommonRecognizers.Symbol()
         );

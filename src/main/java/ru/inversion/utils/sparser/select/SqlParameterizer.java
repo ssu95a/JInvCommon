@@ -249,9 +249,8 @@ final class SqlParameterizer {
 
     /**
      * Параметризуем только обычный SQL literal '...'.
-     * Диалектные/prefixed forms (N'...', q'...', E'...', U&'...', $tag$...$)
-     * и typed literals (DATE '...', TIMESTAMP '...', INTERVAL '...') оставляем
-     * byte-for-byte: bind на их месте может изменить или сломать SQL grammar.
+     * Typed literals (DATE '...', TIMESTAMP '...', INTERVAL '...')
+     * оставляем byte-for-byte: bind на их месте может изменить SQL grammar.
      */
     private boolean canParameterizeString(int index, SqlScanner.Token token, String text) {
         if (text.length() < 2 || text.charAt(0) != '\''
@@ -263,11 +262,6 @@ final class SqlParameterizer {
         if (previous < 0) return true;
 
         SqlScanner.Token prev = tokens.get(previous);
-
-        // B'...', X'...' and other prefix forms that scanner represents
-        // as WORD immediately followed by a plain STRING token.
-        if (prev.kind() == WORD && prev.end() == token.start())
-            return false;
 
         if (in(keyword(prev), DATE, TIME, TIMESTAMP, INTERVAL))
             return false;
@@ -307,16 +301,15 @@ final class SqlParameterizer {
     private static Object literalValue(SqlScanner.Kind kind, String text) {
         if (kind == NUMBER) {
             try {
-                String value = text.replace("_", "");
-                if (value.length() > 2 && value.charAt(0) == '0') {
-                    char prefix = Character.toLowerCase(value.charAt(1));
-                    int radix = prefix == 'x' ? 16 : prefix == 'b' ? 2 : prefix == 'o' ? 8 : 0;
-                    if (radix != 0) return new BigInteger(value.substring(2), radix);
-                }
-                return value.indexOf('.') >= 0 || value.indexOf('e') >= 0 || value.indexOf('E') >= 0
-                        ? new BigDecimal(value) : new BigInteger(value);
-            } catch (NumberFormatException ex) {
-                return null;
+                return text.indexOf('.') >= 0
+                        || text.indexOf('e') >= 0
+                        || text.indexOf('E') >= 0
+                        ? new BigDecimal(text)
+                        : new BigInteger(text);
+            }
+            catch (NumberFormatException ex) {
+                throw new IllegalArgumentException(
+                        "Invalid numeric literal: " + text, ex);
             }
         }
         if (text.length() < 2 || text.charAt(0) != '\''
