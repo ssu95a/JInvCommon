@@ -99,6 +99,46 @@ public class JDBCDataReaderPreparedSqlTest {
         assertEquals(Arrays.asList(null, null, 1), jdbc.statements.get(0).values());
     }
 
+
+    @Test
+    public void executesLiteralOnlySqlWithoutRuntimeParameters() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+
+        PreparedSql sql = new SqlSelect(
+                "select id from t where state = 'ACTIVE' and type = 10",
+                new PostgresSqlScanner()
+        ).prepare();
+
+        reader(jdbc, sql).executeQuery((IParameters) null);
+
+        assertEquals(
+                Arrays.asList("ACTIVE", 10),
+                jdbc.statements.get(0).values()
+        );
+    }
+
+    @Test
+    public void nullRuntimeParametersFailWhenBindValueIsRequired() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+
+        JDBCDataReader<Object> reader = reader(
+                jdbc,
+                prepared("select ?", Parameter.named("id"))
+        );
+
+        try {
+            reader.executeQuery((IParameters) null);
+            fail("Expected DataSetException");
+        }
+        catch (DataSetException expected) {
+            assertTrue(expected.getCause() instanceof IllegalArgumentException);
+            assertTrue(expected.getCause().getMessage().contains(":id"));
+        }
+
+        assertTrue(jdbc.statements.isEmpty());
+        assertTrue(reader.isEOF());
+    }
+
     @Test
     public void narrowsGeneratedIntegersWithoutNarrowingUserBigInteger() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc();

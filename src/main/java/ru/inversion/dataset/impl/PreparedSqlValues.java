@@ -23,7 +23,6 @@ public final class PreparedSqlValues {
             IParameters parameters
     ) {
         Objects.requireNonNull(preparedSql, "preparedSql");
-        Objects.requireNonNull(parameters, "parameters");
 
         List<Object> values =
                 new ArrayList<>(preparedSql.getParameters().size());
@@ -35,12 +34,17 @@ public final class PreparedSqlValues {
 
             switch( parameter.getKind() ) {
                 case POSITIONAL:
+                    requireParameters(parameters, "?");
                     value = parameters.getParameter(positionalIndex++);
                     break;
                 case NAMED:
+                    requireParameters(
+                            parameters, ":" + parameter.getName());
                     value = parameters.getParameter(parameter.getName());
                     break;
                 case NUMBERED:
+                    requireParameters(
+                            parameters, "$" + parameter.getNumber());
                     value = parameters.getParameter(parameter.getNumber() - 1);
                     break;
                 case LITERAL:
@@ -55,6 +59,15 @@ public final class PreparedSqlValues {
         }
 
         return Collections.unmodifiableList(values);
+    }
+
+    private static void requireParameters(
+            IParameters parameters,
+            String parameter
+    ) {
+        if( parameters == null )
+            throw new IllegalArgumentException(
+                    "Runtime parameters are required for " + parameter);
     }
 
     /** Values converted exactly as JDBC execution expects them. */
