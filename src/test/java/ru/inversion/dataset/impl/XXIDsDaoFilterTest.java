@@ -66,13 +66,11 @@ public class XXIDsDaoFilterTest {
                 SqlDialectFactory.POSTGRES));
     }
 
-    @Test
-    public void oracleQuotedStringIsNotTreatedAsParameter() {
-        assertEquals(
-                "message = q'[inside :p1]' and id = 8",
-                XXIDsDao.renderStoredFilter(
-                        "message = q'[inside :p1]' and id = :p1",
-                        Collections.<String,Object>singletonMap("p1", 8),
-                        SqlDialectFactory.ORACLE));
+    @Test(expected = IllegalArgumentException.class)
+    public void unsupportedOracleQuotedStringIsRejected() {
+        XXIDsDao.renderStoredFilter(
+                "message = q'[inside :p1]' and id = :p1",
+                Collections.<String,Object>singletonMap("p1", 8),
+                SqlDialectFactory.ORACLE);
     }
 }
