@@ -396,7 +396,7 @@ public class JDBCDataReaderPreparedSqlTest {
         return result;
     }
 
-    private static final class RecoveryRow {
+    public static final class RecoveryRow {
         private long id;
 
         RecoveryRow() {
