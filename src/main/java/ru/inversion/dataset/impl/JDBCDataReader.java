@@ -82,7 +82,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             throw ex;
         }
         catch( Exception ex ) {
-            doClose();
+            closeAfterFailure(ex);
             throw new DataSetException(
                     Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
         }
@@ -92,7 +92,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     @Override
     public synchronized void executeQuery( List<Object> jdbcValues ) throws DataSetException {
         try {
-            doClose();
+            closeOrThrow();
             rowCounter = 0;
 
             if( jdbcValues == null
@@ -103,27 +103,26 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             final List<Object> pv = new ArrayList<>(jdbcValues);
 
             try {
-                statement = connection.prepareStatement( preparedSql.getSql() );
+                statement = connection.prepareStatement(preparedSql.getSql());
 
                 int nIndex = 1;
-                for( Object o : pv )
-                    statement.setObject( nIndex++, o );
+                for( Object value : pv )
+                    statement.setObject(nIndex++, value);
 
-                statement.setFetchSize( currentPageSize );
+                statement.setFetchSize(currentPageSize);
                 rowSet = statement.executeQuery();
             }
             catch( SQLException ex ) {
-                doClose();
-                throw new JInvDbException( ex, preparedSql.getSql(), pv );
+                throw new JInvDbException(ex, preparedSql.getSql(), pv);
             }
 
             if( !rowSet.next() )
-                doClose();
+                closeOrThrow();
             else
                 initMapper();
         }
         catch( Exception ex ) {
-            doClose();
+            closeAfterFailure(ex);
             throw new DataSetException(
                     Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
         }
@@ -140,17 +139,59 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         }
     }
 
-    private void doClose() {
-        if( rowSet != null ) {
-            try { rowSet.close(); } catch( SQLException ex ) { ex.printStackTrace(); }
-            rowSet = null;
+    /**
+     * Close both JDBC resources and preserve every close failure.
+     * Fields are cleared before close so repeated cleanup never closes
+     * the same JDBC object twice.
+     */
+    private SQLException closeResources() {
+        SQLException failure = null;
+
+        ResultSet currentRowSet = rowSet;
+        rowSet = null;
+
+        if( currentRowSet != null ) {
+            try {
+                currentRowSet.close();
+            }
+            catch( SQLException ex ) {
+                failure = ex;
+            }
         }
-        if( statement != null ) {
-            try { statement.close(); } catch( SQLException ex ) { ex.printStackTrace(); }
-            statement = null;
+
+        PreparedStatement currentStatement = statement;
+        statement = null;
+
+        if( currentStatement != null ) {
+            try {
+                currentStatement.close();
+            }
+            catch( SQLException ex ) {
+                if( failure == null )
+                    failure = ex;
+                else
+                    failure.addSuppressed(ex);
+            }
         }
+
         if( isOwnerMapper )
             rowMapper = null;
+
+        return failure;
+    }
+
+    private void closeOrThrow() throws SQLException {
+        SQLException failure = closeResources();
+
+        if( failure != null )
+            throw failure;
+    }
+
+    private void closeAfterFailure(Throwable failure) {
+        SQLException closeFailure = closeResources();
+
+        if( closeFailure != null )
+            failure.addSuppressed(closeFailure);
     }
 
     @Override
@@ -179,7 +220,12 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
 
     @Override
     public void close() throws DataSetException {
-        doClose();
+        SQLException failure = closeResources();
+
+        if( failure != null )
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "Error on dataReader close",
+                    failure);
     }
 
     private class RestoreContext {
@@ -219,8 +265,12 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
 
         private int restore( RestoreContext ctx ) {
             try {
-                rowSet.close();
+                ResultSet currentRowSet = rowSet;
                 rowSet = null;
+
+                if( currentRowSet != null )
+                    currentRowSet.close();
+
                 connection.rollback();
                 rowSet = statement.executeQuery();
                 final Comparator<T> cmp = EntityMetadataFactory.getEntityMetaData(rowClass).getIdComparator();
@@ -240,7 +290,11 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                 return ctx.nCounter;
             }
             catch( Throwable th ) {
-                throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on restore resultSet after '34000' code", th );
+                closeAfterFailure(th);
+                throw new RuntimeException(
+                        Tags.PRODUCT_LABEL
+                                + "Error on restore resultSet after '34000' code",
+                        th);
             }
         }
 
@@ -253,8 +307,14 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                     ((IMarkable) row).setMark( rowSet.getBoolean(IMarkable.MARK_COLUMN) );
 
                 if( !rowSet.next() ) {
-                    doClose();
+                    SQLException closeFailure = closeResources();
                     nCounter = 0;
+
+                    if( closeFailure != null )
+                        throw new RuntimeException(
+                                Tags.PRODUCT_LABEL
+                                        + "Error on dataReader close at EOF",
+                                closeFailure);
                 }
                 else
                     nCounter--;
@@ -263,8 +323,11 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                 if( "34000".equals( ex.getSQLState() ) )
                     nCounter = restore( new RestoreContext( row, nCounter, ex ) );
                 else {
-                    doClose();
-                    throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on read Row from resultSet", ex);
+                    closeAfterFailure(ex);
+                    throw new RuntimeException(
+                            Tags.PRODUCT_LABEL
+                                    + "Error on read Row from resultSet",
+                            ex);
                 }
             }
             return row;

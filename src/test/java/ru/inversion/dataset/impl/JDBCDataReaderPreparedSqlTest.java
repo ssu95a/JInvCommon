@@ -20,6 +20,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -188,6 +189,69 @@ public class JDBCDataReaderPreparedSqlTest {
         assertEquals(0, jdbc.statements.get(0).executions);
     }
 
+
+    @Test
+    public void bindingFailurePreservesStatementCloseFailureAsSuppressed() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        jdbc.failOnBinding = 2;
+        jdbc.failStatementClose = true;
+
+        JDBCDataReader<Object> reader = reader(
+                jdbc,
+                prepared("select ?, ?",
+                        Parameter.literal("A"),
+                        Parameter.literal("B"))
+        );
+
+        try {
+            reader.executeQuery(new Params());
+            fail("Expected DataSetException");
+        }
+        catch (DataSetException expected) {
+            assertNotNull(expected.getCause());
+            assertEquals(1, expected.getCause().getSuppressed().length);
+            assertEquals(
+                    "Statement close failure",
+                    expected.getCause().getSuppressed()[0].getMessage()
+            );
+        }
+    }
+
+    @Test
+    public void explicitCloseReportsResultSetAndStatementFailures() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        jdbc.resultSetHasRow = true;
+        jdbc.failResultSetClose = true;
+        jdbc.failStatementClose = true;
+
+        JDBCDataReader<Object> reader = reader(
+                jdbc,
+                prepared("select 1")
+        );
+
+        reader.executeQuery(Collections.<Object>emptyList());
+
+        try {
+            reader.close();
+            fail("Expected DataSetException");
+        }
+        catch (DataSetException expected) {
+            assertTrue(expected.getCause() instanceof SQLException);
+            assertEquals(
+                    "ResultSet close failure",
+                    expected.getCause().getMessage()
+            );
+            assertEquals(1, expected.getCause().getSuppressed().length);
+            assertEquals(
+                    "Statement close failure",
+                    expected.getCause().getSuppressed()[0].getMessage()
+            );
+        }
+
+        assertTrue(reader.isEOF());
+        assertTrue(jdbc.statements.get(0).closed);
+    }
+
     @Test
     public void bindsOutputOfRealSqlSelectPrepare() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc();
@@ -228,12 +292,21 @@ public class JDBCDataReaderPreparedSqlTest {
     private static final class RecordingJdbc {
         final List<StatementCalls> statements = new ArrayList<>();
         int failOnBinding = -1;
+        boolean resultSetHasRow;
+        boolean failResultSetClose;
+        boolean failStatementClose;
 
         Connection connection() {
             return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
                     new Class<?>[]{Connection.class}, (proxy, method, args) -> {
                         if (method.getName().equals("prepareStatement")) {
-                            StatementCalls calls = new StatementCalls((String) args[0], failOnBinding);
+                            StatementCalls calls = new StatementCalls(
+                                    (String) args[0],
+                                    failOnBinding,
+                                    resultSetHasRow,
+                                    failResultSetClose,
+                                    failStatementClose
+                            );
                             statements.add(calls);
                             return calls.proxy();
                         }
@@ -248,13 +321,25 @@ public class JDBCDataReaderPreparedSqlTest {
         final Map<Integer, Object> binds = new HashMap<>();
         final List<Integer> bindingOrder = new ArrayList<>();
         final int failOnBinding;
+        final boolean resultSetHasRow;
+        final boolean failResultSetClose;
+        final boolean failStatementClose;
         boolean closed;
         int executions;
         int fetchSize;
 
-        StatementCalls(String sql, int failOnBinding) {
+        StatementCalls(
+                String sql,
+                int failOnBinding,
+                boolean resultSetHasRow,
+                boolean failResultSetClose,
+                boolean failStatementClose
+        ) {
             this.sql = sql;
             this.failOnBinding = failOnBinding;
+            this.resultSetHasRow = resultSetHasRow;
+            this.failResultSetClose = failResultSetClose;
+            this.failStatementClose = failStatementClose;
         }
 
         PreparedStatement proxy() {
@@ -282,13 +367,45 @@ public class JDBCDataReaderPreparedSqlTest {
                 case "executeQuery":
                     executions++;
                     return Proxy.newProxyInstance(ResultSet.class.getClassLoader(),
-                            new Class<?>[]{ResultSet.class}, (rs, m, a) -> {
-                                if (m.getName().equals("next")) return false;
-                                if (m.getName().equals("close")) return null;
-                                if (m.getName().equals("isClosed")) return false;
-                                throw new UnsupportedOperationException(m.getName());
+                            new Class<?>[]{ResultSet.class}, new InvocationHandler() {
+                                private boolean first = true;
+                                private boolean resultSetClosed;
+
+                                @Override
+                                public Object invoke(
+                                        Object rs,
+                                        Method m,
+                                        Object[] a
+                                ) throws Throwable {
+                                    switch (m.getName()) {
+                                        case "next":
+                                            if (first) {
+                                                first = false;
+                                                return resultSetHasRow;
+                                            }
+                                            return false;
+                                        case "close":
+                                            resultSetClosed = true;
+                                            if (failResultSetClose)
+                                                throw new SQLException(
+                                                        "ResultSet close failure",
+                                                        "99998");
+                                            return null;
+                                        case "isClosed":
+                                            return resultSetClosed;
+                                        default:
+                                            throw new UnsupportedOperationException(
+                                                    m.getName());
+                                    }
+                                }
                             });
-                case "close": closed = true; return null;
+                case "close":
+                    closed = true;
+                    if (failStatementClose)
+                        throw new SQLException(
+                                "Statement close failure",
+                                "99997");
+                    return null;
                 case "isClosed": return closed;
                 default: throw new UnsupportedOperationException("Unexpected Statement." + method.getName());
             }
