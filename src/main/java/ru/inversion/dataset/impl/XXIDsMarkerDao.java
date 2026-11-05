@@ -18,7 +18,6 @@ import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -37,50 +36,79 @@ public class XXIDsMarkerDao {
 	}
 
     /** */
-    static public <T> void markRow( TaskContext tc, Long markerID, MarkDescriptor markDescriptor, IMarkable row, boolean mark ) {
-
-        if( U.containsNull(markerID, row, markDescriptor) || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
+    static public <T> void markRow(
+            TaskContext tc,
+            Long markerID,
+            MarkDescriptor markDescriptor,
+            IMarkable row,
+            boolean mark
+    ) {
+        if( U.containsNull(markerID, row, markDescriptor)
+                || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
             return;
 
-        String sp_name = null;
+        final String spName;
 
-            switch( markDescriptor.getMarkMode() ) {
-                case MRK:
-                    sp_name = mark ? "{ call JF_PKG_UTIL.MRK_Insert( ?, ? ) }" : "{ call JF_PKG_UTIL.MRK_Delete( ?, ? ) }";
+        switch( markDescriptor.getMarkMode() ) {
+            case MRK:
+                spName = mark
+                        ? "{ call JF_PKG_UTIL.MRK_Insert( ?, ? ) }"
+                        : "{ call JF_PKG_UTIL.MRK_Delete( ?, ? ) }";
                 break;
-                case MRK_ID:
-                case MRK_ID2:
-                    sp_name = mark ? "{ call JF_PKG_UTIL.MRK_Insert2( ?, ?, ? ) }" : "{ call JF_PKG_UTIL.MRK_Delete2( ?, ?, ? ) }";
+            case MRK_ID:
+            case MRK_ID2:
+                spName = mark
+                        ? "{ call JF_PKG_UTIL.MRK_Insert2( ?, ?, ? ) }"
+                        : "{ call JF_PKG_UTIL.MRK_Delete2( ?, ?, ? ) }";
                 break;
-                case MRK_U:
-                    sp_name = mark ? "{ call JF_PKG_UTIL.MRK_Insert3( ?, ? ) }" : "{ call JF_PKG_UTIL.MRK_Delete3( ?, ? ) }";
+            case MRK_U:
+                spName = mark
+                        ? "{ call JF_PKG_UTIL.MRK_Insert3( ?, ? ) }"
+                        : "{ call JF_PKG_UTIL.MRK_Delete3( ?, ? ) }";
                 break;
+            default:
+                throw new IllegalStateException(
+                        "Unsupported mark mode "
+                                + markDescriptor.getMarkMode());
+        }
+
+        try {
+            try( CallableStatement storedProc =
+                         tc.getConnection().prepareCall(spName) ) {
+                int index = 1;
+
+                switch( markDescriptor.getMarkMode() ) {
+                    case MRK:
+                    case MRK_U:
+                        storedProc.setObject(index++, row.getMarkID1());
+                        break;
+                    case MRK_ID:
+                    case MRK_ID2:
+                        storedProc.setObject(index++, row.getMarkID1());
+                        storedProc.setObject(index++, row.getMarkID2());
+                        break;
+                    default:
+                        break;
+                }
+
+                storedProc.setLong(index, markerID);
+                storedProc.execute();
             }
-
-        try( CallableStatement storedProc = tc.getConnection().prepareCall(sp_name) ) {
-
-            int i = 1;
-
-            switch( markDescriptor.getMarkMode( ) ) {
-                case MRK:
-                case MRK_U:
-                    storedProc.setObject( i++, row.getMarkID1( ) );
-                break;
-                case MRK_ID:
-                case MRK_ID2:
-                    storedProc.setObject( i++, row.getMarkID1( ) );
-                    storedProc.setObject( i++, row.getMarkID2( ) );
-                break;
-            }
-
-            storedProc.setLong( i, markerID  );
-
-            storedProc.execute( );
 
             tc.commit();
-
-        } catch ( Throwable th ) {
-            throw new JInvDbException( Tags.PRODUCT_LABEL + "markRow", th, sp_name, Arrays.asList( row.getMarkID1( ), row.getMarkID2( ), markerID ) );
+        }
+        catch( Throwable th ) {
+            rollbackAfterFailure(tc, th);
+            throw new JInvDbException(
+                    Tags.PRODUCT_LABEL + "markRow",
+                    th,
+                    spName,
+                    Arrays.asList(
+                            row.getMarkID1(),
+                            row.getMarkID2(),
+                            markerID
+                    )
+            );
         }
     }
 
@@ -95,19 +123,29 @@ public class XXIDsMarkerDao {
     )
         throws DataSetException
     {
-        if( U.containsNull(markerID, markDescriptor, sql) || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
+        if( U.containsNull(markerID, markDescriptor, sql)
+                || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
             return;
 
-        try {
-            if( !savePrevMarkedRows )
-                unMarkAllRow( tc, markerID, markDescriptor );
+        final List<Object> jdbcValues;
 
-            executePrepared(
-                    tc, sql, PreparedSqlValues.jdbc(sql, parameters) );
+        try {
+            jdbcValues = PreparedSqlValues.jdbc(sql, parameters);
         }
         catch( Throwable th ) {
-            throw new DataSetException( Tags.PRODUCT_LABEL + "markAllRow", th );
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "markAllRow",
+                    th);
         }
+
+        markAllRow(
+                tc,
+                markerID,
+                markDescriptor,
+                sql,
+                jdbcValues,
+                savePrevMarkedRows
+        );
     }
 
     /** Already resolved JDBC values. */
@@ -126,13 +164,27 @@ public class XXIDsMarkerDao {
             return;
 
         try {
-            if( !savePrevMarkedRows )
-                unMarkAllRow(tc, markerID, markDescriptor);
-
-            executePrepared(tc, sql, jdbcValues);
+            requirePreparedValues(sql, jdbcValues);
         }
         catch( Throwable th ) {
-            throw new DataSetException(Tags.PRODUCT_LABEL + "markAllRow", th);
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "markAllRow",
+                    th);
+        }
+
+        try {
+            if( !savePrevMarkedRows )
+                deleteAllMarks(tc, markerID, markDescriptor);
+
+            executePrepared(tc, sql, jdbcValues);
+
+            tc.commit();
+        }
+        catch( Throwable th ) {
+            rollbackAfterFailure(tc, th);
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "markAllRow",
+                    th);
         }
     }
 
@@ -145,16 +197,22 @@ public class XXIDsMarkerDao {
     )
         throws DataSetException
     {
-        if( U.containsNull(markDescriptor, sql) || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
+        if( U.containsNull(markDescriptor, sql)
+                || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
             return;
 
+        final List<Object> jdbcValues;
+
         try {
-            executePrepared(
-                    tc, sql, PreparedSqlValues.jdbc(sql, parameters) );
+            jdbcValues = PreparedSqlValues.jdbc(sql, parameters);
         }
         catch( Throwable th ) {
-            throw new DataSetException( Tags.PRODUCT_LABEL + "unMarkAllRow", th );
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "unMarkAllRow",
+                    th);
         }
+
+        unMarkAllRow(tc, markDescriptor, sql, jdbcValues);
     }
 
     /** Already resolved JDBC values. */
@@ -171,10 +229,39 @@ public class XXIDsMarkerDao {
             return;
 
         try {
-            executePrepared(tc, sql, jdbcValues);
+            requirePreparedValues(sql, jdbcValues);
         }
         catch( Throwable th ) {
-            throw new DataSetException(Tags.PRODUCT_LABEL + "unMarkAllRow", th);
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "unMarkAllRow",
+                    th);
+        }
+
+        try {
+            executePrepared(tc, sql, jdbcValues);
+            tc.commit();
+        }
+        catch( Throwable th ) {
+            rollbackAfterFailure(tc, th);
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL + "unMarkAllRow",
+                    th);
+        }
+    }
+
+    private static void requirePreparedValues(
+            PreparedSql sql,
+            List<?> values
+    ) {
+        if( values == null
+                || values.size() != sql.getParameters().size() ) {
+            throw new IllegalArgumentException(
+                    "PreparedSql parameters/value count mismatch: "
+                            + sql.getParameters().size()
+                            + " != "
+                            + (values == null
+                               ? "null"
+                               : values.size()));
         }
     }
 
@@ -183,44 +270,79 @@ public class XXIDsMarkerDao {
             PreparedSql sql,
             List<Object> values
     ) {
-        if( values == null || values.size() != sql.getParameters().size() )
-            throw new IllegalArgumentException(
-                    "PreparedSql parameters/value count mismatch");
-
-        try( PreparedStatement statement = tc.getConnection().prepareStatement(sql.getSql()) ) {
+        try( PreparedStatement statement =
+                     tc.getConnection().prepareStatement(sql.getSql()) ) {
             int index = 1;
+
             for( Object value : values )
-                statement.setObject( index++, value );
+                statement.setObject(index++, value);
 
             statement.executeUpdate();
-            tc.getConnection().commit();
         }
         catch( Throwable th ) {
-            try { tc.getConnection().rollback(); } catch( SQLException ignored ) { }
-            throw new JInvDbException( th, sql.getSql(), values );
+            throw new JInvDbException(
+                    th,
+                    sql.getSql(),
+                    values);
         }
     }
 
     /** */
-    static public void unMarkAllRow( TaskContext tc, Long markerID, MarkDescriptor markDescriptor ) {
-
-        if( U.containsNull( markerID, markDescriptor ) || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
+    static public void unMarkAllRow(
+            TaskContext tc,
+            Long markerID,
+            MarkDescriptor markDescriptor
+    ) {
+        if( U.containsNull(markerID, markDescriptor)
+                || markDescriptor.getMarkMode() == MarkModeEnum.NONE )
             return;
 
-        final String sp_name = "{ call JF_PKG_util.MRK_DeleteAll( ?, ? ) }";
+        try {
+            deleteAllMarks(tc, markerID, markDescriptor);
+            tc.commit();
+        }
+        catch( Throwable th ) {
+            rollbackAfterFailure(tc, th);
 
-        try( CallableStatement storedProc = tc.getConnection().prepareCall(sp_name) ) {
+            if( th instanceof JInvDbException )
+                throw (JInvDbException)th;
 
-            storedProc.setLong( 1, markerID  );
-            storedProc.setInt ( 2, markDescriptor.getMarkMode().toInt() );
+            throw new JInvDbException(
+                    Tags.PRODUCT_LABEL + "unMarkAllRow",
+                    th
+            );
+        }
+    }
 
-            storedProc.execute( );
+    private static void deleteAllMarks(
+            TaskContext tc,
+            Long markerID,
+            MarkDescriptor markDescriptor
+    ) {
+        final String spName =
+                "{ call JF_PKG_util.MRK_DeleteAll( ?, ? ) }";
 
-            tc.getConnection().commit();
+        List<Object> values = Arrays.<Object>asList(
+                markerID,
+                markDescriptor.getMarkMode().toInt()
+        );
 
-        } catch ( Throwable th ) {
-            try { tc.getConnection().rollback(); } catch (SQLException ex) { } ;
-            throw new JInvDbException( Tags.PRODUCT_LABEL +  "unMarkAllRow", th, sp_name, Arrays.asList( markerID, markDescriptor.getMarkMode().toInt() ) );
+        try( CallableStatement storedProc =
+                     tc.getConnection().prepareCall(spName) ) {
+            storedProc.setLong(1, markerID);
+            storedProc.setInt(
+                    2,
+                    markDescriptor.getMarkMode().toInt()
+            );
+            storedProc.execute();
+        }
+        catch( Throwable th ) {
+            throw new JInvDbException(
+                    Tags.PRODUCT_LABEL + "unMarkAllRow",
+                    th,
+                    spName,
+                    values
+            );
         }
     }
 
@@ -242,7 +364,7 @@ public class XXIDsMarkerDao {
                 break;
             case MRK_U:
                 sqlInsert = "insert into v_jf_mrk_u( Idmarker, UROW ) " +
-                            "select ? ,? from dual where not exists ( select null from v_jf_mrk_id a where a.Idmarker = ? and a.UROW = ?)";
+                            "select ? ,? from dual where not exists ( select null from v_jf_mrk_u a where a.Idmarker = ? and a.UROW = ?)";
                 break;
             default:
                 sqlInsert = null;
@@ -251,37 +373,47 @@ public class XXIDsMarkerDao {
         if( sqlInsert == null )
             return;
 
-        //unMarkAllRow( tc, markerID, markDescriptor );
-        //
-        try( PreparedStatement ps = tc.getConnection().prepareStatement(sqlInsert) )
-        {
-            int counter = 0;
+        try {
+            try( PreparedStatement ps =
+                         tc.getConnection().prepareStatement(sqlInsert) ) {
+                int counter = 0;
 
-            for( Object id : idList )
-            {
-                ps.setLong  ( 1, markerID );
-                ps.setObject( 2, id );
-                ps.setLong  ( 3, markerID );
-                ps.setObject( 4, id );
+                for( Object id : idList ) {
+                    ps.setLong(1, markerID);
+                    ps.setObject(2, id);
+                    ps.setLong(3, markerID);
+                    ps.setObject(4, id);
 
-                ps.addBatch();
+                    ps.addBatch();
 
-                if( counter++ >= 50 )
-                {
-                    ps.executeBatch();
-                    counter = 0;
+                    if( ++counter >= 50 ) {
+                        ps.executeBatch();
+                        counter = 0;
+                    }
                 }
+
+                if( counter > 0 )
+                    ps.executeBatch();
             }
 
-            // хвост обрабатываем
-            if( counter > 0 )
-                ps.executeBatch();
-
-            tc.getConnection().commit();
+            tc.commit();
         }
-        catch( SQLException ex ) {
-            try { tc.getConnection().rollback(); } catch (SQLException ignored) { }
-            throw new JInvDbException( ex, sqlInsert );
+        catch( Throwable th ) {
+            rollbackAfterFailure(tc, th);
+            throw new JInvDbException(th, sqlInsert);
+        }
+    }
+
+    private static void rollbackAfterFailure(
+            TaskContext tc,
+            Throwable failure
+    ) {
+        try {
+            tc.rollback();
+        }
+        catch( Throwable rollbackFailure ) {
+            if( rollbackFailure != failure )
+                failure.addSuppressed(rollbackFailure);
         }
     }
 
