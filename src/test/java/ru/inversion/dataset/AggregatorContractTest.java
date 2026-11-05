@@ -171,4 +171,69 @@ public class AggregatorContractTest {
         }
     }
 
+
+    @Test
+    public void countOneIsGeneratedAsCountStar() {
+        ru.inversion.utils.Triplet<String, AggrFuncEnum, String> aggregate =
+                ru.inversion.utils.Triplet.makeTriplet(
+                        "1",
+                        AggrFuncEnum.COUNT,
+                        "A$1"
+                );
+
+        assertEquals(
+                "COUNT(*) A$1",
+                SQLDataSet.aggregateSql(aggregate)
+        );
+    }
+
+    @Test
+    public void nonCountLiteralRemainsAvailableForParameterization() {
+        ru.inversion.utils.Triplet<String, AggrFuncEnum, String> aggregate =
+                ru.inversion.utils.Triplet.makeTriplet(
+                        "1",
+                        AggrFuncEnum.SUM,
+                        "TOTAL"
+                );
+
+        assertEquals(
+                "SUM (1) TOTAL",
+                SQLDataSet.aggregateSql(aggregate)
+        );
+    }
+
+    @Test
+    public void markExistsUsesStructuralNullNotBoundOne()
+            throws Exception {
+        TestXXIDataSet ds = new TestXXIDataSet();
+        ds.setRowClass(MarkRow.class);
+
+        Method method = XXIDataSet.class.getDeclaredMethod(
+                "markExistsPredicate",
+                String.class
+        );
+        method.setAccessible(true);
+
+        String predicate = (String)method.invoke(ds, "");
+
+        assertTrue(predicate, predicate.contains("select NULL"));
+        assertFalse(predicate, predicate.contains("select 1"));
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                new ru.inversion.utils.sparser.select.SqlSelect(
+                        "select count(*) from t where " + predicate,
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                ).prepare();
+
+        assertEquals(1, prepared.getParameters().size());
+        assertEquals(
+                ru.inversion.utils.sparser.jdbc.Parameter.Kind.NAMED,
+                prepared.getParameters().get(0).getKind()
+        );
+        assertEquals(
+                "jinv_marker_id",
+                prepared.getParameters().get(0).getName()
+        );
+    }
+
 }

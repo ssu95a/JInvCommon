@@ -2091,6 +2091,42 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
+   static String aggregateSql(
+           Triplet<String, AggrFuncEnum, String> aggregate
+   ) {
+      String expression = aggregate.getFirst();
+      AggrFuncEnum function = aggregate.getSecond();
+
+      StringBuilder sql = new StringBuilder();
+
+      if( function == AggrFuncEnum.COUNT
+              && "1".equals(expression.trim()) ) {
+         sql.append("COUNT(*)");
+      }
+      else {
+         if( function != AggrFuncEnum.NONE )
+            sql.append(function).append(' ');
+
+         sql.append('(')
+            .append(expression)
+            .append(')');
+      }
+
+      return sql.append(' ')
+              .append(aggregate.third)
+              .toString();
+   }
+
+   private static boolean isRowCountAggregate(
+           Triplet<String, AggrFuncEnum, String> aggregate
+   ) {
+      if( aggregate.getSecond() != AggrFuncEnum.COUNT )
+         return false;
+
+      String expression = aggregate.getFirst().trim();
+      return "1".equals(expression) || "*".equals(expression);
+   }
+
    private static String aggregateResultKey(String sqlAlias) {
       if( sqlAlias == null )
          return null;
@@ -2226,13 +2262,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             if( index++ > 0 )
                sql.append(", ");
 
-            if( aggregate.getSecond() != AggrFuncEnum.NONE )
-               sql.append( aggregate.getSecond() ).append(' ');
-
-            sql.append('(')
-               .append( aggregate.getFirst() )
-               .append(") ")
-               .append( aggregate.third );
+            sql.append(aggregateSql(aggregate));
          }
 
          sql.append(" FROM (")
@@ -2283,10 +2313,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
          values = dataReader.getNextPage(1).get(0);
 
-         if( totalRowCount == -1 && !ignoreFilter )
+         if( totalRowCount == -1
+                 && !ignoreFilter
+                 && predicateList.isEmpty() )
          {
             aggrList.stream()
-                    .filter( (a)->a.getSecond() == AggrFuncEnum.COUNT )
+                    .filter(SQLDataSet::isRowCountAggregate)
                     .findFirst()
                     .map( (a)-> totalRowCount = U.nvl(
                             TypeConverter.convert(

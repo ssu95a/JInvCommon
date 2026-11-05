@@ -475,19 +475,19 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         switch( markDescriptor.getMarkMode() ) {
             case MRK:
-                return "exists ( select 1 from v_jf_mrk a$ "
+                return "exists ( select NULL from v_jf_mrk a$ "
                         + "where a$.IMRKMARKERID = :jinv_marker_id "
                         + "and a$.RMRKROWID = "
                         + actualPrefix + key[0] + ")";
 
             case MRK_ID:
-                return "exists ( select 1 from v_jf_mrk_id a$ "
+                return "exists ( select NULL from v_jf_mrk_id a$ "
                         + "where a$.idmarker = :jinv_marker_id "
                         + "and a$.idrow = "
                         + actualPrefix + key[0] + ")";
 
             case MRK_ID2:
-                return "exists ( select 1 from v_jf_mrk_id2 a$ "
+                return "exists ( select NULL from v_jf_mrk_id2 a$ "
                         + "where a$.idmarker = :jinv_marker_id "
                         + "and a$.IDROW = "
                         + actualPrefix + key[0]
@@ -495,7 +495,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                         + actualPrefix + key[1] + ")";
 
             case MRK_U:
-                return "exists ( select 1 from v_jf_mrk_u a$ "
+                return "exists ( select NULL from v_jf_mrk_u a$ "
                         + "where a$.idmarker = :jinv_marker_id "
                         + "and a$.UROW = "
                         + actualPrefix + key[0] + ")";
@@ -1054,13 +1054,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                 if( index++ > 0 )
                     sql.append(", ");
 
-                if( aggregate.getSecond() != AggrFuncEnum.NONE )
-                    sql.append( aggregate.getSecond() ).append(' ');
-
-                sql.append('(')
-                   .append( aggregate.getFirst() )
-                   .append(") ")
-                   .append( aggregate.third );
+                sql.append(aggregateSql(aggregate));
             }
 
             if( S.isNullOrEmpty(aggrTable) ) {
