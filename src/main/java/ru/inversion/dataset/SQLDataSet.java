@@ -2100,7 +2100,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
               && key.charAt(0) == '"'
               && key.charAt(key.length() - 1) == '"' ) {
          return key.substring(1, key.length() - 1)
-                 .replace("""", """);
+                 .replace("\"\"", "\"");
       }
 
       return key;
