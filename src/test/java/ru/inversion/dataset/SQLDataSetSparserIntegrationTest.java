@@ -1,7 +1,7 @@
 package ru.inversion.dataset;
 
 import org.junit.Test;
-import ru.inversion.dataset.impl.NextSelectBuilder;
+import ru.inversion.dataset.impl.DataSetSelectBuilder;
 import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
@@ -80,7 +80,7 @@ public class SQLDataSetSparserIntegrationTest {
         expr.setParameter("branch", 9);
         int id = ds.setFilter(expr, false, false);
 
-        NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder builder = new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         builder.addPredicate(ds.predicates().get(id).getExpression());
         PreparedSql prepared = builder.prepare();
         assertTrue(prepared.getSql().contains("branch = ?"));
@@ -108,7 +108,7 @@ public class SQLDataSetSparserIntegrationTest {
             @Override public boolean hasParameter(String name) { return "branch".equals(name); }
         });
 
-        NextSelectBuilder builder = new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder builder = new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         builder.addPredicate(ds.predicates().get(id).getExpression());
         assertEquals(
                 Collections.<Object>singletonList(null),
@@ -132,6 +132,31 @@ public class SQLDataSetSparserIntegrationTest {
         assertTrue(predicate, predicate.contains("branch = 17"));
         assertTrue(predicate, predicate.contains("state =  'A-1' "));
         assertFalse(predicate, predicate.contains(":branch"));
+    }
+
+    @Test
+    public void completedWherePredicateUsesJdbcRuntimeConversion() throws Exception {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+
+        SQLExpression expression =
+                new SQLExpression(
+                        "empty is not distinct from :empty "
+                        + "and chr = :chr"
+                );
+
+        expression.setParameter("empty", "");
+        expression.setParameter("chr", Character.valueOf('X'));
+        ds.setFilter(expression, false, false);
+
+        String predicate =
+                ds.renderCompletedWherePredicate(SqlDialectFactory.POSTGRES);
+
+        assertTrue(predicate, predicate.contains(
+                "empty is not distinct from  NULL "
+        ));
+        assertTrue(predicate, predicate.contains(
+                "chr =  'X' "
+        ));
     }
 
     @Test
@@ -182,6 +207,38 @@ public class SQLDataSetSparserIntegrationTest {
         assertEquals(
                 "select '?' as literal_text,  'ACTIVE'  from client where owner_id = 17 and amount = 10",
                 sql
+        );
+    }
+
+    @Test
+    public void completedSqlRenderingUsesJdbcRuntimeConversion() {
+        PreparedSql prepared = new PreparedSql(
+                "select ? empty_value, ? char_value",
+                Arrays.asList(
+                        Parameter.named("empty"),
+                        Parameter.named("character")
+                )
+        );
+
+        IParameters parameters = new ParametersByName() {
+            @Override public Object getParameter(String name) {
+                if( "empty".equals(name) ) return "";
+                if( "character".equals(name) ) return Character.valueOf('X');
+                return null;
+            }
+            @Override public boolean hasParameter(String name) {
+                return "empty".equals(name)
+                        || "character".equals(name);
+            }
+        };
+
+        assertEquals(
+                "select  NULL  empty_value,  'X'  char_value",
+                SQLDataSet.renderPreparedSql(
+                        prepared,
+                        parameters,
+                        new PostgresSqlScanner()
+                )
         );
     }
 

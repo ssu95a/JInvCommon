@@ -2,19 +2,24 @@ package ru.inversion.dataset.impl;
 
 import ru.inversion.dataset.IParameters;
 import ru.inversion.utils.sparser.SqlValueFormatter;
-import ru.inversion.utils.sparser.jdbc.Parameter;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.sparser.lexer.SqlScanner;
 
 import java.util.List;
 import java.util.Objects;
 
-/** Diagnostic SQL text rendered from the same parameter plan used by JDBC. */
+/**
+ * Diagnostic SQL text rendered from a PreparedSql parameter plan.
+ *
+ * render(...) preserves supplied/raw values.
+ * renderJdbc(...) first applies the same value conversion as JDBC execution.
+ */
 public final class PreparedSqlRenderer {
 
     private PreparedSqlRenderer() {
     }
 
+    /** Compatibility/raw-value rendering from IParameters. */
     public static String render(
             PreparedSql preparedSql,
             IParameters parameters,
@@ -27,7 +32,38 @@ public final class PreparedSqlRenderer {
         );
     }
 
-    /** Render already resolved raw values in physical JDBC order. */
+    /**
+     * Render values exactly as they would be passed to PreparedStatement.
+     */
+    public static String renderJdbc(
+            PreparedSql preparedSql,
+            IParameters parameters,
+            SqlScanner scanner
+    ) {
+        return render(
+                preparedSql,
+                PreparedSqlValues.jdbc(preparedSql, parameters),
+                scanner
+        );
+    }
+
+    /**
+     * Convert already resolved raw values exactly as JDBC execution does,
+     * then render them in physical placeholder order.
+     */
+    public static String renderJdbc(
+            PreparedSql preparedSql,
+            List<?> rawValues,
+            SqlScanner scanner
+    ) {
+        return render(
+                preparedSql,
+                PreparedSqlValues.jdbc(preparedSql, rawValues),
+                scanner
+        );
+    }
+
+    /** Render already resolved values in physical JDBC placeholder order. */
     public static String render(
             PreparedSql preparedSql,
             List<?> values,

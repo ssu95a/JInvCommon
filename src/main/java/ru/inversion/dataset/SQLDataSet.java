@@ -1331,7 +1331,10 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return predicate;
    }
 
-   /** Вернуть полностью готовый SQL, c параметрами */
+   /**
+    * Вернуть диагностический SQL с теми значениями, которые фактически
+    * передаются JDBC после runtime conversion.
+    */
    @Override
    public String getCompletedSQL( ) {
 
@@ -1355,7 +1358,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
            IParameters parameters,
            SqlScanner scanner
    ) {
-      return PreparedSqlRenderer.render(preparedSql, parameters, scanner);
+      return PreparedSqlRenderer.renderJdbc(preparedSql, parameters, scanner);
    }
 
    static String renderPreparedSql(
@@ -1363,7 +1366,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
            List<?> values,
            SqlScanner scanner
    ) {
-      return PreparedSqlRenderer.render(preparedSql, values, scanner);
+      return PreparedSqlRenderer.renderJdbc(preparedSql, values, scanner);
    }
 
    private transient String refreshCurrentRowSQL;

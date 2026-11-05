@@ -30,6 +30,21 @@ public class SQLExpressionCompletedSqlTest {
                 expression.getCompletedSQL(SqlDialectFactory.POSTGRES));
     }
 
+    @Test
+    public void dialectCompletedSqlUsesJdbcRuntimeConversion() {
+        SQLExpression expression = new SQLExpression(
+                "empty = :empty and chr = :chr and flag = :flag"
+        );
+        expression.setParameter("empty", "");
+        expression.setParameter("chr", Character.valueOf('X'));
+        expression.setParameter("flag", true);
+
+        assertEquals(
+                "empty =  NULL  and chr =  'X'  and flag = 1",
+                expression.getCompletedSQL(SqlDialectFactory.POSTGRES)
+        );
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void unsupportedOracleQQuotedStringIsRejected() {
         SQLExpression expression = new SQLExpression(

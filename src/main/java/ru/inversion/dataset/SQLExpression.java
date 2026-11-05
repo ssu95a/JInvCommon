@@ -2,6 +2,7 @@ package ru.inversion.dataset;
 
 import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.dialect.SqlDialect;
+import ru.inversion.utils.Jt2St;
 import ru.inversion.utils.S;
 import ru.inversion.utils.U;
 import ru.inversion.utils.sparser.SqlScannerFactory;
@@ -112,7 +113,9 @@ public class SQLExpression implements ISQLExpression {
     }
 
     /**
-     * Diagnostic SQL with values substituted using the actual dialect lexer.
+     * Diagnostic SQL with runtime values converted as JDBC execution sees them
+     * and substituted using the actual dialect lexer.
+     *
      * Works with arbitrary SQL fragments, not just SELECT statements.
      * Literal text, quoted identifiers and comments are left unchanged.
      */
@@ -145,7 +148,8 @@ public class SQLExpression implements ISQLExpression {
             }
 
             result.append(strSQL, copiedUntil, token.start());
-            result.append(SqlValueFormatter.format(value));
+            result.append(SqlValueFormatter.format(
+                    Jt2St.convert(value)));
             copiedUntil = token.end();
         }
 

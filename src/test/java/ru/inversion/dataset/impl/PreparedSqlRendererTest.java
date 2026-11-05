@@ -68,6 +68,70 @@ public class PreparedSqlRendererTest {
     }
 
     @Test
+    public void rawRenderPreservesRawApplicationValues() {
+        PreparedSql prepared = new PreparedSql(
+                "select ?, ?",
+                Arrays.asList(
+                        Parameter.named("empty"),
+                        Parameter.named("character")
+                )
+        );
+
+        IParameters values = new IParameters() {
+            @Override public Object getParameter(String name) {
+                if ("empty".equals(name)) return "";
+                if ("character".equals(name)) return Character.valueOf('X');
+                throw new AssertionError(name);
+            }
+            @Override public Object getParameter(int index) {
+                throw new AssertionError(index);
+            }
+        };
+
+        assertEquals(
+                "select  '' , X",
+                PreparedSqlRenderer.render(
+                        prepared,
+                        values,
+                        SqlScannerFactory.create(SqlDialectFactory.POSTGRES)
+                )
+        );
+    }
+
+    @Test
+    public void jdbcRenderUsesExecutionValueConversion() {
+        PreparedSql prepared = new PreparedSql(
+                "select ?, ?, ?",
+                Arrays.asList(
+                        Parameter.named("empty"),
+                        Parameter.named("character"),
+                        Parameter.named("flag")
+                )
+        );
+
+        IParameters values = new IParameters() {
+            @Override public Object getParameter(String name) {
+                if ("empty".equals(name)) return "";
+                if ("character".equals(name)) return Character.valueOf('X');
+                if ("flag".equals(name)) return true;
+                throw new AssertionError(name);
+            }
+            @Override public Object getParameter(int index) {
+                throw new AssertionError(index);
+            }
+        };
+
+        assertEquals(
+                "select  NULL ,  'X' , 1",
+                PreparedSqlRenderer.renderJdbc(
+                        prepared,
+                        values,
+                        SqlScannerFactory.create(SqlDialectFactory.POSTGRES)
+                )
+        );
+    }
+
+    @Test
     public void ignoresQuestionMarksInSqlStrings() {
         PreparedSql prepared = new PreparedSql(
                 "select '?' as literal_text, ? from t where x = ?",
