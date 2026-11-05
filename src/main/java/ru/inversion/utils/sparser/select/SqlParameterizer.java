@@ -47,7 +47,6 @@ final class SqlParameterizer {
         List<Parameter> parameters = new ArrayList<>();
 
         boolean parameterize = true;
-        boolean legacyProtected = false;
 
         int legacyClose = -1;
         int legacyConcatClose = -1;
@@ -68,14 +67,12 @@ final class SqlParameterizer {
 
             if (i == legacyClose) {
                 legacyClose = -1;
-                legacyProtected = !legacyProtected;
                 continue;
             }
 
             if (i == legacyConcatClose) {
                 legacyConcatClose = -1;
                 sql.append("||");
-                legacyProtected = !legacyProtected;
                 continue;
             }
 
@@ -94,7 +91,6 @@ final class SqlParameterizer {
 
                 if (close >= 0) {
                     legacyClose = close;
-                    legacyProtected = !legacyProtected;
                     continue;
                 }
             }
@@ -107,7 +103,6 @@ final class SqlParameterizer {
                 if (close >= 0) {
                     legacyConcatClose = close;
                     sql.append("||");
-                    legacyProtected = !legacyProtected;
                     continue;
                 }
             }
@@ -165,6 +160,9 @@ final class SqlParameterizer {
 
                 case STRING:
                 case NUMBER:
+                    boolean legacyProtected =
+                            (legacyClose >= 0) != (legacyConcatClose >= 0);
+
                     if (parameterize
                             && !legacyProtected
                             && typeDepth < 0
