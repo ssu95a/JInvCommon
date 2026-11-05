@@ -509,6 +509,21 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
     /** {@inheritDoc } */
     @Override
+    public boolean hasParameter( String name ) {
+        return "jinv_marker_id".equals(name)
+                || super.hasParameter(name);
+    }
+
+    /** {@inheritDoc } */
+    @Override
+    public Object getParameterValue( String name ) {
+        return "jinv_marker_id".equals(name)
+                ? getMarkerID()
+                : super.getParameterValue(name);
+    }
+
+    /** {@inheritDoc } */
+    @Override
     protected String getMarkSQLPart( ) {
         if( !isSupportMark() || getMarkerID() == null )
             return null;
@@ -648,7 +663,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             }
         }
         catch( Throwable th ) {
-            throw new DataSetException( Tags.PRODUCT_LABEL + "markRow", th );
+            throw new DataSetException( Tags.PRODUCT_LABEL + "unMarkAllRow", th );
         }
 	}
 
@@ -678,7 +693,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                 }//end if
             }
             catch( Throwable th ) {
-                throw new DataSetException( Tags.PRODUCT_LABEL + "unMarkAllRow", th );
+                throw new DataSetException( Tags.PRODUCT_LABEL + "markRow", th );
             }
         }//end if
     }
