@@ -2,7 +2,7 @@ package ru.inversion.dataset;
 
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.JDBCDataReader;
-import ru.inversion.dataset.impl.NextSelectBuilder;
+import ru.inversion.dataset.impl.DataSetSelectBuilder;
 import ru.inversion.dataset.impl.PreparedSqlValues;
 import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.dataset.impl.XXIDsMarkerDao;
@@ -243,7 +243,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         try {
 
-            NextSelectBuilder builder = createNextSelectBuilder(false);
+            DataSetSelectBuilder builder = createDataSetSelectBuilder(false);
             PreparedSql preparedSql = builder.prepare();
             List<Object> values = builder.values(mainSqlParameters);
 
@@ -312,8 +312,8 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         return result.toString();
     }
 
-    private NextSelectBuilder createMarkSourceBuilder() {
-        NextSelectBuilder builder = createNextSelectBuilder( false );
+    private DataSetSelectBuilder createMarkSourceBuilder() {
+        DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
         builder.mark( null );
         builder.orderBy( (String)null );
         return builder;
@@ -399,6 +399,51 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         parameters.add( Parameter.named("jinv_marker_id") );
         parameters.addAll( source.getParameters() );
         return new PreparedSql( sql.toString(), parameters );
+    }
+
+    /**
+     * Bind order of prepareMarkInsertSql:
+     * marker id, source SELECT values, marker id.
+     */
+    static List<Object> markInsertJdbcValues(
+            PreparedSql markSql,
+            Long markerID,
+            List<?> sourceValues
+    ) {
+        Objects.requireNonNull(markSql, "markSql");
+        Objects.requireNonNull(markerID, "markerID");
+        Objects.requireNonNull(sourceValues, "sourceValues");
+
+        List<Object> rawValues =
+                new ArrayList<>(sourceValues.size() + 2);
+
+        rawValues.add(markerID);
+        rawValues.addAll(sourceValues);
+        rawValues.add(markerID);
+
+        return PreparedSqlValues.jdbc(markSql, rawValues);
+    }
+
+    /**
+     * Bind order of prepareMarkClearSql:
+     * marker id, source SELECT values.
+     */
+    static List<Object> markClearJdbcValues(
+            PreparedSql markSql,
+            Long markerID,
+            List<?> sourceValues
+    ) {
+        Objects.requireNonNull(markSql, "markSql");
+        Objects.requireNonNull(markerID, "markerID");
+        Objects.requireNonNull(sourceValues, "sourceValues");
+
+        List<Object> rawValues =
+                new ArrayList<>(sourceValues.size() + 1);
+
+        rawValues.add(markerID);
+        rawValues.addAll(sourceValues);
+
+        return PreparedSqlValues.jdbc(markSql, rawValues);
     }
 
 	/** {@inheritDoc} */
@@ -552,15 +597,21 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         try {
             if( isSupportMark() )
             {
-                NextSelectBuilder source = createMarkSourceBuilder();
+                DataSetSelectBuilder source = createMarkSourceBuilder();
                 PreparedSql select = source.prepare();
+                Long actualMarkerID = getOrCreateMarkerID();
+                PreparedSql markSql = prepareMarkInsertSql(select);
 
                 XXIDsMarkerDao.markAllRow(
                     getTaskContextForUse(),
-                    getOrCreateMarkerID(),
+                    actualMarkerID,
                     markDescriptor,
-                    prepareMarkInsertSql(select),
-                    source.jdbcValues(mainSqlParameters),
+                    markSql,
+                    markInsertJdbcValues(
+                            markSql,
+                            actualMarkerID,
+                            source.values(mainSqlParameters)
+                    ),
                     savePrevMarkedRows
                 );
 
@@ -586,14 +637,19 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
                 if( savePrevMarkedRows ) {
 
-                    NextSelectBuilder source = createMarkSourceBuilder();
+                    DataSetSelectBuilder source = createMarkSourceBuilder();
                     PreparedSql select = source.prepare();
+                    PreparedSql markSql = prepareMarkClearSql(select);
 
                     XXIDsMarkerDao.unMarkAllRow(
                             getTaskContextForUse(),
                             markDescriptor,
-                            prepareMarkClearSql(select),
-                            source.jdbcValues(mainSqlParameters)
+                            markSql,
+                            markClearJdbcValues(
+                                    markSql,
+                                    getMarkerID(),
+                                    source.values(mainSqlParameters)
+                            )
                     );
                 }
                 else
@@ -833,7 +889,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         if( !isSupportMark() || getMarkerID() == null )
             return Collections.<T>emptyIterator();
 
-        NextSelectBuilder builder = createNextSelectBuilder( ignoreFilter );
+        DataSetSelectBuilder builder = createDataSetSelectBuilder( ignoreFilter );
         builder.mark("1");
 
         StringBuilder predicate = new StringBuilder("EXISTS\n");
@@ -1015,8 +1071,8 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             }
 
             if( S.isNullOrEmpty(aggrTable) ) {
-                NextSelectBuilder base =
-                        new NextSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
+                DataSetSelectBuilder base =
+                        new DataSetSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
 
                 for( String predicate : predicatList )
                     base.addPredicate(predicate);
