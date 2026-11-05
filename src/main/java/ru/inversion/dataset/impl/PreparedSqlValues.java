@@ -11,13 +11,23 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-/** Resolves a PreparedSql parameter plan to values in physical JDBC order. */
+/**
+ * Resolves a PreparedSql parameter plan and converts resolved values for JDBC.
+ *
+ * Raw resolution and JDBC conversion are intentionally separate:
+ * diagnostics render raw application values, while execution uses jdbc(...).
+ */
 public final class PreparedSqlValues {
 
     private PreparedSqlValues() {
     }
 
-    /** Raw runtime values in physical JDBC placeholder order. */
+    /**
+     * Raw values in physical JDBC placeholder order.
+     *
+     * Runtime values are not converted through Jt2St here. A null IParameters
+     * is valid only when the plan contains generated literals exclusively.
+     */
     public static List<Object> resolve(
             PreparedSql preparedSql,
             IParameters parameters
@@ -70,7 +80,7 @@ public final class PreparedSqlValues {
                     "Runtime parameters are required for " + parameter);
     }
 
-    /** Values converted exactly as JDBC execution expects them. */
+    /** Resolve IParameters and convert the result exactly as JDBC execution expects. */
     public static List<Object> jdbc(
             PreparedSql preparedSql,
             IParameters parameters
@@ -78,7 +88,12 @@ public final class PreparedSqlValues {
         return jdbc(preparedSql, resolve(preparedSql, parameters));
     }
 
-    /** Convert already resolved raw values to JDBC-ready values. */
+    /**
+     * Convert already resolved raw values to JDBC-ready values.
+     *
+     * Automatically generated integral literals preserve the legacy Integer /
+     * Long narrowing rules. Runtime BigInteger values are never narrowed here.
+     */
     public static List<Object> jdbc(
             PreparedSql preparedSql,
             List<?> values
@@ -95,16 +110,20 @@ public final class PreparedSqlValues {
 
         List<Object> jdbcValues = new ArrayList<>(values.size());
 
-        for( int i = 0; i < values.size(); i++ ) {
-            Object value = values.get(i);
-
-            if( plan.get(i).getKind() == Parameter.Kind.LITERAL )
-                value = legacyIntegralLiteral(value);
-
-            jdbcValues.add(Jt2St.convert(value));
-        }
+        for( int i = 0; i < values.size(); i++ )
+            jdbcValues.add(toJdbcValue(plan.get(i), values.get(i)));
 
         return Collections.unmodifiableList(jdbcValues);
+    }
+
+    private static Object toJdbcValue(
+            Parameter parameter,
+            Object value
+    ) {
+        if( parameter.getKind() == Parameter.Kind.LITERAL )
+            value = legacyIntegralLiteral(value);
+
+        return Jt2St.convert(value);
     }
 
     /** Preserve legacy JDBC types for automatically generated integer literals. */
