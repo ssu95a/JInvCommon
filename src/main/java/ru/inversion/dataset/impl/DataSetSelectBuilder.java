@@ -142,7 +142,25 @@ public class DataSetSelectBuilder {
      * primary (DataSet/callback) has priority over ISQLExpression fallbacks.
      */
     public List<Object> values(IParameters primary) {
+        return values(primary, 0);
+    }
+
+    /**
+     * Resolve this SELECT when it is embedded after preceding positional
+     * parameters in a larger PreparedSql.
+     *
+     * Only primary '?' indexes are shifted. Expression fallback indexes and
+     * explicit numbered parameters ($n) keep their own established namespace.
+     */
+    public List<Object> values(
+            IParameters primary,
+            int positionalOffset
+    ) {
         Objects.requireNonNull(primary, "primary");
+
+        if( positionalOffset < 0 )
+            throw new IllegalArgumentException(
+                    "positionalOffset must be >= 0");
 
         PreparedSql plan = prepare();
         List<ISQLExpression> fallbacks = fallbacks();
@@ -175,10 +193,12 @@ public class DataSetSelectBuilder {
                     break;
 
                 case POSITIONAL:
+                    int localIndex = positionalIndex++;
                     value = resolveIndexed(
                             primary,
                             fallbacks,
-                            positionalIndex++
+                            positionalOffset + localIndex,
+                            localIndex
                     );
                     break;
 
@@ -313,25 +333,39 @@ public class DataSetSelectBuilder {
             List<ISQLExpression> fallbacks,
             int index
     ) {
-        if (primary.hasParameter(index))
-            return primary.getParameter(index);
+        return resolveIndexed(
+                primary,
+                fallbacks,
+                index,
+                index
+        );
+    }
+
+    private static Object resolveIndexed(
+            IParameters primary,
+            List<ISQLExpression> fallbacks,
+            int primaryIndex,
+            int fallbackIndex
+    ) {
+        if( primary.hasParameter(primaryIndex) )
+            return primary.getParameter(primaryIndex);
 
         boolean found = false;
         Object value = null;
 
-        for (ISQLExpression fallback : fallbacks) {
-            if (!fallback.hasParameter(index))
+        for( ISQLExpression fallback : fallbacks ) {
+            if( !fallback.hasParameter(fallbackIndex) )
                 continue;
 
-            if (found)
-                throw conflict("index " + index);
+            if( found )
+                throw conflict("index " + primaryIndex);
 
             found = true;
-            value = fallback.getParameter(index);
+            value = fallback.getParameter(fallbackIndex);
         }
 
-        if (!found)
-            throw missing("index " + index);
+        if( !found )
+            throw missing("index " + primaryIndex);
 
         return value;
     }

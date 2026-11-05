@@ -419,4 +419,43 @@ public class DataSetSelectBuilderTest {
                 .prepare();
     }
 
+
+    @Test public void composedSourceOffsetsOnlyPrimaryQuestionMarks() {
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
+                "select id from t",
+                SqlDialectFactory.POSTGRES
+        );
+
+        b.addPredicate(new Expr("a = ?").set(0, 7));
+
+        assertEquals(
+                Collections.<Object>singletonList(7),
+                b.values(new Params().set(0, 100), 1)
+        );
+
+        assertEquals(
+                Collections.<Object>singletonList(200),
+                b.values(
+                        new Params()
+                                .set(0, 100)
+                                .set(1, 200),
+                        1
+                )
+        );
+    }
+
+    @Test public void composedSourceDoesNotOffsetNumberedParameters() {
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
+                "select id from t",
+                SqlDialectFactory.POSTGRES
+        );
+
+        b.addPredicate(new Expr("a = $1").set(0, 7));
+
+        assertEquals(
+                Collections.<Object>singletonList(100),
+                b.values(new Params().set(0, 100), 1)
+        );
+    }
+
 }

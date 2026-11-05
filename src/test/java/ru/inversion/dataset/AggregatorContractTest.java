@@ -236,4 +236,159 @@ public class AggregatorContractTest {
         );
     }
 
+
+    @Test
+    public void aggregateSourceKeepsSelectContextAndExpressionFallbacks() {
+        SQLExpression fallback =
+                new SQLExpression("q.id > ? and q.code = :code");
+        fallback.setParameter(0, 7);
+        fallback.setParameter("code", "X");
+
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                new ru.inversion.dataset.impl.DataSetSelectBuilder(
+                        "select id, code, amount from t",
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                )
+                        .queryAlias("q")
+                        .optimizerHint("+ AGG_TEST")
+                        .addPredicate(fallback)
+                        .orderBy("q.id DESC")
+                        .rowLimit(5);
+
+        java.util.List<ru.inversion.utils.Triplet<String, AggrFuncEnum, String>>
+                aggregates = java.util.Collections.singletonList(
+                        ru.inversion.utils.Triplet.makeTriplet(
+                                "amount",
+                                AggrFuncEnum.SUM,
+                                "TOTAL"
+                        )
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                SQLDataSet.prepareAggregateSql(
+                        aggregates,
+                        source,
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains("/*+ AGG_TEST*/")
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(") q")
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains("ORDER BY q.id DESC")
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains("LIMIT ?")
+        );
+
+        assertEquals(
+                java.util.Arrays.<Object>asList(7, "X", 5),
+                SQLDataSet.aggregateJdbcValues(
+                        prepared,
+                        source,
+                        new SQLExpression()
+                )
+        );
+    }
+
+    @Test
+    public void aggregatePrefixQuestionMarkOffsetsSourcePrimaryIndex() {
+        SQLExpression fallback =
+                new SQLExpression("id > ?");
+        fallback.setParameter(0, 7);
+
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                new ru.inversion.dataset.impl.DataSetSelectBuilder(
+                        "select id, amount from t",
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                ).addPredicate(fallback);
+
+        java.util.List<ru.inversion.utils.Triplet<String, AggrFuncEnum, String>>
+                aggregates = java.util.Collections.singletonList(
+                        ru.inversion.utils.Triplet.makeTriplet(
+                                "?",
+                                AggrFuncEnum.SUM,
+                                "TOTAL"
+                        )
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                SQLDataSet.prepareAggregateSql(
+                        aggregates,
+                        source,
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        SQLExpression primary = new SQLExpression();
+        primary.setParameter(0, 100);
+
+        assertEquals(
+                java.util.Arrays.<Object>asList(100, 7),
+                SQLDataSet.aggregateJdbcValues(
+                        prepared,
+                        source,
+                        primary
+                )
+        );
+
+        primary.setParameter(1, 200);
+
+        assertEquals(
+                java.util.Arrays.<Object>asList(100, 200),
+                SQLDataSet.aggregateJdbcValues(
+                        prepared,
+                        source,
+                        primary
+                )
+        );
+    }
+
+    @Test
+    public void aggregatePrefixDoesNotShiftSourceNumberedParameter() {
+        SQLExpression fallback =
+                new SQLExpression("id > $1");
+        fallback.setParameter(0, 7);
+
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                new ru.inversion.dataset.impl.DataSetSelectBuilder(
+                        "select id, amount from t",
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                ).addPredicate(fallback);
+
+        java.util.List<ru.inversion.utils.Triplet<String, AggrFuncEnum, String>>
+                aggregates = java.util.Collections.singletonList(
+                        ru.inversion.utils.Triplet.makeTriplet(
+                                "?",
+                                AggrFuncEnum.SUM,
+                                "TOTAL"
+                        )
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                SQLDataSet.prepareAggregateSql(
+                        aggregates,
+                        source,
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        SQLExpression primary = new SQLExpression();
+        primary.setParameter(0, 100);
+
+        assertEquals(
+                java.util.Arrays.<Object>asList(100, 100),
+                SQLDataSet.aggregateJdbcValues(
+                        prepared,
+                        source,
+                        primary
+                )
+        );
+    }
+
 }

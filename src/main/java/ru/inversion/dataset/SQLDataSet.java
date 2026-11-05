@@ -2091,6 +2091,177 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
+   DataSetSelectBuilder createAggregateSourceBuilder(
+           boolean ignoreFilter
+   ) {
+      DataSetSelectBuilder source =
+              createDataSetSelectBuilder(ignoreFilter);
+
+      source.mark(null);
+
+      // ORDER BY only affects aggregate membership when a runtime row limit
+      // is active. Otherwise keep the aggregate source free of runtime sort.
+      if( getRowLimit() == null )
+         source.orderBy((String)null);
+
+      return source;
+   }
+
+   static PreparedSql prepareAggregateSql(
+           List<Triplet<String, AggrFuncEnum, String>> aggregates,
+           DataSetSelectBuilder source,
+           SqlDialect dialect
+   ) {
+      Objects.requireNonNull(aggregates, "aggregates");
+      Objects.requireNonNull(source, "source");
+      Objects.requireNonNull(dialect, "dialect");
+
+      StringBuilder sql = new StringBuilder("SELECT ");
+
+      for( int i = 0; i < aggregates.size(); i++ ) {
+         if( i > 0 )
+            sql.append(", ");
+
+         sql.append(aggregateSql(aggregates.get(i)));
+      }
+
+      sql.append(" FROM (")
+         .append(source.buildSql())
+         .append(") arslt");
+
+      PreparedSql prepared =
+              new SqlSelect(sql.toString(), dialect).prepare();
+
+      requireAggregateSourceSuffix(
+              prepared,
+              source.prepare()
+      );
+
+      return prepared;
+   }
+
+   static List<Object> aggregateJdbcValues(
+           PreparedSql aggregateSql,
+           DataSetSelectBuilder source,
+           IParameters primary
+   ) {
+      Objects.requireNonNull(aggregateSql, "aggregateSql");
+      Objects.requireNonNull(source, "source");
+      Objects.requireNonNull(primary, "primary");
+
+      PreparedSql sourceSql = source.prepare();
+      List<Parameter> aggregateParameters =
+              aggregateSql.getParameters();
+      List<Parameter> sourceParameters =
+              sourceSql.getParameters();
+
+      int prefixSize =
+              aggregateParameters.size() - sourceParameters.size();
+
+      if( prefixSize < 0 )
+         throw new IllegalStateException(
+                 "Aggregate PreparedSql has fewer parameters "
+                         + "than its source");
+
+      requireAggregateSourceSuffix(
+              aggregateSql,
+              sourceSql
+      );
+
+      List<Object> raw =
+              new ArrayList<>(aggregateParameters.size());
+
+      int positionalOffset = 0;
+
+      if( prefixSize > 0 ) {
+         List<Parameter> prefixParameters =
+                 new ArrayList<>(
+                         aggregateParameters.subList(
+                                 0,
+                                 prefixSize));
+
+         for( Parameter parameter : prefixParameters ) {
+            if( parameter.getKind()
+                    == Parameter.Kind.POSITIONAL )
+               positionalOffset++;
+         }
+
+         raw.addAll(
+                 PreparedSqlValues.resolve(
+                         new PreparedSql(
+                                 "SELECT 1",
+                                 prefixParameters),
+                         primary
+                 )
+         );
+      }
+
+      raw.addAll(
+              source.values(
+                      primary,
+                      positionalOffset)
+      );
+
+      return PreparedSqlValues.jdbc(
+              aggregateSql,
+              raw
+      );
+   }
+
+   private static void requireAggregateSourceSuffix(
+           PreparedSql aggregateSql,
+           PreparedSql sourceSql
+   ) {
+      List<Parameter> aggregate =
+              aggregateSql.getParameters();
+      List<Parameter> source =
+              sourceSql.getParameters();
+
+      int offset = aggregate.size() - source.size();
+
+      if( offset < 0 )
+         throw new IllegalStateException(
+                 "Aggregate PreparedSql has fewer parameters "
+                         + "than its source");
+
+      for( int i = 0; i < source.size(); i++ ) {
+         if( !sameParameter(
+                 aggregate.get(offset + i),
+                 source.get(i)) ) {
+            throw new IllegalStateException(
+                    "Aggregate source parameter plan mismatch "
+                            + "at index " + i);
+         }
+      }
+   }
+
+   private static boolean sameParameter(
+           Parameter left,
+           Parameter right
+   ) {
+      if( left.getKind() != right.getKind() )
+         return false;
+
+      switch( left.getKind() ) {
+         case POSITIONAL:
+            return true;
+         case NAMED:
+            return Objects.equals(
+                    left.getName(),
+                    right.getName());
+         case NUMBERED:
+            return left.getNumber() == right.getNumber();
+         case LITERAL:
+            return Objects.equals(
+                    left.getValue(),
+                    right.getValue());
+         default:
+            throw new IllegalStateException(
+                    "Unknown parameter kind: "
+                            + left.getKind());
+      }
+   }
+
    static String aggregateSql(
            Triplet<String, AggrFuncEnum, String> aggregate
    ) {
@@ -2155,6 +2326,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       private JDBCDataReader<Map<String,Object>> dataReader;
       private PreparedSql preparedSql;
+      private DataSetSelectBuilder aggregateSourceBuilder;
 
       private final IDataSetListener refreshListener;
       private final IProperty.ChangeListener<Boolean> readerInvalidationListener;
@@ -2214,6 +2386,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          JDBCDataReader<Map<String,Object>> reader = dataReader;
          dataReader = null;
          preparedSql = null;
+         aggregateSourceBuilder = null;
 
          if( reader == null )
             return;
@@ -2241,40 +2414,25 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          if( dataReader != null )
             return;
 
-         DataSetSelectBuilder base =
-                 new DataSetSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
-
-         for( PredicateItem item : predicates.values() ) {
-            if( ignoreFilter && item.isFilter() )
-               continue;
-            if( item.getExpression() != null )
-               throw new UnsupportedOperationException(
-                       "ISQLExpression predicates in aggregator are not yet supported");
-            base.addPredicate(item.getFilterStr());
-         }
+         aggregateSourceBuilder =
+                 createAggregateSourceBuilder(ignoreFilter);
 
          for( String predicate : predicateList )
-            base.addPredicate(predicate);
+            aggregateSourceBuilder.addPredicate(predicate);
 
-         StringBuilder sql = new StringBuilder("SELECT ");
-         int index = 0;
-         for( Triplet<String, AggrFuncEnum, String> aggregate : aggrList ) {
-            if( index++ > 0 )
-               sql.append(", ");
-
-            sql.append(aggregateSql(aggregate));
-         }
-
-         sql.append(" FROM (")
-            .append( base.buildSql() )
-            .append(") arslt");
-
-         preparedSql =
-                 new SqlSelect( sql.toString(), getTaskContextForUse().dialect() ).prepare();
+         preparedSql = prepareAggregateSql(
+                 aggrList,
+                 aggregateSourceBuilder,
+                 getTaskContextForUse().dialect()
+         );
 
          dataReader = new JDBCDataReader<>(
                  getTaskContextForUse().getConnection(),
-                 preparedSql, AggrRSMapper.instance, null, false );
+                 preparedSql,
+                 AggrRSMapper.instance,
+                 null,
+                 false
+         );
       }
 
       /** */
@@ -2308,7 +2466,10 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          prepareReader( );
 
          dataReader.executeQuery(
-                 PreparedSqlValues.jdbc(preparedSql, mainSqlParameters)
+                 aggregateJdbcValues(
+                         preparedSql,
+                         aggregateSourceBuilder,
+                         mainSqlParameters)
          );
 
          values = dataReader.getNextPage(1).get(0);
@@ -2362,6 +2523,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          JDBCDataReader<Map<String,Object>> reader = dataReader;
          dataReader = null;
          preparedSql = null;
+         aggregateSourceBuilder = null;
 
          if( reader != null )
             reader.close();
