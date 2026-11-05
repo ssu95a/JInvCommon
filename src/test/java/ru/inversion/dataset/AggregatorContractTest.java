@@ -74,4 +74,101 @@ public class AggregatorContractTest {
         assertEquals("A$id", method.invoke(null, "\"A$id\""));
         assertEquals("total", method.invoke(null, "total"));
     }
+
+    @Test
+    public void ordinaryCloseDetachesRefreshListener()
+            throws Exception {
+        TestSQLDataSet ds = new TestSQLDataSet();
+        ds.setProperty("ds.execute_count", 1);
+
+        IAggregator<Object> aggregator =
+                ds.createAggregatorBuilder(true)
+                        .add("id", AggrFuncEnum.COUNT)
+                        .build();
+
+        aggregator.addListener(source -> { });
+        aggregator.close();
+        aggregator.close();
+
+        ds.fireAfterExecute();
+    }
+
+    @Test
+    public void markedCloseDetachesDataSetAndMarkListeners()
+            throws Exception {
+        TestXXIDataSet ds = new TestXXIDataSet();
+        ds.setRowClass(MarkRow.class);
+        ds.setMarkerID(10L);
+
+        IAggregator<Object> aggregator =
+                ds.createMarkedAggregatorBuilder(true)
+                        .add("id", AggrFuncEnum.SUM)
+                        .build();
+
+        aggregator.addListener(source -> { });
+        aggregator.close();
+        aggregator.close();
+
+        ds.fireAfterExecute();
+        ds.fireMarkAll();
+    }
+
+    @Test(expected = IllegalStateException.class)
+    public void executeAfterCloseIsRejected()
+            throws Exception {
+        IAggregator<Object> aggregator =
+                new SQLDataSet<Object>()
+                        .createAggregatorBuilder(false)
+                        .add("id", AggrFuncEnum.COUNT)
+                        .build();
+
+        aggregator.close();
+        aggregator.execute();
+    }
+
+    private static final class TestSQLDataSet
+            extends SQLDataSet<Object> {
+
+        void fireAfterExecute() {
+            fireDataSetEvent(
+                    DataSetEvent.DataSetEventType.EXECUTE,
+                    false);
+        }
+    }
+
+    private static final class TestXXIDataSet
+            extends XXIDataSet<Object> {
+
+        void fireAfterExecute() {
+            fireDataSetEvent(
+                    DataSetEvent.DataSetEventType.EXECUTE,
+                    false);
+        }
+
+        void fireMarkAll() {
+            fireMarkDataSetEvent(
+                    DataSetMarkEvent.MarkActionEnum.MARK_ALL);
+        }
+    }
+
+    public static final class MarkRow
+            implements ru.inversion.dataset.mark.IIDMarkable {
+
+        @Override
+        public boolean isMark() {
+            return false;
+        }
+
+        @Override
+        public void setMark(boolean mark) {
+        }
+
+        @javax.persistence.Id
+        @javax.persistence.Column(name = "ID")
+        @Override
+        public Long getMarkLongID() {
+            return 1L;
+        }
+    }
+
 }

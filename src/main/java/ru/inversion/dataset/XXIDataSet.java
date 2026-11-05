@@ -948,6 +948,11 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         private JDBCDataReader<Map<String,Object>> dataReader;
         private PreparedSql preparedSql;
 
+        private final IDataSetListener refreshListener;
+        private final IDataSetMarkListener markListener;
+        private final IProperty.ChangeListener<Boolean> readerInvalidationListener;
+        private boolean closed;
+
         /** */
         public MarkAggregator(
             List< Triplet<String, AggrFuncEnum, String> > aggrList,
@@ -962,50 +967,74 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                     new ArrayList<>(predicatList));
             this.aggrTable = aggrTable;
 
-            if( refreshOnExecute )
-            {
-                XXIDataSet.this.addDataSetListener( (IDataSetListener) (DataSetEvent e) -> {
-                    if( e.getEventType() == EXECUTE && e.isAfter() ) {
-                        try {
-                            execute(true);
-                        } catch( DataSetException ex ) {
-                            throw new RuntimeException(ex);
+            refreshListener = refreshOnExecute
+                    ? (IDataSetListener)(DataSetEvent e) -> {
+                        if( e.getEventType() == EXECUTE
+                                && e.isAfter() ) {
+                            try {
+                                execute(true);
+                            }
+                            catch( DataSetException ex ) {
+                                throw new RuntimeException(
+                                        Tags.PRODUCT_LABEL
+                                                + "Error on execute aggregator",
+                                        ex);
+                            }
                         }
                     }
-                });
-            }
+                    : null;
 
-            XXIDataSet.this.addMarkDataSetListener((IDataSetMarkListener)event -> {
+            if( refreshListener != null )
+                XXIDataSet.this.addDataSetListener(refreshListener);
 
+            markListener = (IDataSetMarkListener) event -> {
                 try {
                     execute(true);
-                } catch (DataSetException ex) {
+                }
+                catch( DataSetException ex ) {
                     throw new RuntimeException(
                             Tags.PRODUCT_LABEL
                                     + "Error on execute aggregator",
                             ex);
                 }
+            };
+            XXIDataSet.this.addMarkDataSetListener(markListener);
 
-            });
+            readerInvalidationListener =
+                    (property, oldValue, newValue) -> {
+                        if( Boolean.TRUE.equals(newValue) )
+                            invalidateReader();
+                    };
 
-            XXIDataSet.this.needReCreateReader.addListener( new IProperty.ChangeListener<Boolean>() {
-                @Override
-                public void changed(IProperty<? extends Boolean> property, Boolean oldValue, Boolean newValue) {
-                    if( newValue ) {
-                        if( dataReader != null )
-                            try{ dataReader.close(); } catch( Exception ex ) {}
-                        dataReader = null;
-                        preparedSql = null;
-                    }
-               }
-            });
+            XXIDataSet.this.needReCreateReader.addListener(
+                    readerInvalidationListener);
+
 
         }
 
-        /** */
-        private void clearValues() {
-            values = Collections.<String,Object>emptyMap();
-            listeners.fire( (IAggregatorListener l)->l.change(this) );
+        private void requireOpen() {
+            if( closed )
+                throw new IllegalStateException(
+                        "Marked aggregator is closed");
+        }
+
+        private void invalidateReader() {
+            JDBCDataReader<Map<String,Object>> reader = dataReader;
+            dataReader = null;
+            preparedSql = null;
+
+            if( reader == null )
+                return;
+
+            try {
+                reader.close();
+            }
+            catch( DataSetException ex ) {
+                throw new RuntimeException(
+                        Tags.PRODUCT_LABEL
+                                + "Error closing marked aggregator reader",
+                        ex);
+            }
         }
 
         /** */
@@ -1083,6 +1112,8 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         private void execute(boolean onEvent) throws DataSetException {
 
+            requireOpen();
+
             if( getMarkerID() == null )
                 return;
 
@@ -1121,11 +1152,24 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         /** */
         @Override
         public void close() throws DataSetException {
-            if( dataReader != null ) {
-                dataReader.close();
-                dataReader = null;
-                preparedSql = null;
-            }
+            if( closed )
+                return;
+
+            closed = true;
+
+            if( refreshListener != null )
+                XXIDataSet.this.removeDataSetListener(refreshListener);
+
+            XXIDataSet.this.removeMarkDataSetListener(markListener);
+            XXIDataSet.this.needReCreateReader.removeListener(
+                    readerInvalidationListener);
+
+            JDBCDataReader<Map<String,Object>> reader = dataReader;
+            dataReader = null;
+            preparedSql = null;
+
+            if( reader != null )
+                reader.close();
         }
     }
 

@@ -19,6 +19,7 @@ import ru.inversion.meta.IEntityProperty;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.parser.token.Token;
 import ru.inversion.property.BooleanProperty;
+import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
 import ru.inversion.utils.converter.TypeConverter;
@@ -2119,7 +2120,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       private JDBCDataReader<Map<String,Object>> dataReader;
       private PreparedSql preparedSql;
 
-      final private boolean           ignoreFilter;
+      private final IDataSetListener refreshListener;
+      private final IProperty.ChangeListener<Boolean> readerInvalidationListener;
+      private boolean closed;
+
+      final private boolean ignoreFilter;
 
       /** */
       public Aggregator (
@@ -2135,30 +2140,57 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                  new ArrayList<>(predicateList));
          this.ignoreFilter = ignoreFilter;
 
-         if( refreshOnExecute )
-         {
-            SQLDataSet.this.addDataSetListener( (DataSetEvent e) -> {
-               if( e.getEventType() == EXECUTE && e.isAfter() )
-               {
-                  try {
-                     execute( true );
-                  } catch( DataSetException ex ) {
-                     throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on execute aggregator", ex );
-                  }
-               }
-            });
+         refreshListener = refreshOnExecute
+                 ? (DataSetEvent e) -> {
+                    if( e.getEventType() == EXECUTE && e.isAfter() ) {
+                       try {
+                          execute(true);
+                       }
+                       catch( DataSetException ex ) {
+                          throw new RuntimeException(
+                                  Tags.PRODUCT_LABEL
+                                          + "Error on execute aggregator",
+                                  ex);
+                       }
+                    }
+                 }
+                 : null;
+
+         if( refreshListener != null )
+            SQLDataSet.this.addDataSetListener(refreshListener);
+
+         readerInvalidationListener =
+                 (property, oldValue, newValue) -> {
+                    if( Boolean.TRUE.equals(newValue) )
+                       invalidateReader();
+                 };
+
+         SQLDataSet.this.needReCreateReader.addListener(
+                 readerInvalidationListener);
+      }
+
+      private void requireOpen() {
+         if( closed )
+            throw new IllegalStateException("Aggregator is closed");
+      }
+
+      private void invalidateReader() {
+         JDBCDataReader<Map<String,Object>> reader = dataReader;
+         dataReader = null;
+         preparedSql = null;
+
+         if( reader == null )
+            return;
+
+         try {
+            reader.close();
          }
-
-         SQLDataSet.this.needReCreateReader.addListener(( property, oldValue, newValue ) -> {
-            if( newValue ) {
-               if( dataReader != null )
-                  try{ dataReader.close(); } catch( Exception ex ) {}
-               dataReader = null;
-               preparedSql = null;
-            }
-         });
-
-         //aggregatorList.add( new WeakReference<>(this) );
+         catch( DataSetException ex ) {
+            throw new RuntimeException(
+                    Tags.PRODUCT_LABEL
+                            + "Error closing aggregator reader",
+                    ex);
+         }
       }
 
       /** */
@@ -2236,6 +2268,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       /** */
       protected void execute( boolean onEvent ) throws DataSetException {
 
+         requireOpen();
+
          if( onEvent && ( listeners.isEmpty() || getProperty("ds.execute_count") == null ) )
             return;
 
@@ -2282,11 +2316,23 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       /** */
       @Override
       public void close() throws DataSetException {
-         if( dataReader != null ) {
-            dataReader.close();
-            dataReader = null;
-            preparedSql = null;
-         }
+         if( closed )
+            return;
+
+         closed = true;
+
+         if( refreshListener != null )
+            SQLDataSet.this.removeDataSetListener(refreshListener);
+
+         SQLDataSet.this.needReCreateReader.removeListener(
+                 readerInvalidationListener);
+
+         JDBCDataReader<Map<String,Object>> reader = dataReader;
+         dataReader = null;
+         preparedSql = null;
+
+         if( reader != null )
+            reader.close();
       }
    }
 }
