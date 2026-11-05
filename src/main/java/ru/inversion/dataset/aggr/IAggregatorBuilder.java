@@ -64,16 +64,18 @@ IAggregatorBuilder<T> {
      */
     public IAggregator<T> build( ) throws DataSetException;
 
-    /** 
-     * Создает аггрегатор в виде DataSet.
+    /**
+     * Unsupported compatibility surface.
      * <p>
-     * Объект подготавливающий аггрегирующие данные реализует интерфейс {@code IDataSet}
-     * 
-     * @return 
-     *          созданный DataSet.
-     * 
-     * @throws DataSetException
-     *          Если были ошибки при создании
+     * Aggregate rows are not instances of the source row type {@code T}, so
+     * the current {@code IDataSet<T>} signature does not define a type-safe
+     * result contract. Built-in JInvCommon builders therefore do not implement
+     * aggregate-as-DataSet behavior.
+     *
+     * @deprecated no supported aggregate DataSet contract exists.
      */
-    public IDataSet<T> buildDataSet( ) throws DataSetException;
+    @Deprecated
+    default IDataSet<T> buildDataSet( ) throws DataSetException {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
 }

@@ -2084,11 +2084,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          );
       }
 
-      /** */
-      @Override
-      public IDataSet<T> buildDataSet() throws DataSetException {
-         throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
-      }
    }
 
    DataSetSelectBuilder createAggregateSourceBuilder(
