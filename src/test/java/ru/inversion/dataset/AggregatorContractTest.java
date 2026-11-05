@@ -423,14 +423,18 @@ public class AggregatorContractTest {
         SQLExpression parameters = new SQLExpression();
         parameters.setParameter("jinv_marker_id", 77L);
 
-        assertEquals(
-                java.util.Collections.<Object>singletonList(77L),
+        java.util.List<Object> values =
                 SQLDataSet.aggregateJdbcValues(
                         prepared,
                         source,
                         parameters
-                )
+                );
+
+        assertEquals(
+                java.util.Collections.<Object>singletonList(77),
+                values
         );
+        assertEquals(Integer.class, values.get(0).getClass());
     }
 
     @Test
