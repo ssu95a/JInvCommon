@@ -46,11 +46,11 @@ final class SqlParameterizer {
         StringBuilder sql = new StringBuilder();
         List<Parameter> parameters = new ArrayList<>();
 
-        boolean[] legacyMarkers = legacyMarkers();
-        boolean[] legacyConcatMarkers = legacyConcatMarkers();
-
         boolean parameterize = true;
         boolean legacyProtected = false;
+
+        int legacyClose = -1;
+        int legacyConcatClose = -1;
 
         int depth = 0;
         int typeDepth = -1;
@@ -66,15 +66,50 @@ final class SqlParameterizer {
             else if (kind == PARAMETERIZE_ON)
                 parameterize = true;
 
-            if (legacyMarkers[i]) {
+            if (i == legacyClose) {
+                legacyClose = -1;
                 legacyProtected = !legacyProtected;
                 continue;
             }
 
-            if (legacyConcatMarkers[i]) {
+            if (i == legacyConcatClose) {
+                legacyConcatClose = -1;
                 sql.append("||");
                 legacyProtected = !legacyProtected;
                 continue;
+            }
+
+            if (legacyClose < 0 && tilde(token)) {
+                int close = oracle
+                        ? nextTilde(i + 1)
+                        : legacyOpening(i)
+                            ? nextLegacyClosingTilde(i + 1)
+                            : -1;
+
+                if (oracle && close < 0) {
+                    throw new IllegalArgumentException(
+                            "Unpaired Oracle legacy ~ marker at offset "
+                                    + token.start());
+                }
+
+                if (close >= 0) {
+                    legacyClose = close;
+                    legacyProtected = !legacyProtected;
+                    continue;
+                }
+            }
+
+            if (!oracle
+                    && legacyConcatClose < 0
+                    && symbol(token, "~||")) {
+                int close = nextSymbol(i + 1, "||~");
+
+                if (close >= 0) {
+                    legacyConcatClose = close;
+                    sql.append("||");
+                    legacyProtected = !legacyProtected;
+                    continue;
+                }
             }
 
             if (symbol(token, ")")) {
@@ -311,76 +346,35 @@ final class SqlParameterizer {
     }
 
     /**
-     * Legacy ~...~ protection.
-     * Oracle treats standalone ~ only as our legacy marker.
-     * PostgreSQL also has a real ~ operator, so marker recognition is contextual.
+     * Find the matching marker only when a candidate opening is encountered.
+     * This keeps real PostgreSQL ~ operators untouched unless a full legacy
+     * pair is confirmed.
      */
-    private boolean[] legacyMarkers() {
-        boolean[] markers = new boolean[tokens.size()];
-        int opening = -1;
-
-        if (oracle) {
-            for (int i = 0; i < tokens.size(); i++) {
-                if (!tilde(tokens.get(i)))
-                    continue;
-
-                markers[i] = true;
-                opening = opening < 0 ? i : -1;
-            }
-
-            if (opening >= 0) {
-                throw new IllegalArgumentException(
-                        "Unpaired Oracle legacy ~ marker at offset "
-                                + tokens.get(opening).start());
-            }
-
-            return markers;
+    private int nextTilde(int from) {
+        for (int i = from; i < tokens.size(); i++) {
+            if (tilde(tokens.get(i)))
+                return i;
         }
 
-        for (int i = 0; i < tokens.size(); i++) {
-            if (!tilde(tokens.get(i)))
-                continue;
-
-            if (opening >= 0 && legacyClosing(i)) {
-                markers[opening] = true;
-                markers[i] = true;
-                opening = -1;
-            }
-            else if (opening < 0 && legacyOpening(i)) {
-                opening = i;
-            }
-        }
-
-        return markers;
+        return -1;
     }
 
-    /**
-     * PostgreSQL lexer keeps ~|| and ||~ as whole operator tokens.
-     * For a confirmed pair we keep || and strip only the legacy ~ marker.
-     */
-    private boolean[] legacyConcatMarkers() {
-        boolean[] markers = new boolean[tokens.size()];
-
-        if (oracle)
-            return markers;
-
-        int opening = -1;
-
-        for (int i = 0; i < tokens.size(); i++) {
-            SqlScanner.Token token = tokens.get(i);
-
-            if (symbol(token, "~||")) {
-                if (opening < 0)
-                    opening = i;
-            }
-            else if (symbol(token, "||~") && opening >= 0) {
-                markers[opening] = true;
-                markers[i] = true;
-                opening = -1;
-            }
+    private int nextLegacyClosingTilde(int from) {
+        for (int i = from; i < tokens.size(); i++) {
+            if (tilde(tokens.get(i)) && legacyClosing(i))
+                return i;
         }
 
-        return markers;
+        return -1;
+    }
+
+    private int nextSymbol(int from, String expected) {
+        for (int i = from; i < tokens.size(); i++) {
+            if (symbol(tokens.get(i), expected))
+                return i;
+        }
+
+        return -1;
     }
 
     private boolean tilde(SqlScanner.Token token) {

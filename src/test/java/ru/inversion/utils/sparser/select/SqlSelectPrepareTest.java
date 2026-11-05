@@ -262,6 +262,39 @@ public class SqlSelectPrepareTest {
         );
     }
 
+
+    @Test public void postgresUnpairedLegacyConcatOperatorIsPreserved() {
+        PreparedSql p = pg(
+                "select a ~|| b from t where id=10"
+        ).prepare();
+
+        assertTrue(p.getSql(), p.getSql().contains("a ~|| b"));
+        assertTrue(p.getSql(), p.getSql().contains("where id=?"));
+        assertParameterKinds(p, Parameter.Kind.LITERAL);
+    }
+
+    @Test public void postgresLegacyConcatMarkersProtectInnerLiterals() {
+        PreparedSql p = pg(
+                "select ~||'A'||~ from t where id=10"
+        ).prepare();
+
+        assertEquals(
+                "select ||'A'|| from t where id=?",
+                p.getSql()
+        );
+        assertParameterKinds(p, Parameter.Kind.LITERAL);
+        assertEquals(
+                new BigInteger("10"),
+                p.getParameters().get(0).getValue()
+        );
+    }
+
+    @Test public void oracleUnpairedLegacyMarkerIsRejected() {
+        assertRejected(() -> ora(
+                "select ~replace(code, 'a', 'b') from t"
+        ).prepare());
+    }
+
     @Test public void postgresLegacyWhereAfterFromAliasRemovesPairedMarkers() {
         String source =
                 "SELECT cmnamenu CMNBMNA, cMnaName CMNBNAME FROM xmna "
