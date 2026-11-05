@@ -922,17 +922,15 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         public IAggregator<T> build() throws DataSetException {
 
             if( aggrList.isEmpty() )
-                throw new IllegalStateException( Tags.PRODUCT_LABEL + "Aggregator list is empty");
+                throw new IllegalStateException(
+                        Tags.PRODUCT_LABEL + "Aggregator list is empty");
 
-            if( aggrList.size() == 1 && predicateList.isEmpty() ) {
-
-                Pair<String, AggrFuncEnum> aggrPair = aggrList.get(0);
-
-                if( aggrPair.second == AggrFuncEnum.COUNT )
-                    return new NumberMarkedRowAggregator<>( refreshOnExecute, aggrPair.first );
-            }
-
-            return new MarkAggregator( aggrList, predicateList, refreshOnExecute, aggrTable );
+            return new MarkAggregator(
+                    new ArrayList<>(aggrList),
+                    new ArrayList<>(predicateList),
+                    refreshOnExecute,
+                    aggrTable
+            );
         }
     }
 
@@ -958,16 +956,18 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             String aggrTable
         )
         {
-            this.aggrList     = aggrList;
-            this.predicatList = predicatList;
-            this.aggrTable    = aggrTable;
+            this.aggrList = Collections.unmodifiableList(
+                    new ArrayList<>(aggrList));
+            this.predicatList = Collections.unmodifiableList(
+                    new ArrayList<>(predicatList));
+            this.aggrTable = aggrTable;
 
             if( refreshOnExecute )
             {
                 XXIDataSet.this.addDataSetListener( (IDataSetListener) (DataSetEvent e) -> {
                     if( e.getEventType() == EXECUTE && e.isAfter() ) {
                         try {
-                            execute( );
+                            execute(true);
                         } catch( DataSetException ex ) {
                             throw new RuntimeException(ex);
                         }
@@ -978,9 +978,12 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             XXIDataSet.this.addMarkDataSetListener((IDataSetMarkListener)event -> {
 
                 try {
-                    execute( );
+                    execute(true);
                 } catch (DataSetException ex) {
-                    throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on execute aggregator", ex);
+                    throw new RuntimeException(
+                            Tags.PRODUCT_LABEL
+                                    + "Error on execute aggregator",
+                            ex);
                 }
 
             });
@@ -1075,21 +1078,33 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         /** */
         @Override
         public void execute( ) throws DataSetException {
+            execute(false);
+        }
 
-            if( listeners.isEmpty() || getMarkerID( ) == null )
+        private void execute(boolean onEvent) throws DataSetException {
+
+            if( getMarkerID() == null )
+                return;
+
+            if( onEvent && listeners.isEmpty() )
                 return;
 
             values = null;
 
-            prepareReader( );
+            prepareReader();
 
             dataReader.executeQuery(
-                    PreparedSqlValues.jdbc(preparedSql, mainSqlParameters)
+                    PreparedSqlValues.jdbc(
+                            preparedSql,
+                            mainSqlParameters)
             );
 
-            values = (Map<String,Object>)dataReader.getNextPage(-1).get(0);
+            values = (Map<String,Object>)dataReader
+                    .getNextPage(1)
+                    .get(0);
 
-            listeners.fire( (IAggregatorListener l)->l.change(this) );
+            listeners.fire(
+                    (IAggregatorListener l)->l.change(this));
         }
 
         /** */
@@ -1106,99 +1121,13 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         /** */
         @Override
         public void close() throws DataSetException {
-            dataReader.close();
-        }
-    }
-
-    /**
-     *
-     */
-    private class NumberMarkedRowAggregator<T> implements IAggregator<T> {
-
-        final private Map<String,Object> values = new HashMap<>();
-        final private String             key;
-
-        final private IListenerManConsumer<IAggregatorListener> listeners = ListenerManFactory.createListenerManConsumer();
-
-        /** */
-        public NumberMarkedRowAggregator( boolean refreshOnExecute, String key )
-        {
-            this.key = "A$" + key;
-
-            if( refreshOnExecute )
-            {
-                XXIDataSet.this.addDataSetListener( (IDataSetListener) (DataSetEvent e) -> {
-                    if( e.getEventType() == EXECUTE && e.isAfter() ) {
-                        try {
-                            execute( );
-                        } catch( DataSetException ex ) {
-                            throw new RuntimeException(ex);
-                        }
-                    }
-                });
+            if( dataReader != null ) {
+                dataReader.close();
+                dataReader = null;
+                preparedSql = null;
             }
-
-            XXIDataSet.this.addMarkDataSetListener( (IDataSetMarkListener)event -> {
-
-                if( U.in( event.getMarkAction(), MARK_ALL, MARK_ROW, UNMARK_ROW ) )
-                {
-                    try {
-                        execute( );
-                    } catch (DataSetException ex) {
-                        throw new RuntimeException(ex);
-                    }
-                }
-                else if( event.getMarkAction() == UNMARK_ALL ) {
-                    clearValues( );
-                }//end if
-            });
-        }
-
-        /** */
-        @Override
-        public Map<String,Object> getValues() {
-            return values;
-        }
-
-        /** */
-        @Override
-        public IDataSet<T> getDataSet() {
-            return (IDataSet<T>) XXIDataSet.this;
-        }
-
-        /** */
-        private void clearValues( ) {
-            values.put( key, null );
-            listeners.fire( (IAggregatorListener l)->l.change(this) );
-        }
-
-        /** */
-        @Override
-        public void execute() throws DataSetException {
-
-            if( listeners.isEmpty() || getMarkerID( ) == null )
-                return;
-
-            values.put( key, computeNumberMarkedRows( ) );
-
-            listeners.fire( (IAggregatorListener l)->l.change(this) );
-        }
-
-        /** */
-        @Override
-        public void addListener(IAggregatorListener listener) {
-            listeners.addListener(listener);
-        }
-
-        /** */
-        @Override
-        public void removeListener(IAggregatorListener listener) {
-            listeners.removeListener(listener);
-        }
-
-        /** */
-        @Override
-        public void close( ) {
         }
     }
+
+
 }

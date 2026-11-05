@@ -26,10 +26,13 @@ public class AggrRSMapper implements IRowMapper<Map<String,Object>> {
         
         for( int i = metaData.getColumnCount(); i > 0; i-- ) {
              
-            String column = metaData.getColumnName(i);
-            Object value  = rs.getObject(i);
-             
-             retMap.put( column, value );
+            String column = metaData.getColumnLabel(i);
+            if( column == null || column.isEmpty() )
+                column = metaData.getColumnName(i);
+
+            Object value = rs.getObject(i);
+
+            retMap.put(column, value);
         }
         
         return retMap;

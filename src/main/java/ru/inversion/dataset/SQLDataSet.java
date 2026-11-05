@@ -2062,14 +2062,25 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       /** */
       @Override
       public IAggregatorBuilder<T> addWherePredicate( String wherePredicate ) {
-         predicateList.add(wherePredicate);
+         if( S.isNotNullOrEmpty(wherePredicate) )
+            predicateList.add(wherePredicate);
+
          return this;
       }
 
       /** */
       @Override
       public IAggregator<T> build( ) throws DataSetException {
-         return new Aggregator( aggrList, predicateList, refreshOnExecute, ignoreFilter );
+         if( aggrList.isEmpty() )
+            throw new IllegalStateException(
+                    Tags.PRODUCT_LABEL + "Aggregator list is empty");
+
+         return new Aggregator(
+                 new ArrayList<>(aggrList),
+                 new ArrayList<>(predicateList),
+                 refreshOnExecute,
+                 ignoreFilter
+         );
       }
 
       /** */
@@ -2077,6 +2088,22 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       public IDataSet<T> buildDataSet() throws DataSetException {
          throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
       }
+   }
+
+   private static String aggregateResultKey(String sqlAlias) {
+      if( sqlAlias == null )
+         return null;
+
+      String key = sqlAlias.trim();
+
+      if( key.length() >= 2
+              && key.charAt(0) == '"'
+              && key.charAt(key.length() - 1) == '"' ) {
+         return key.substring(1, key.length() - 1)
+                 .replace("""", """);
+      }
+
+      return key;
    }
 
    /** */
@@ -2102,9 +2129,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
               boolean ignoreFilter
       )
       {
-         this.aggrList      = aggrList;
-         this.predicateList = predicateList;
-         this.ignoreFilter  = ignoreFilter;
+         this.aggrList = Collections.unmodifiableList(
+                 new ArrayList<>(aggrList));
+         this.predicateList = Collections.unmodifiableList(
+                 new ArrayList<>(predicateList));
+         this.ignoreFilter = ignoreFilter;
 
          if( refreshOnExecute )
          {
@@ -2153,8 +2182,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             if( item.getExpression() != null )
                throw new UnsupportedOperationException(
                        "ISQLExpression predicates in aggregator are not yet supported");
-            base.addPredicate( item.getFilterStr() );
+            base.addPredicate(item.getFilterStr());
          }
+
+         for( String predicate : predicateList )
+            base.addPredicate(predicate);
 
          StringBuilder sql = new StringBuilder("SELECT ");
          int index = 0;
@@ -2222,7 +2254,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             aggrList.stream()
                     .filter( (a)->a.getSecond() == AggrFuncEnum.COUNT )
                     .findFirst()
-                    .map ( (a)-> totalRowCount = U.nvl( TypeConverter.convert( values.get( a.third ), Integer.class ), -1 ) );
+                    .map( (a)-> totalRowCount = U.nvl(
+                            TypeConverter.convert(
+                                    values.get(
+                                            aggregateResultKey(a.third)),
+                                    Integer.class
+                            ),
+                            -1
+                    ) );
          }
 
          listeners.fire( (IAggregatorListener<T> l)->l.change(this) );
@@ -2243,7 +2282,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       /** */
       @Override
       public void close() throws DataSetException {
-         dataReader.close();
+         if( dataReader != null ) {
+            dataReader.close();
+            dataReader = null;
+            preparedSql = null;
+         }
       }
    }
 }
