@@ -145,7 +145,7 @@ public final class NextSelectBuilder {
         Objects.requireNonNull(primary, "primary");
 
         PreparedSql plan = prepare();
-        List<ISQLExpression> expressions = expressions();
+        List<ISQLExpression> fallbacks = fallbacks();
 
         List<Object> values = new ArrayList<>(plan.getParameters().size());
         int positionalIndex = 0;
@@ -159,35 +159,28 @@ public final class NextSelectBuilder {
                     break;
 
                 case NAMED:
-                    if (primary.hasParameter(parameter.getName()))
-                        value = primary.getParameter(parameter.getName());
-                    else
-                        value = findUniqueNamed(
-                                expressions, parameter.getName())
-                                .getParameter(parameter.getName());
+                    value = resolveNamed(
+                            primary,
+                            fallbacks,
+                            parameter.getName()
+                    );
                     break;
 
-                case NUMBERED: {
-                    int index = parameter.getNumber() - 1;
-                    if (primary.hasParameter(index))
-                        value = primary.getParameter(index);
-                    else
-                        value = findUniqueIndexed(expressions, index)
-                                .getParameter(index);
+                case NUMBERED:
+                    value = resolveIndexed(
+                            primary,
+                            fallbacks,
+                            parameter.getNumber() - 1
+                    );
                     break;
-                }
 
-                case POSITIONAL: {
-                    int index = positionalIndex++;
-
-                    if (primary.hasParameter(index))
-                        value = primary.getParameter(index);
-                    else
-                        value = findUniqueIndexed(expressions, index)
-                                .getParameter(index);
-
+                case POSITIONAL:
+                    value = resolveIndexed(
+                            primary,
+                            fallbacks,
+                            positionalIndex++
+                    );
                     break;
-                }
 
                 default:
                     throw new IllegalStateException(
@@ -269,10 +262,15 @@ public final class NextSelectBuilder {
         }
     }
 
-    private List<ISQLExpression> expressions() {
+    private List<ISQLExpression> fallbacks() {
         List<ISQLExpression> result = new ArrayList<>();
-        for (Part part : predicates) addIfAbsent(result, part.expression);
-        if (sorting != null) addIfAbsent(result, sorting.expression);
+
+        for (Part part : predicates)
+            addIfAbsent(result, part.expression);
+
+        if (sorting != null)
+            addIfAbsent(result, sorting.expression);
+
         return result;
     }
 
@@ -282,28 +280,60 @@ public final class NextSelectBuilder {
         values.add(candidate);
     }
 
-    private static ISQLExpression findUniqueNamed(List<ISQLExpression> expressions, String name) {
-        ISQLExpression owner = null;
-        for (ISQLExpression expr : expressions) {
-            if (expr.hasParameter(name)) {
-                if (owner != null) throw conflict(":" + name);
-                owner = expr;
-            }
+    private static Object resolveNamed(
+            IParameters primary,
+            List<ISQLExpression> fallbacks,
+            String name
+    ) {
+        if (primary.hasParameter(name))
+            return primary.getParameter(name);
+
+        boolean found = false;
+        Object value = null;
+
+        for (ISQLExpression fallback : fallbacks) {
+            if (!fallback.hasParameter(name))
+                continue;
+
+            if (found)
+                throw conflict(":" + name);
+
+            found = true;
+            value = fallback.getParameter(name);
         }
-        if (owner == null) throw missing(":" + name);
-        return owner;
+
+        if (!found)
+            throw missing(":" + name);
+
+        return value;
     }
 
-    private static ISQLExpression findUniqueIndexed(List<ISQLExpression> expressions, int index) {
-        ISQLExpression owner = null;
-        for (ISQLExpression expr : expressions) {
-            if (expr.hasParameter(index)) {
-                if (owner != null) throw conflict("$" + (index + 1));
-                owner = expr;
-            }
+    private static Object resolveIndexed(
+            IParameters primary,
+            List<ISQLExpression> fallbacks,
+            int index
+    ) {
+        if (primary.hasParameter(index))
+            return primary.getParameter(index);
+
+        boolean found = false;
+        Object value = null;
+
+        for (ISQLExpression fallback : fallbacks) {
+            if (!fallback.hasParameter(index))
+                continue;
+
+            if (found)
+                throw conflict("index " + index);
+
+            found = true;
+            value = fallback.getParameter(index);
         }
-        if (owner == null) throw missing("$ / ?" + (index + 1));
-        return owner;
+
+        if (!found)
+            throw missing("index " + index);
+
+        return value;
     }
 
     private static IllegalStateException conflict(String name) {

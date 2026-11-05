@@ -85,7 +85,8 @@ public class NextSelectBuilderTest {
             fail("Missing positional conflict");
         }
         catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("Conflicting SQL parameter"));
+            assertTrue(e.getMessage().contains(
+                    "Conflicting SQL parameter index 0"));
         }
     }
 
@@ -148,6 +149,39 @@ public class NextSelectBuilderTest {
         PreparedSql p=b.prepare();
         assertEquals(Parameter.Kind.NUMBERED,p.getParameters().get(0).getKind());
         assertEquals(Collections.<Object>singletonList(7), b.values(new Params()));
+    }
+
+
+    @Test public void missingIndexedParameterReportsGlobalIndex() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from t where a = ?",
+                SqlDialectFactory.POSTGRES
+        );
+
+        try {
+            b.values(new Params());
+            fail("Expected missing indexed parameter");
+        }
+        catch (IllegalStateException e) {
+            assertTrue(e.getMessage().contains(
+                    "Missing SQL parameter index 0"));
+        }
+    }
+
+    @Test public void missingNamedParameterReportsName() {
+        NextSelectBuilder b = new NextSelectBuilder(
+                "select id from t where a = :id",
+                SqlDialectFactory.POSTGRES
+        );
+
+        try {
+            b.values(new Params());
+            fail("Expected missing named parameter");
+        }
+        catch (IllegalStateException e) {
+            assertTrue(e.getMessage().contains(
+                    "Missing SQL parameter :id"));
+        }
     }
 
     @Test public void formerInternalPrefixIsAnOrdinaryNamedParameter() {
