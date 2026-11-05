@@ -501,9 +501,9 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                         + actualPrefix + key[0] + ")";
 
             default:
-                throw new IllegalStateException(
-                        "Unsupported mark mode "
-                                + markDescriptor.getMarkMode());
+                // Compatibility: marked aggregator historically tolerated
+                // a DataSet without mark support by producing no predicate.
+                return "";
         }
     }
 
