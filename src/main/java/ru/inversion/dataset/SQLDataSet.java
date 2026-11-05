@@ -111,7 +111,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected ISQLDataReader<P> dataReader;
 
    /** Актуальный resolver значений, связанный с текущим PreparedSql. */
-   private DataSetSelectBuilder preparedReaderBuilder;
+   private DataSetSelectBuilder preparedSelectBuilder;
 
    /** Живое представление параметров DataSet. Явный null имеет приоритет. */
    protected final IParameters mainSqlParameters = new IParameters() {
@@ -877,7 +877,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected PreparedSql prepareDataQuery() throws DataSetException {
       DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
       PreparedSql sql = builder.prepare();
-      preparedReaderBuilder = builder;
+      preparedSelectBuilder = builder;
       return sql;
    }
 
@@ -906,7 +906,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                   dataReader.close();
                   dataReader = null;
                }
-               preparedReaderBuilder = null;
+               preparedSelectBuilder = null;
                PreparedSql sql = prepareDataQuery();
 
                dataReader = new JDBCDataReader<>(
@@ -916,11 +916,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                needReCreateReader.setValue(false);
             }
 
-            if( preparedReaderBuilder == null )
+            if( preparedSelectBuilder == null )
                dataReader.executeQuery(mainSqlParameters);
             else
                dataReader.executeQuery(
-                       preparedReaderBuilder.jdbcValues(mainSqlParameters));
+                       preparedSelectBuilder.jdbcValues(mainSqlParameters));
 
             clear( );
             swappingData( fetchAllRows );
@@ -936,7 +936,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             // Не оставляем открытый курсор/PreparedStatement после неудачной загрузки.
             ISQLDataReader<P> failedReader = dataReader;
             dataReader = null;
-            preparedReaderBuilder = null;
+            preparedSelectBuilder = null;
             if (failedReader != null) {
                try {
                   failedReader.close();
