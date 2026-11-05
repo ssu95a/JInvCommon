@@ -313,9 +313,17 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
     }
 
     private DataSetSelectBuilder createMarkSourceBuilder() {
-        DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
-        builder.mark( null );
-        builder.orderBy( (String)null );
+        DataSetSelectBuilder builder = createDataSetSelectBuilder(false);
+        builder.mark(null);
+
+        /*
+         * Sorting is irrelevant for an unbounded bulk operation and may be
+         * expensive. With runtime rowLimit it defines which rows belong to
+         * the DataSet and must therefore be preserved.
+         */
+        if( getRowLimit() == null )
+            builder.orderBy((String)null);
+
         return builder;
     }
 
@@ -456,81 +464,58 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 		this.enableAutoFilter = enableAutoFilter;
 	}
 
-    /** */
-    private String sql4MarkColumn;
+    /**
+     * EXISTS predicate for the current mark mode.
+     * prefix qualifies DataSet key columns when the predicate is used
+     * against an aggregate table.
+     */
+    private String markExistsPredicate(String prefix) {
+        String actualPrefix = prefix == null ? "" : prefix;
+        String[] key = markDescriptor.getMarkKeyColumns();
 
-    /** {@inheritDoc } */
-    @Override
-    public boolean hasParameter( String name )
-    {
-        return "jinv_marker_id".equals( name ) || super.hasParameter(name);
+        switch( markDescriptor.getMarkMode() ) {
+            case MRK:
+                return "exists ( select 1 from v_jf_mrk a$ "
+                        + "where a$.IMRKMARKERID = :jinv_marker_id "
+                        + "and a$.RMRKROWID = "
+                        + actualPrefix + key[0] + ")";
+
+            case MRK_ID:
+                return "exists ( select 1 from v_jf_mrk_id a$ "
+                        + "where a$.idmarker = :jinv_marker_id "
+                        + "and a$.idrow = "
+                        + actualPrefix + key[0] + ")";
+
+            case MRK_ID2:
+                return "exists ( select 1 from v_jf_mrk_id2 a$ "
+                        + "where a$.idmarker = :jinv_marker_id "
+                        + "and a$.IDROW = "
+                        + actualPrefix + key[0]
+                        + " and a$.IDAROW = "
+                        + actualPrefix + key[1] + ")";
+
+            case MRK_U:
+                return "exists ( select 1 from v_jf_mrk_u a$ "
+                        + "where a$.idmarker = :jinv_marker_id "
+                        + "and a$.UROW = "
+                        + actualPrefix + key[0] + ")";
+
+            default:
+                throw new IllegalStateException(
+                        "Unsupported mark mode "
+                                + markDescriptor.getMarkMode());
+        }
     }
 
     /** {@inheritDoc } */
     @Override
-    public Object getParameterValue( String name )
-    {
-        return "jinv_marker_id".equals( name ) ? getMarkerID( ) : super.getParameterValue(name);
-    }
-
-    /** {@inheritDoc } */
-    @Override
-    protected String getMarkSQLPart( )
-    {
-        if( !isSupportMark() || getMarkerID( ) == null )
+    protected String getMarkSQLPart( ) {
+        if( !isSupportMark() || getMarkerID() == null )
             return null;
 
-        if( sql4MarkColumn == null)
-        {
-            if ( markDescriptor.getMarkMode() == MRK )
-            {
-                StringBuilder sb = new StringBuilder();
-                sb.append( "nvl( (select 1 from dual where exists ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id" )
-                  .append( " and a$.RMRKROWID = " )
-                  .append( markDescriptor.getMarkKeyColumns()[0] )
-                  .append( ")),0) ");
-
-                sql4MarkColumn = sb.toString();
-            }
-            else
-            {
-                String pkColumns[] = markDescriptor.getMarkKeyColumns( );
-
-                if( pkColumns.length > 0 ) {
-
-                    StringBuilder sb = new StringBuilder();
-
-                    if ( pkColumns.length == 1 ) {
-
-                        if( markDescriptor.getMarkMode() == MRK_ID )
-                        {
-                            sb.append("nvl((select 1 from dual where exists ( select 1 from v_jf_mrk_id a$ where a$.idmarker = :jinv_marker_id")
-                              .append(" and a$.idrow = ")
-                              .append(pkColumns[0])
-                              .append(")),0) ");
-                        }
-                        else
-                            if ( markDescriptor.getMarkMode() == MRK_U ) {
-                                sb.append("nvl((select 1 from dual where exists ( select 1 from v_jf_mrk_u a$ where a$.idmarker = :jinv_marker_id")
-                                  .append(" and a$.UROW = ")
-                                  .append( pkColumns[0] )
-                                  .append(")),0) ");
-                        }
-                    }
-                    else
-                    {
-                        sb.append("nvl((select 1 from dual where exists ( select 1 from v_jf_mrk_id2 a$ where idmarker = :jinv_marker_id")
-                          .append(" and a$.IDROW  = ")
-                          .append(pkColumns[0])
-                          .append(" and a$.IDAROW = ")
-                          .append(pkColumns[1])
-                          .append(")),0) ");
-                    }
-                    sql4MarkColumn = sb.toString();
-                }
-            }//end else
-        }
-        return sql4MarkColumn;
+        return "nvl((select 1 from dual where "
+                + markExistsPredicate("")
+                + "),0) ";
     }
 
     /** {@inheritDoc} */
@@ -663,7 +648,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             }
         }
         catch( Throwable th ) {
-            throw new DataSetException( Tags.PRODUCT_LABEL + "unMarkAllRow", th );
+            throw new DataSetException( Tags.PRODUCT_LABEL + "markRow", th );
         }
 	}
 
@@ -874,7 +859,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 	public Iterator<T> getMarkedRowIterator( Predicate<T> predicate ) {
 
         if( !isSupportMark() )
-            Collections.<T>emptyIterator();
+            return Collections.<T>emptyIterator();
 
         if( predicate == null )
             return rows( ).stream( ).filter( mrkprdkt ).iterator();
@@ -892,27 +877,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         DataSetSelectBuilder builder = createDataSetSelectBuilder( ignoreFilter );
         builder.mark("1");
 
-        StringBuilder predicate = new StringBuilder("EXISTS\n");
-        String[] markKeyColumns = markDescriptor.getMarkKeyColumns();
-
-        if( markDescriptor.getMarkMode() == MRK )
-            predicate.append(" ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id and a$.RMRKROWID = ")
-                     .append(markKeyColumns[0]).append(")");
-        else if( markKeyColumns.length == 1 ) {
-            if( markDescriptor.getMarkMode() == MRK_ID )
-                predicate.append(" ( select 1 from v_jf_mrk_id a$ where a$.idmarker = :jinv_marker_id and a$.idrow = ")
-                         .append(markKeyColumns[0]).append(")");
-            else if( markDescriptor.getMarkMode() == MRK_U )
-                predicate.append(" ( select 1 from v_jf_mrk_u a$ where a$.idmarker = :jinv_marker_id and a$.UROW = ")
-                         .append(markKeyColumns[0]).append(")");
-        }
-        else if( markKeyColumns.length > 1 )
-            predicate.append(" ( select 1 from v_jf_mrk_id2 a$ where idmarker = :jinv_marker_id")
-                     .append(" and a$.IDROW = ").append(markKeyColumns[0])
-                     .append(" and a$.IDAROW = ").append(markKeyColumns[1])
-                     .append(")");
-
-        builder.addPredicate( predicate.toString() );
+        builder.addPredicate(markExistsPredicate(""));
 
         PreparedSql sql = builder.prepare();
         JDBCDataReader<T> reader = new JDBCDataReader<>(
@@ -1031,28 +996,9 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             if( dataReader != null )
                 return;
 
-            String[] key = markDescriptor.getMarkKeyColumns();
             String qualifier = S.isNullOrEmpty(aggrTable) ? null : aggrTable;
             String prefix = qualifier == null ? "" : qualifier + ".";
-
-            StringBuilder markPredicate = new StringBuilder();
-
-            if( markDescriptor.getMarkMode() == MRK )
-                markPredicate.append("exists ( select 1 from v_jf_mrk a$ where a$.IMRKMARKERID = :jinv_marker_id and a$.RMRKROWID = ")
-                             .append(prefix).append(key[0]).append(")");
-            else if( key.length == 1 ) {
-                if( markDescriptor.getMarkMode() == MRK_ID )
-                    markPredicate.append("exists ( select 1 from v_jf_mrk_id a$ where a$.idmarker = :jinv_marker_id and a$.idrow = ")
-                                 .append(prefix).append(key[0]).append(")");
-                else if( markDescriptor.getMarkMode() == MRK_U )
-                    markPredicate.append("exists ( select 1 from v_jf_mrk_u a$ where a$.idmarker = :jinv_marker_id and a$.UROW = ")
-                                 .append(prefix).append(key[0]).append(")");
-            }
-            else if( key.length > 1 )
-                markPredicate.append("exists ( select 1 from v_jf_mrk_id2 a$ where idmarker = :jinv_marker_id")
-                             .append(" and a$.IDROW = ").append(prefix).append(key[0])
-                             .append(" and a$.IDAROW = ").append(prefix).append(key[1])
-                             .append(")");
+            String markPredicate = markExistsPredicate(prefix);
 
             StringBuilder sql = new StringBuilder("SELECT ");
             int index = 0;
@@ -1077,7 +1023,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                 for( String predicate : predicatList )
                     base.addPredicate(predicate);
 
-                base.addPredicate(markPredicate.toString());
+                base.addPredicate(markPredicate);
 
                 sql.append(" FROM (")
                    .append(base.buildSql())
