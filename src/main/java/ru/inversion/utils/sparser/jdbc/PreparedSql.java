@@ -5,13 +5,13 @@ import ru.inversion.utils.Checks;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
 /**
- * SQL для JDBC и источники значений его параметров.
+ * Immutable JDBC SQL plan.
  * <p>
- * Элемент parameters с индексом i соответствует JDBC-позиции i + 1.
- * Значения runtime-параметров разрешаются непосредственно перед execute.
+ * Parameter at index {@code i} describes JDBC placeholder {@code i + 1}.
+ * The list is a physical placeholder order only; it carries no fragment
+ * ownership. Runtime values are resolved immediately before execution.
  */
 public final class PreparedSql {
 
@@ -37,7 +37,9 @@ public final class PreparedSql {
         return sql;
     }
 
-    /** */
+    /**
+     * Immutable snapshot of parameters in physical JDBC placeholder order.
+     */
     public List<Parameter> getParameters() {
         return parameters;
     }

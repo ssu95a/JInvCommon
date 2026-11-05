@@ -7,10 +7,18 @@ import java.util.Objects;
 /**
  * Источник значения для одного JDBC-плейсхолдера в подготовленном SQL.
  * Позиция плейсхолдера определяется местом в списке параметров.
+ *
+ * Current execution uses one global parameter namespace. Fragment/source
+ * ownership is no longer part of parameter resolution.
  */
 public final class Parameter {
 
-    /** Parameter belongs to the original/global SQL rather than a local fragment. */
+    /**
+     * Compatibility value from the former fragment-ownership model.
+     *
+     * @deprecated current execution has one global parameter namespace.
+     */
+    @Deprecated
     public static final int GLOBAL_SOURCE = -1;
 
     public enum Kind {
@@ -52,6 +60,10 @@ public final class Parameter {
         return positional(GLOBAL_SOURCE);
     }
 
+    /**
+     * @deprecated source ownership is ignored by the current execution model.
+     */
+    @Deprecated
     public static Parameter positional(int sourceId) {
         return new Parameter(Kind.POSITIONAL, null, 0, null, sourceId);
     }
@@ -61,6 +73,10 @@ public final class Parameter {
         return named(name, GLOBAL_SOURCE);
     }
 
+    /**
+     * @deprecated source ownership is ignored by the current execution model.
+     */
+    @Deprecated
     public static Parameter named(String name, int sourceId) {
         Objects.requireNonNull(name, "name");
         if (name.isEmpty() || name.charAt(0) == ':') {
@@ -75,6 +91,10 @@ public final class Parameter {
         return numbered(number, GLOBAL_SOURCE);
     }
 
+    /**
+     * @deprecated source ownership is ignored by the current execution model.
+     */
+    @Deprecated
     public static Parameter numbered(int number, int sourceId) {
         if (number < 1) {
             throw new IllegalArgumentException("Parameter number must be positive");
@@ -91,6 +111,10 @@ public final class Parameter {
         return literal(value, GLOBAL_SOURCE);
     }
 
+    /**
+     * @deprecated source ownership is ignored by the current execution model.
+     */
+    @Deprecated
     public static Parameter literal(Object value, int sourceId) {
         Objects.requireNonNull(value, "value");
         Class<?> type = value.getClass();
@@ -123,9 +147,11 @@ public final class Parameter {
     }
 
     /**
-     * Opaque origin assigned by the SQL assembler.
-     * GLOBAL_SOURCE means the original/global SQL.
+     * Compatibility origin from the former fragment-ownership model.
+     *
+     * @deprecated current parameter resolution does not inspect sourceId.
      */
+    @Deprecated
     public int getSourceId() {
         return sourceId;
     }

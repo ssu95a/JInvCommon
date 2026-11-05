@@ -36,17 +36,6 @@ public class SqlSelectPrepareTest {
         }
     }
 
-    @Test public void insertedFragmentsUseGlobalParameterSpace() {
-        SqlSelect select = pg("select id from t where root = ?");
-        select.setPredicates(Arrays.asList("a = ?", "b = :name"));
-        select.setOrderBy("id + ?");
-
-        PreparedSql prepared = select.prepare();
-
-        for (Parameter parameter : prepared.getParameters())
-            assertEquals(Parameter.GLOBAL_SOURCE, parameter.getSourceId());
-    }
-
     @Test public void mixedParameterSourcesAndRepeatedNames() {
         PreparedSql p = pg("select * from t where a=? and b=:userId and c=$2 and d='OPEN' and e=:userId and f=15 and g=?").prepare();
         assertEquals("select * from t where a=? and b=? and c=? and d=? and e=? and f=? and g=?", p.getSql());
