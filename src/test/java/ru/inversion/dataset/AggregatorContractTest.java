@@ -391,4 +391,90 @@ public class AggregatorContractTest {
         );
     }
 
+
+    @Test
+    public void markedAggregateUsesCommonPreparedComposition() {
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                new ru.inversion.dataset.impl.DataSetSelectBuilder(
+                        "select id, amount from t",
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                )
+                        .addPredicate(
+                                "exists (select NULL from marks "
+                                        + "where marker_id = :jinv_marker_id)"
+                        );
+
+        java.util.List<ru.inversion.utils.Triplet<String, AggrFuncEnum, String>>
+                aggregates = java.util.Collections.singletonList(
+                        ru.inversion.utils.Triplet.makeTriplet(
+                                "amount",
+                                AggrFuncEnum.SUM,
+                                "TOTAL"
+                        )
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                SQLDataSet.prepareAggregateSql(
+                        aggregates,
+                        source,
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        SQLExpression parameters = new SQLExpression();
+        parameters.setParameter("jinv_marker_id", 77L);
+
+        assertEquals(
+                java.util.Collections.<Object>singletonList(77L),
+                SQLDataSet.aggregateJdbcValues(
+                        prepared,
+                        source,
+                        parameters
+                )
+        );
+    }
+
+    @Test
+    public void aggregateTableKeepsDirectTableSqlShape() {
+        java.util.List<ru.inversion.utils.Triplet<String, AggrFuncEnum, String>>
+                aggregates = java.util.Collections.singletonList(
+                        ru.inversion.utils.Triplet.makeTriplet(
+                                "AGGR_T.amount",
+                                AggrFuncEnum.SUM,
+                                "TOTAL"
+                        )
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                SQLDataSet.prepareAggregateTableSql(
+                        aggregates,
+                        "AGGR_T",
+                        java.util.Arrays.asList(
+                                "AGGR_T.kind = :kind",
+                                "exists (select NULL from marks "
+                                        + "where marks.id = AGGR_T.id "
+                                        + "and marks.marker_id = :marker)"
+                        ),
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(
+                        "SUM (AGGR_T.amount) TOTAL FROM AGGR_T")
+        );
+        assertFalse(
+                prepared.getSql(),
+                prepared.getSql().contains("FROM (")
+        );
+        assertEquals(2, prepared.getParameters().size());
+        assertEquals(
+                "kind",
+                prepared.getParameters().get(0).getName()
+        );
+        assertEquals(
+                "marker",
+                prepared.getParameters().get(1).getName()
+        );
+    }
+
 }

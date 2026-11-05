@@ -2112,9 +2112,60 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
            DataSetSelectBuilder source,
            SqlDialect dialect
    ) {
-      Objects.requireNonNull(aggregates, "aggregates");
       Objects.requireNonNull(source, "source");
-      Objects.requireNonNull(dialect, "dialect");
+
+      String sql = aggregateSelectSql(aggregates)
+              + " FROM ("
+              + source.buildSql()
+              + ") arslt";
+
+      PreparedSql prepared =
+              new SqlSelect(sql, dialect).prepare();
+
+      requireAggregateSourceSuffix(
+              prepared,
+              source.prepare()
+      );
+
+      return prepared;
+   }
+
+   static PreparedSql prepareAggregateTableSql(
+           List<Triplet<String, AggrFuncEnum, String>> aggregates,
+           String table,
+           List<String> predicates,
+           SqlDialect dialect
+   ) {
+      Objects.requireNonNull(table, "table");
+      Objects.requireNonNull(predicates, "predicates");
+
+      StringBuilder sql = new StringBuilder(
+              aggregateSelectSql(aggregates)
+      );
+
+      sql.append(" FROM ")
+         .append(table);
+
+      if( !predicates.isEmpty() ) {
+         sql.append(" WHERE null is null");
+
+         for( String predicate : predicates )
+            if( S.isNotNullOrEmpty(predicate) )
+               sql.append(" AND (")
+                  .append(predicate)
+                  .append(')');
+      }
+
+      return new SqlSelect(
+              sql.toString(),
+              dialect
+      ).prepare();
+   }
+
+   private static String aggregateSelectSql(
+           List<Triplet<String, AggrFuncEnum, String>> aggregates
+   ) {
+      Objects.requireNonNull(aggregates, "aggregates");
 
       StringBuilder sql = new StringBuilder("SELECT ");
 
@@ -2125,19 +2176,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          sql.append(aggregateSql(aggregates.get(i)));
       }
 
-      sql.append(" FROM (")
-         .append(source.buildSql())
-         .append(") arslt");
-
-      PreparedSql prepared =
-              new SqlSelect(sql.toString(), dialect).prepare();
-
-      requireAggregateSourceSuffix(
-              prepared,
-              source.prepare()
-      );
-
-      return prepared;
+      return sql.toString();
    }
 
    static List<Object> aggregateJdbcValues(

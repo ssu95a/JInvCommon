@@ -947,6 +947,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         private JDBCDataReader<Map<String,Object>> dataReader;
         private PreparedSql preparedSql;
+        private DataSetSelectBuilder aggregateSourceBuilder;
 
         private final IDataSetListener refreshListener;
         private final IDataSetMarkListener markListener;
@@ -1022,6 +1023,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             JDBCDataReader<Map<String,Object>> reader = dataReader;
             dataReader = null;
             preparedSql = null;
+            aggregateSourceBuilder = null;
 
             if( reader == null )
                 return;
@@ -1043,49 +1045,50 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             if( dataReader != null )
                 return;
 
-            String qualifier = S.isNullOrEmpty(aggrTable) ? null : aggrTable;
-            String prefix = qualifier == null ? "" : qualifier + ".";
-            String markPredicate = markExistsPredicate(prefix);
-
-            StringBuilder sql = new StringBuilder("SELECT ");
-            int index = 0;
-
-            for( Triplet<String, AggrFuncEnum, String> aggregate : aggrList ) {
-                if( index++ > 0 )
-                    sql.append(", ");
-
-                sql.append(aggregateSql(aggregate));
-            }
-
             if( S.isNullOrEmpty(aggrTable) ) {
-                DataSetSelectBuilder base =
-                        new DataSetSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
+                aggregateSourceBuilder =
+                        new DataSetSelectBuilder(
+                                internalGetSQL(),
+                                getTaskContextForUse().dialect()
+                        );
 
                 for( String predicate : predicatList )
-                    base.addPredicate(predicate);
+                    aggregateSourceBuilder.addPredicate(predicate);
 
-                base.addPredicate(markPredicate);
+                aggregateSourceBuilder.addPredicate(
+                        markExistsPredicate("")
+                );
 
-                sql.append(" FROM (")
-                   .append(base.buildSql())
-                   .append(") arslt");
+                preparedSql = prepareAggregateSql(
+                        aggrList,
+                        aggregateSourceBuilder,
+                        getTaskContextForUse().dialect()
+                );
             }
             else {
-                sql.append(" FROM ").append(aggrTable)
-                   .append(" WHERE null is null");
+                List<String> predicates =
+                        new ArrayList<>(predicatList.size() + 1);
 
-                for( String predicate : predicatList )
-                    sql.append(" AND (").append(predicate).append(')');
+                predicates.addAll(predicatList);
+                predicates.add(
+                        markExistsPredicate(aggrTable + ".")
+                );
 
-                sql.append(" AND (").append(markPredicate).append(')');
+                preparedSql = prepareAggregateTableSql(
+                        aggrList,
+                        aggrTable,
+                        predicates,
+                        getTaskContextForUse().dialect()
+                );
             }
-
-            preparedSql =
-                    new SqlSelect( sql.toString(), getTaskContextForUse().dialect() ).prepare();
 
             dataReader = new JDBCDataReader<>(
                     getTaskContextForUse().getConnection(),
-                    preparedSql, AggrRSMapper.instance, null, false );
+                    preparedSql,
+                    AggrRSMapper.instance,
+                    null,
+                    false
+            );
         }
 
         /** */
@@ -1119,9 +1122,14 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             prepareReader();
 
             dataReader.executeQuery(
-                    PreparedSqlValues.jdbc(
-                            preparedSql,
-                            mainSqlParameters)
+                    aggregateSourceBuilder == null
+                            ? PreparedSqlValues.jdbc(
+                                    preparedSql,
+                                    mainSqlParameters)
+                            : aggregateJdbcValues(
+                                    preparedSql,
+                                    aggregateSourceBuilder,
+                                    mainSqlParameters)
             );
 
             values = (Map<String,Object>)dataReader
@@ -1161,6 +1169,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             JDBCDataReader<Map<String,Object>> reader = dataReader;
             dataReader = null;
             preparedSql = null;
+            aggregateSourceBuilder = null;
 
             if( reader != null )
                 reader.close();
