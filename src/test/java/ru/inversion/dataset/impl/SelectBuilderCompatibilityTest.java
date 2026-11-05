@@ -12,6 +12,26 @@ import static org.junit.Assert.assertTrue;
 
 public class SelectBuilderCompatibilityTest {
 
+    @Test
+    @SuppressWarnings("deprecation")
+    public void nextSelectBuilderKeepsFluentCompatibility() {
+        NextSelectBuilder builder =
+                new NextSelectBuilder(
+                        "select id from client",
+                        SqlDialectFactory.POSTGRES)
+                        .addPredicate("id = :id")
+                        .orderBy("id")
+                        .rowLimit(10)
+                        .mark("0");
+
+        String sql = builder.buildSql();
+
+        assertTrue(sql, sql.contains("id = :id"));
+        assertTrue(sql, sql.contains("ORDER BY id"));
+        assertTrue(sql, sql.contains("LIMIT 10"));
+        assertTrue(sql, sql.contains("AS MARK"));
+    }
+
     @Table(name = "client")
     public static class Row {
         @Column(name = "id")

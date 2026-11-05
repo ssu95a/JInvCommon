@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 /**
  * Compatibility facade for the former EntitySelectBuilder.
  *
- * Ordinary SELECT construction is delegated to NextSelectBuilder.
+ * Ordinary SELECT construction is delegated to DataSetSelectBuilder.
  * SQLDataSet itself does not depend on this class.
  */
 public class EntitySelectBuilder extends SelectBuilder {
@@ -55,8 +55,8 @@ public class EntitySelectBuilder extends SelectBuilder {
         if( aggrList != null && !aggrList.isEmpty() )
             return buildAggregate();
 
-        NextSelectBuilder builder =
-                new NextSelectBuilder(buildEntitySource(), dialect());
+        DataSetSelectBuilder builder =
+                new DataSetSelectBuilder(buildEntitySource(), dialect());
 
         if( predicateList != null )
             for( String predicate : predicateList )

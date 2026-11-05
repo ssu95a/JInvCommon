@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Compatibility facade for the former SQLSelectBuilder.
  *
- * Ordinary SELECT construction is delegated to NextSelectBuilder.
+ * Ordinary SELECT construction is delegated to DataSetSelectBuilder.
  * The former implementation and parser hierarchy are not restored.
  */
 public class SQLSelectBuilder extends SelectBuilder {
@@ -146,7 +146,7 @@ public class SQLSelectBuilder extends SelectBuilder {
     }
 
     private String build( String source, SqlDialect actualDialect ) {
-        NextSelectBuilder builder = new NextSelectBuilder(source, actualDialect);
+        DataSetSelectBuilder builder = new DataSetSelectBuilder(source, actualDialect);
 
         if( predicateList != null )
             for( String predicate : predicateList )

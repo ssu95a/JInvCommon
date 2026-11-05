@@ -111,7 +111,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected ISQLDataReader<P> dataReader;
 
    /** Актуальный resolver значений, связанный с текущим PreparedSql. */
-   private NextSelectBuilder preparedReaderBuilder;
+   private DataSetSelectBuilder preparedReaderBuilder;
 
    /** Живое представление параметров DataSet. Явный null имеет приоритет. */
    protected final IParameters mainSqlParameters = new IParameters() {
@@ -821,6 +821,21 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return execute_count;
    }
 
+   /**
+    * Canonical SELECT builder hook.
+    *
+    * The default implementation delegates to the former protected hook so
+    * subclasses overriding createNextSelectBuilder(...) keep working.
+    */
+   protected DataSetSelectBuilder createDataSetSelectBuilder( boolean ignoreFilters ) {
+      return createNextSelectBuilder(ignoreFilters);
+   }
+
+   /**
+    * @deprecated compatibility hook; override createDataSetSelectBuilder(...)
+    * in new code.
+    */
+   @Deprecated
    protected NextSelectBuilder createNextSelectBuilder( boolean ignoreFilters ) {
       SqlDialect dialect = getTaskContextForUse().dialect();
       NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
@@ -838,7 +853,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return builder;
    }
 
-   private void addPredicates( NextSelectBuilder builder, boolean ignoreFilters ) {
+   private void addPredicates( DataSetSelectBuilder builder, boolean ignoreFilters ) {
       for( PredicateItem item : predicates.values() ) {
          if( ignoreFilters && item.isFilter() )
             continue;
@@ -860,7 +875,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * Legacy SelectBuilder здесь больше не участвует.
     */
    protected PreparedSql prepareDataQuery() throws DataSetException {
-      NextSelectBuilder builder = createNextSelectBuilder( false );
+      DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
       PreparedSql sql = builder.prepare();
       preparedReaderBuilder = builder;
       return sql;
@@ -1266,7 +1281,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /**
     * Возвращает predicates DataSet с фактическими runtime-значениями.
-    * Для разрешения параметров используется тот же NextSelectBuilder,
+    * Для разрешения параметров используется тот же DataSetSelectBuilder,
     * что и при JDBC execution.
     */
    @Override
@@ -1291,8 +1306,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       final String prefix = "SELECT NULL WHERE NULL IS NULL ";
 
-      NextSelectBuilder builder =
-              new NextSelectBuilder(prefix + "<w>", dialect);
+      DataSetSelectBuilder builder =
+              new DataSetSelectBuilder(prefix + "<w>", dialect);
 
       addPredicates(builder, false);
 
@@ -1321,7 +1336,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public String getCompletedSQL( ) {
 
       try {
-         NextSelectBuilder builder = createNextSelectBuilder(false);
+         DataSetSelectBuilder builder = createDataSetSelectBuilder(false);
          PreparedSql preparedSql = builder.prepare();
          List<Object> values = builder.values(mainSqlParameters);
 
@@ -1403,8 +1418,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             sb.append("null is null");
 
-            NextSelectBuilder builder =
-                    new NextSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
+            DataSetSelectBuilder builder =
+                    new DataSetSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
             builder.addPredicate( sb.toString() );
 
             if( isSupportMark() ) {
@@ -1809,7 +1824,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    @Override
    public Iterator< P > createRSIterator( boolean ignoreFilters ) throws DataSetException {
 
-      NextSelectBuilder builder = createNextSelectBuilder( ignoreFilters );
+      DataSetSelectBuilder builder = createDataSetSelectBuilder( ignoreFilters );
       PreparedSql preparedSql = builder.prepare();
       List<Object> values = builder.jdbcValues(mainSqlParameters);
 
@@ -1838,7 +1853,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          return;
 
       try {
-         d.put("ds.sql.query", createNextSelectBuilder(false).buildSql());
+         d.put("ds.sql.query", createDataSetSelectBuilder(false).buildSql());
          d.put("ds.sql.query_with_parameters", getCompletedSQL());
          d.put("ds.support_mark", isSupportMark());
          d.put("ds.native_query_name", S.nvl(nativeQueryName));
@@ -2086,8 +2101,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          if( dataReader != null )
             return;
 
-         NextSelectBuilder base =
-                 new NextSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
+         DataSetSelectBuilder base =
+                 new DataSetSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
 
          for( PredicateItem item : predicates.values() ) {
             if( ignoreFilter && item.isFilter() )

@@ -11,7 +11,7 @@ import java.util.*;
 
 import static org.junit.Assert.*;
 
-public class NextSelectBuilderTest {
+public class DataSetSelectBuilderTest {
 
     private static final class Params implements IParameters {
         private final Map<String, Object> names = new HashMap<>();
@@ -38,7 +38,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void duplicatedNamedParameterWithoutDatasetThrows() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = :id").set("id",10));
         b.addPredicate(new Expr("b = :id").set("id",20));
         try {b.values(new Params()); fail("Missing conflict");}
@@ -46,7 +46,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void explicitNullDatasetOverridesBothExpressions() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = :id").set("id", 10));
         b.addPredicate(new Expr("b = :id").set("id", 20));
         Params main = new Params().set("id", null);
@@ -57,7 +57,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void positionalParametersUseGlobalIndexes() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t",
                 SqlDialectFactory.POSTGRES
         );
@@ -72,7 +72,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void duplicatedPositionalParameterWithoutDatasetThrows() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t",
                 SqlDialectFactory.POSTGRES
         );
@@ -91,7 +91,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void mainQuestionMarkGetsFinalTextualPosition() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t where root = ?", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t where root = ?", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 10));
         PreparedSql p = b.prepare();
         assertEquals(2, p.getParameters().size());
@@ -102,7 +102,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void datasetIndexedOverridesPredicateFallback() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 10));
         assertEquals(
                 Collections.<Object>singletonList(null),
@@ -111,7 +111,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void runtimeValuesAreReadAtExecutionWithoutRecompile() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.ORACLE);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.ORACLE);
         Expr x = new Expr("a = :name").set("name","x");
         b.addPredicate(x);
         PreparedSql first = b.prepare();
@@ -122,7 +122,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void questionMarkInsideStringIsBoundWithoutStealingPositionalSlot() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("txt = '?' and x = ? /* ? */").set(0,77));
 
         PreparedSql p = b.prepare();
@@ -135,7 +135,7 @@ public class NextSelectBuilderTest {
         assertEquals(Arrays.<Object>asList("?", 77), b.values(new Params()));
     }
     @Test public void changeOfPredicateInvalidatesPlan() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         PreparedSql before=b.prepare();
         b.addPredicate("a = :x");
         PreparedSql after=b.prepare();
@@ -144,7 +144,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void numberedParameterCanUseExpressionFallback() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = $2").set(1,7));
         PreparedSql p=b.prepare();
         assertEquals(Parameter.Kind.NUMBERED,p.getParameters().get(0).getKind());
@@ -153,7 +153,7 @@ public class NextSelectBuilderTest {
 
 
     @Test public void missingIndexedParameterReportsGlobalIndex() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t where a = ?",
                 SqlDialectFactory.POSTGRES
         );
@@ -169,7 +169,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void missingNamedParameterReportsName() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t where a = :id",
                 SqlDialectFactory.POSTGRES
         );
@@ -186,7 +186,7 @@ public class NextSelectBuilderTest {
 
     @Test public void formerInternalPrefixIsAnOrdinaryNamedParameter() {
         String name = "__sparser_local_pos_0_0";
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t where x = :" + name, SqlDialectFactory.POSTGRES);
         PreparedSql prepared = b.prepare();
 
@@ -195,14 +195,14 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void repeatSameExpressionDoesNotConflictWithItself() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         Expr one = new Expr("a = :id").set("id", 99);
         b.addPredicate(one).addPredicate(one);
         assertEquals(Arrays.<Object>asList(99, 99), b.values(new Params()));
     }
 
     @Test public void generatedLiteralsKeepTheirParameterType() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ? and b = 42").set(0, 100));
         PreparedSql result = b.prepare();
         assertEquals(Parameter.Kind.POSITIONAL, result.getParameters().get(0).getKind());
@@ -211,14 +211,14 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void conflictOnNumberedParameterIsDetected() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = $1").set(0,11));
         b.addPredicate(new Expr("b = $1").set(0,12));
         try { b.values(new Params()); fail("Expected conflict"); }
         catch (IllegalStateException e) {assertTrue(e.getMessage().contains("Conflicting"));}
     }
     @Test public void numberedAndPositionalDuplicateThrows() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
         try { b.values(new Params()); fail("Expected mixed positional conflict"); }
@@ -226,7 +226,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void datasetOverridesMixedPositionalConflictWithNull() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ?").set(0, 11));
         b.addPredicate(new Expr("b = $1").set(0, 12));
         assertEquals(
@@ -236,7 +236,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void orderByExpressionUsesGlobalPositionalIndex() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         b.orderBy(new Expr("case when id = ? then 0 else 1 end").set(0, 99));
         PreparedSql prepared = b.prepare();
         assertEquals(1, prepared.getParameters().size());
@@ -245,7 +245,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void sameExpressionInstanceCanSupplyNamedFromOrderByAndWhere() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
         Expr e = new Expr("x = :id").set("id", 17);
         b.addPredicate(e);
         b.orderBy(new Expr("case when id = :id then 0 else 1 end"));
@@ -254,7 +254,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void malformedPredicateDoesNotCorruptCachedPreparedSql() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t", SqlDialectFactory.ORACLE);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.ORACLE);
         PreparedSql initial = b.prepare();
         b.addPredicate("x = 1; delete from t");
         try { b.prepare(); fail("Expected invalid SQL fragment"); }
@@ -264,7 +264,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void mixedSourcesFollowFinalSqlTextOrder() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t where root = ? and code = :code", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = ? and state = 'A'").set(0, 10));
         b.addPredicate(new Expr("b = ?").set(1, 20));
@@ -281,7 +281,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void changingSortingDropsOldBindings() {
-        NextSelectBuilder b = new NextSelectBuilder("select id from t order by :old", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t order by :old", SqlDialectFactory.POSTGRES);
         b.orderBy("id DESC");
         PreparedSql p = b.prepare();
         assertEquals(0, p.getParameters().size());
@@ -291,7 +291,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void markComesAfterOriginalSelectItems() {
-        NextSelectBuilder b = new NextSelectBuilder("select x, y from t order by 1", SqlDialectFactory.ORACLE);
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select x, y from t order by 1", SqlDialectFactory.ORACLE);
         b.mark("0");
         String sql = b.buildSql().toLowerCase(Locale.ROOT);
         assertTrue(sql.indexOf("x, y") < sql.indexOf("as mark"));
@@ -300,8 +300,8 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void queryAliasWrapsSourceAndPredicatesUseOuterAlias() {
-        NextSelectBuilder b =
-                new NextSelectBuilder("select id, name from client", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b =
+                new DataSetSelectBuilder("select id, name from client", SqlDialectFactory.POSTGRES);
         b.queryAlias("q");
         b.addPredicate("q.id = :id");
 
@@ -314,13 +314,13 @@ public class NextSelectBuilderTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void queryAliasMustBeSingleIdentifier() {
-        new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)
+        new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)
                 .queryAlias("q where 1=1");
     }
 
     @Test public void optimizerHintIsInsertedAfterTopLevelSelect() {
-        NextSelectBuilder b =
-                new NextSelectBuilder("select id from client", SqlDialectFactory.ORACLE);
+        DataSetSelectBuilder b =
+                new DataSetSelectBuilder("select id from client", SqlDialectFactory.ORACLE);
         b.optimizerHint("+ index(client idx_client)");
 
         String sql = b.buildSql();
@@ -330,8 +330,8 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void optimizerHintTargetsOuterSelectWhenAliasWrapsSource() {
-        NextSelectBuilder b =
-                new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder b =
+                new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
         b.queryAlias("q");
         b.optimizerHint("+ test_hint");
 
@@ -342,7 +342,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void optimizerHintSkipsSelectInsideCte() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "with x as (select id from client) select id from x",
                 SqlDialectFactory.POSTGRES);
         b.optimizerHint("+ outer_hint");
@@ -355,13 +355,13 @@ public class NextSelectBuilderTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void optimizerHintRejectsCommentTerminator() {
-        new NextSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)
+        new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)
                 .optimizerHint("+ bad */ delete");
     }
 
 
     @Test public void rowLimitIsAppliedAndParameterized() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from client order by id",
                 SqlDialectFactory.POSTGRES);
 
@@ -381,14 +381,14 @@ public class NextSelectBuilderTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void rowLimitRejectsNegativeValue() {
-        new NextSelectBuilder(
+        new DataSetSelectBuilder(
                 "select id from client",
                 SqlDialectFactory.POSTGRES
         ).rowLimit(-1);
     }
 
     @Test public void ordinaryStringLiteralWithPunctuationIsBound() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t where code = 'A-1/2'",
                 SqlDialectFactory.POSTGRES);
 
@@ -401,7 +401,7 @@ public class NextSelectBuilderTest {
     }
 
     @Test public void escapedQuoteInStringLiteralIsDecodedForBinding() {
-        NextSelectBuilder b = new NextSelectBuilder(
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
                 "select id from t where name = 'O''Brien'",
                 SqlDialectFactory.ORACLE);
 
@@ -413,7 +413,7 @@ public class NextSelectBuilderTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void typedStringLiteralIsRejected() {
-        new NextSelectBuilder(
+        new DataSetSelectBuilder(
                 "select id from t where d = DATE '2026-10-26'",
                 SqlDialectFactory.ORACLE)
                 .prepare();
