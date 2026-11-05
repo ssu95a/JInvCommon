@@ -57,6 +57,7 @@ class SQLDataSetLifecycleTest {
         int executeCount;
         int pageCount;
         int closeCount;
+        int resolvedExecuteCount;
         boolean eof;
         boolean failExecute;
         boolean failPage;
@@ -72,6 +73,13 @@ class SQLDataSetLifecycleTest {
             receivedParameters.add(values.hasParameter("branch")
                     ? values.getParameter("branch") : null);
             eof = false;
+        }
+
+        @Override
+        public void executeQuery(List<Object> values) {
+            resolvedExecuteCount++;
+            throw new AssertionError(
+                    "Externally installed reader must use compatibility IParameters path");
         }
 
         @Override
@@ -156,6 +164,8 @@ class SQLDataSetLifecycleTest {
         assertTrue(item.isFinal());
         assertEquals(Arrays.asList("row"), ds.getRows());
         assertEquals(0, ds.getCurrentRowNum());
+        assertEquals(1, reader.executeCount);
+        assertEquals(0, reader.resolvedExecuteCount);
         assertEquals(0, reader.closeCount);
     }
 
@@ -229,6 +239,7 @@ class SQLDataSetLifecycleTest {
         assertSame(reader, ds.reader());
         assertEquals(Arrays.asList(10, 20), reader.receivedParameters);
         assertEquals(2, reader.executeCount);
+        assertEquals(0, reader.resolvedExecuteCount);
         assertEquals(2, reader.pageCount);
         assertEquals(0, reader.closeCount);
     }

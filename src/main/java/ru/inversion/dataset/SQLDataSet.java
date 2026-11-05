@@ -110,7 +110,10 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    protected ISQLDataReader<P> dataReader;
 
-   /** Актуальный resolver значений, связанный с текущим PreparedSql. */
+   /** Актуальный PreparedSql обычного data-query. */
+   private PreparedSql preparedDataQuery;
+
+   /** Resolver fallback-значений, если PreparedSql построен нашим builder. */
    private DataSetSelectBuilder preparedSelectBuilder;
 
    /** Живое представление параметров DataSet. Явный null имеет приоритет. */
@@ -871,8 +874,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    /**
-    * Единственный путь подготовки SELECT для обычного SQLDataSet.
-    * Legacy SelectBuilder здесь больше не участвует.
+    * Подготовить PreparedSql обычного data-query.
+    *
+    * Default path uses DataSetSelectBuilder. Method remains protected for
+    * legacy subclasses; an override may return its own PreparedSql without
+    * creating preparedSelectBuilder.
     */
    protected PreparedSql prepareDataQuery() throws DataSetException {
       DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
@@ -906,8 +912,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                   dataReader.close();
                   dataReader = null;
                }
+               preparedDataQuery = null;
                preparedSelectBuilder = null;
+
                PreparedSql sql = prepareDataQuery();
+               preparedDataQuery = sql;
 
                dataReader = new JDBCDataReader<>(
                        getTaskContextForUse().getConnection(),
@@ -916,11 +925,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                needReCreateReader.setValue(false);
             }
 
-            if( preparedSelectBuilder == null )
-               dataReader.executeQuery(mainSqlParameters);
-            else
-               dataReader.executeQuery(
-                       preparedSelectBuilder.jdbcValues(mainSqlParameters));
+            executePreparedDataQuery();
 
             clear( );
             swappingData( fetchAllRows );
@@ -936,6 +941,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             // Не оставляем открытый курсор/PreparedStatement после неудачной загрузки.
             ISQLDataReader<P> failedReader = dataReader;
             dataReader = null;
+            preparedDataQuery = null;
             preparedSelectBuilder = null;
             if (failedReader != null) {
                try {
@@ -962,6 +968,40 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       catch( Throwable th ) {
          throw new DataSetException( Tags.PRODUCT_LABEL + "Error in dataSet on executeQuery", th );
       }
+   }
+
+   /**
+    * Execute the current data-query through the resolved-value JDBC boundary.
+    *
+    * preparedDataQuery == null is reserved for compatibility with an external
+    * ISQLDataReader installed directly by a subclass. Such a reader has no
+    * PreparedSql owned by SQLDataSet, so only the legacy IParameters entry
+    * point is available.
+    */
+   private void executePreparedDataQuery() throws DataSetException {
+
+      if( preparedDataQuery == null ) {
+         dataReader.executeQuery(mainSqlParameters);
+         return;
+      }
+
+      List<Object> jdbcValues;
+
+      /*
+       * Standard path: preserve ISQLExpression fallback resolution only when
+       * the builder is the owner of this exact PreparedSql plan.
+       *
+       * A legacy prepareDataQuery() override may return another PreparedSql;
+       * in that case use the plan itself with the DataSet parameter space.
+       */
+      if( preparedSelectBuilder != null
+              && preparedSelectBuilder.prepare() == preparedDataQuery )
+         jdbcValues = preparedSelectBuilder.jdbcValues(mainSqlParameters);
+      else
+         jdbcValues = PreparedSqlValues.jdbc(
+                 preparedDataQuery, mainSqlParameters);
+
+      dataReader.executeQuery(jdbcValues);
    }
 
    /** {@inheritDoc} */
