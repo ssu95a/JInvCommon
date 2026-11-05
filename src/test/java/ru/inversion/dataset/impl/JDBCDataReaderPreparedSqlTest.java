@@ -25,6 +25,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import javax.persistence.Column;
+import javax.persistence.Id;
+
 import static org.junit.Assert.*;
 
 public class JDBCDataReaderPreparedSqlTest {
@@ -253,6 +256,85 @@ public class JDBCDataReaderPreparedSqlTest {
     }
 
     @Test
+    public void expiredCursorIsRolledBackReexecutedAndResumesAfterReturnedRow() throws Exception {
+        RecoveryJdbc jdbc = new RecoveryJdbc();
+
+        JDBCDataReader<RecoveryRow> reader =
+                recoveryReader(jdbc);
+
+        reader.executeQuery(Collections.<Object>emptyList());
+
+        List<RecoveryRow> firstPage = reader.getNextPage(2);
+        List<RecoveryRow> secondPage = reader.getNextPage(2);
+
+        assertEquals(
+                Arrays.asList(1L, 2L),
+                recoveryIds(firstPage)
+        );
+        assertEquals(
+                Collections.singletonList(3L),
+                recoveryIds(secondPage)
+        );
+
+        assertEquals(2, jdbc.executions);
+        assertBefore(jdbc.events, "rs1.close", "rollback");
+        assertBefore(jdbc.events, "rollback", "execute.2");
+        assertTrue(reader.isEOF());
+    }
+
+    @Test
+    public void rollbackFailureDuringCursorRecoveryClosesStatement() throws Exception {
+        RecoveryJdbc jdbc = new RecoveryJdbc();
+        jdbc.failRollback = true;
+
+        JDBCDataReader<RecoveryRow> reader =
+                recoveryReader(jdbc);
+
+        reader.executeQuery(Collections.<Object>emptyList());
+
+        try {
+            reader.getNextPage(1);
+            fail("Expected cursor recovery failure");
+        }
+        catch( RuntimeException expected ) {
+            assertEquals(
+                    "Rollback failure",
+                    rootCause(expected).getMessage()
+            );
+        }
+
+        assertBefore(jdbc.events, "rs1.close", "rollback");
+        assertTrue(jdbc.statementClosed);
+        assertTrue(reader.isEOF());
+    }
+
+    @Test
+    public void reexecuteFailureDuringCursorRecoveryClosesStatement() throws Exception {
+        RecoveryJdbc jdbc = new RecoveryJdbc();
+        jdbc.failReexecute = true;
+
+        JDBCDataReader<RecoveryRow> reader =
+                recoveryReader(jdbc);
+
+        reader.executeQuery(Collections.<Object>emptyList());
+
+        try {
+            reader.getNextPage(1);
+            fail("Expected cursor recovery failure");
+        }
+        catch( RuntimeException expected ) {
+            assertEquals(
+                    "Re-execute failure",
+                    rootCause(expected).getMessage()
+            );
+        }
+
+        assertBefore(jdbc.events, "rollback", "execute.2");
+        assertTrue(jdbc.statementClosed);
+        assertTrue(reader.isEOF());
+    }
+
+    @Test
     public void bindsOutputOfRealSqlSelectPrepare() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc();
         SqlSelect select = new SqlSelect(
@@ -266,6 +348,218 @@ public class JDBCDataReaderPreparedSqlTest {
         assertEquals(prepared.getSql(), jdbc.statements.get(0).sql);
         assertEquals(Arrays.asList(17, "ACTIVE"), jdbc.statements.get(0).values());
         assertEquals(2, prepared.getParameters().size());
+    }
+
+    private static JDBCDataReader<RecoveryRow> recoveryReader(
+            RecoveryJdbc jdbc
+    ) {
+        return new JDBCDataReader<>(
+                jdbc.connection(),
+                prepared("select id"),
+                (rs, n) -> new RecoveryRow(rs.getLong(1)),
+                RecoveryRow.class,
+                false
+        );
+    }
+
+    private static List<Long> recoveryIds(List<RecoveryRow> rows) {
+        List<Long> ids = new ArrayList<>();
+
+        for( RecoveryRow row : rows )
+            ids.add(row.getId());
+
+        return ids;
+    }
+
+    private static void assertBefore(
+            List<String> events,
+            String first,
+            String second
+    ) {
+        int firstIndex = events.indexOf(first);
+        int secondIndex = events.indexOf(second);
+
+        assertTrue("Missing event " + first + ": " + events, firstIndex >= 0);
+        assertTrue("Missing event " + second + ": " + events, secondIndex >= 0);
+        assertTrue(
+                first + " must happen before " + second + ": " + events,
+                firstIndex < secondIndex
+        );
+    }
+
+    private static Throwable rootCause(Throwable failure) {
+        Throwable result = failure;
+
+        while( result.getCause() != null )
+            result = result.getCause();
+
+        return result;
+    }
+
+    private static final class RecoveryRow {
+        private long id;
+
+        RecoveryRow() {
+        }
+
+        RecoveryRow(long id) {
+            this.id = id;
+        }
+
+        @Id
+        @Column(name = "ID")
+        public long getId() {
+            return id;
+        }
+
+        public void setId(long id) {
+            this.id = id;
+        }
+    }
+
+    private static final class RecoveryJdbc {
+        final List<String> events = new ArrayList<>();
+
+        int executions;
+        boolean failRollback;
+        boolean failReexecute;
+        boolean statementClosed;
+
+        Connection connection() {
+            return (Connection) Proxy.newProxyInstance(
+                    Connection.class.getClassLoader(),
+                    new Class<?>[]{Connection.class},
+                    (proxy, method, args) -> {
+                        switch( method.getName() ) {
+                            case "prepareStatement":
+                                events.add("prepare");
+                                return statement();
+                            case "rollback":
+                                events.add("rollback");
+
+                                if( failRollback )
+                                    throw new SQLException(
+                                            "Rollback failure",
+                                            "99996");
+
+                                return null;
+                            case "toString":
+                                return "RecoveryConnection";
+                            default:
+                                throw new UnsupportedOperationException(
+                                        "Unexpected Connection."
+                                                + method.getName());
+                        }
+                    }
+            );
+        }
+
+        private PreparedStatement statement() {
+            return (PreparedStatement) Proxy.newProxyInstance(
+                    PreparedStatement.class.getClassLoader(),
+                    new Class<?>[]{PreparedStatement.class},
+                    (proxy, method, args) -> {
+                        switch( method.getName() ) {
+                            case "setFetchSize":
+                            case "setObject":
+                                return null;
+
+                            case "executeQuery":
+                                executions++;
+                                events.add("execute." + executions);
+
+                                if( executions == 2 && failReexecute )
+                                    throw new SQLException(
+                                            "Re-execute failure",
+                                            "99995");
+
+                                return executions == 1
+                                        ? resultSet(
+                                                "rs1",
+                                                new long[]{1L},
+                                                true)
+                                        : resultSet(
+                                                "rs2",
+                                                new long[]{1L, 2L, 3L},
+                                                false);
+
+                            case "close":
+                                statementClosed = true;
+                                events.add("statement.close");
+                                return null;
+
+                            case "isClosed":
+                                return statementClosed;
+
+                            default:
+                                throw new UnsupportedOperationException(
+                                        "Unexpected Statement."
+                                                + method.getName());
+                        }
+                    }
+            );
+        }
+
+        private ResultSet resultSet(
+                String name,
+                long[] rows,
+                boolean expireOnSecondNext
+        ) {
+            return (ResultSet) Proxy.newProxyInstance(
+                    ResultSet.class.getClassLoader(),
+                    new Class<?>[]{ResultSet.class},
+                    new InvocationHandler() {
+                        int index = -1;
+                        int nextCalls;
+                        boolean closed;
+
+                        @Override
+                        public Object invoke(
+                                Object proxy,
+                                Method method,
+                                Object[] args
+                        ) throws Throwable {
+                            switch( method.getName() ) {
+                                case "next":
+                                    nextCalls++;
+
+                                    if( expireOnSecondNext
+                                            && nextCalls == 2 ) {
+                                        events.add(name + ".next.34000");
+                                        throw new SQLException(
+                                                "Cursor expired",
+                                                "34000");
+                                    }
+
+                                    index++;
+                                    events.add(name + ".next");
+
+                                    return index < rows.length;
+
+                                case "getLong":
+                                    if( index < 0 || index >= rows.length )
+                                        throw new SQLException(
+                                                "ResultSet is not on a row");
+
+                                    return rows[index];
+
+                                case "close":
+                                    closed = true;
+                                    events.add(name + ".close");
+                                    return null;
+
+                                case "isClosed":
+                                    return closed;
+
+                                default:
+                                    throw new UnsupportedOperationException(
+                                            "Unexpected ResultSet."
+                                                    + method.getName());
+                            }
+                        }
+                    }
+            );
+        }
     }
 
     private static JDBCDataReader<Object> reader(RecordingJdbc jdbc, PreparedSql sql) {

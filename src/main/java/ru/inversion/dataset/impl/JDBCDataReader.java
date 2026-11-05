@@ -231,17 +231,11 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     private class RestoreContext {
         final private T row;
         final private int nCounter;
-        final private SQLException cause;
 
-        private RestoreContext( T row, int nCounter, SQLException cause ) {
+        private RestoreContext( T row, int nCounter ) {
             this.row = row;
             this.nCounter = nCounter;
-            this.cause = cause;
         }
-
-        public T getRow() { return row; }
-        public int getnCounter() { return nCounter; }
-        public SQLException getCause() { return cause; }
     }
 
     private class RSIterator implements Iterator<T> {
@@ -263,6 +257,19 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             }
         }
 
+        /**
+         * Recover a PostgreSQL non-hold cursor invalidated by a transaction
+         * boundary while a DataSet grid remains open.
+         *
+         * Application DML performed from a modal editor is expected to finish
+         * its own transaction before control returns to the grid. If the next
+         * cursor operation fails with SQLSTATE 34000, PostgreSQL no longer has
+         * the server-side cursor and the failed operation leaves this connection
+         * unusable for re-execution until rollback.
+         *
+         * The SELECT is therefore executed again and positioned AFTER the row
+         * already returned by the current iterator call.
+         */
         private int restore( RestoreContext ctx ) {
             try {
                 ResultSet currentRowSet = rowSet;
@@ -272,22 +279,47 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                     currentRowSet.close();
 
                 connection.rollback();
+
                 rowSet = statement.executeQuery();
-                final Comparator<T> cmp = EntityMetadataFactory.getEntityMetaData(rowClass).getIdComparator();
+
+                final Comparator<T> comparator =
+                        EntityMetadataFactory
+                                .getEntityMetaData(rowClass)
+                                .getIdComparator();
+
                 if( isOwnerMapper ) {
                     rowMapper = null;
                     initMapper();
                 }
-                int n = rowCounter;
-                while( rowSet.next() && n > 0 ) {
-                    T row = rowMapper.mapRow( rowSet, n++ );
-                    if( cmp.compare( ctx.row, row ) == 0 )
+
+                boolean found = false;
+                int restoredRow = 0;
+
+                while( rowSet.next() ) {
+                    T candidate = rowMapper.mapRow(
+                            rowSet, restoredRow++);
+
+                    if( comparator.compare(ctx.row, candidate) == 0 ) {
+                        found = true;
                         break;
-                    n--;
+                    }
                 }
-                if( n != 0 )
-                    System.out.println( "oldRowCont = " + rowCounter + ", newRowCont = " + n );
-                return ctx.nCounter;
+
+                if( !found )
+                    throw new IllegalStateException(
+                            "Can not restore ResultSet position after SQLSTATE 34000");
+
+                /*
+                 * The current next() call still returns ctx.row, so the restored
+                 * cursor must point to the following row, exactly as a successful
+                 * rowSet.next() would have done before the cursor expired.
+                 */
+                if( !rowSet.next() ) {
+                    closeOrThrow();
+                    return 0;
+                }
+
+                return ctx.nCounter - 1;
             }
             catch( Throwable th ) {
                 closeAfterFailure(th);
@@ -321,7 +353,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             }
             catch ( SQLException ex ) {
                 if( "34000".equals( ex.getSQLState() ) )
-                    nCounter = restore( new RestoreContext( row, nCounter, ex ) );
+                    nCounter = restore( new RestoreContext( row, nCounter ) );
                 else {
                     closeAfterFailure(ex);
                     throw new RuntimeException(
