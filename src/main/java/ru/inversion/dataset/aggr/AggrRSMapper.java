@@ -1,6 +1,7 @@
 package ru.inversion.dataset.aggr;
 
 import ru.inversion.dataset.IRowMapper;
+import ru.inversion.utils.S;
 
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -13,28 +14,29 @@ import java.util.TreeMap;
  * @author ssu
  */
 public class AggrRSMapper implements IRowMapper<Map<String,Object>> {
-   
+
     final static public AggrRSMapper instance = new AggrRSMapper();
-    
+
     /** */
     @Override
     public Map<String, Object> mapRow( ResultSet rs, int rowNum ) throws SQLException {
-        
-        Map<String, Object> retMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-        
-        ResultSetMetaData metaData = rs.getMetaData();
-        
+
+        final Map<String, Object> retMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+
+        final ResultSetMetaData metaData = rs.getMetaData();
+
         for( int i = metaData.getColumnCount(); i > 0; i-- ) {
-             
+
             String column = metaData.getColumnLabel(i);
-            if( column == null || column.isEmpty() )
+
+            if( S.isNullOrEmpty(column) )
                 column = metaData.getColumnName(i);
 
             Object value = rs.getObject(i);
 
-            retMap.put(column, value);
+            retMap.put( column, value );
         }
-        
+
         return retMap;
     }
 

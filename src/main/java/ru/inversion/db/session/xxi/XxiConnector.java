@@ -141,9 +141,11 @@ public class XxiConnector {
             break;
                 //throw new SQLException("[Xxi-Connector] - To log into cABS 'XXI Vek' you must to change the password.");
             case -1:
-                throw new SQLException("[Xxi-Connector] - " + info.get() );
+                //throw new SQLException("[Xxi-Connector] - " + info.get() );
+               throw XXIConnectorException.of( XXIConnectorException.Reason.AUTH_FAILED, info.get(), null, U.toMap("resultCode",resultCode) );
             default:
-                throw new SQLException("[Xxi-Connector] - Unknown return value from 'XXI_LOGON': " + resultCode );
+               throw XXIConnectorException.of( XXIConnectorException.Reason.AUTH_FAILED, Integer.toString(resultCode), null, U.toMap("resultCode",resultCode) );
+               // throw new SQLException("[Xxi-Connector] - Unknown return value from 'XXI_LOGON': " + resultCode );
         }
 
         if( realAuthentication.isPresent() )
@@ -165,7 +167,7 @@ public class XxiConnector {
             }
         }
         catch( SQLException ex ) {
-            // Признак что была смена пароля
+            // Признак, что была смена пароля
             // Не можем соединиться т.к. скорее всего был вход через псевдосоединение
             if( resultCode == 1 ) {
                 throw new SQLException("[Xxi-Connector] - Для сохранения изменений необходимо осуществить повторный вход в систему!" );
@@ -469,19 +471,19 @@ public class XxiConnector {
     private static final String DATABASE_CHARSET8BIT = "AMERICAN_CIS.CL8MSWIN1251";
     private static final Charset JAVA_CHARSET8BIT = Charset.forName ("cp1251");
 
-    /** */ 
+    /** */
     private String loginAndGetRealEncryptedPassword( String jdbcUrl, String login, String pwd, Properties p ) throws SQLException {
 
 logger.debug("getConnection: url {} ... ", jdbcUrl );
-        
-        try( Connection conn = DriverManager.getConnection( jdbcUrl, p ) ) 
+
+        try( Connection conn = DriverManager.getConnection( jdbcUrl, p ) )
         {
 
 logger.debug("OK." );
 
 logger.debug("prepareCall... " );
 
-            try( CallableStatement st = conn.prepareCall("{? = call XXI.XXI_LOGON.XXI_LOGON(?, ?)}") ) 
+            try( CallableStatement st = conn.prepareCall("{? = call XXI.XXI_LOGON.XXI_LOGON(?, ?)}") )
             {
 
 logger.debug("OK." );
@@ -508,12 +510,12 @@ logger.debug("OK." );
                     }
                     case -1:
                     {
-/*                        
+/*
                         String encryptedErrorDesc = st.getString(3);
                         String decryptedErrorDesc = decryptHexString(encryptedErrorDesc);
                         String readableErrorDescr = decodeString    ("Cp1251", "ISO8859-5", decryptedErrorDesc );
                         throw new SQLException( "[Xxi-Connector] - " + readableErrorDescr );
-*///////                        
+*///////
                     }
                     default:
                         throw new SQLException("[Xxi-Connector] - Unknown return value from 'XXI_LOGON': " + resultCode );
@@ -649,27 +651,27 @@ logger.debug("OK." );
             }
             return new String(outStr);
         }
-          
-        public byte[] arc4b ( byte[] inStr ) 
+
+        public byte[] arc4b ( byte[] inStr )
         {
             byte a, b;
             byte[] outStr = new byte [inStr.length];
-            
-            for (int i = 0; i < inStr.length; i++) 
+
+            for (int i = 0; i < inStr.length; i++)
             {
                 a = inStr [i];
                 b = (byte) arc4Next ();
                 outStr [i] = (byte) (a ^ b);
             }
-            
+
             return outStr;
-        }        
-        
+        }
+
     }
 //
 // test
 //
-    public static void main ( String[] args ) throws Exception 
+    public static void main ( String[] args ) throws Exception
     {
         Properties prop = new Properties ();
         prop.setProperty("ignore_check_xxi", "true");
@@ -679,5 +681,5 @@ logger.debug("OK." );
     }
 //
 //
-//    
+//
 }

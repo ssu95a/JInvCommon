@@ -152,11 +152,11 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
     public static XXIConnectorException fromSql(SQLException ex, Map<String, Object> details) {
 
         if( ex == null )
-            return new XXIConnectorException(Reason.INTERNAL_ERROR, Origin.LOCAL, "Internal error", null, details);
+            return new XXIConnectorException( Reason.INTERNAL_ERROR, Origin.LOCAL, "Internal error", null, details );
 
-        Reason c = SqlClassifier.classify(ex);
-        String msg = c.defaultMessage();
-        return new XXIConnectorException( c, Origin.LOCAL, msg, ex, details);
+        Reason rsn = SqlClassifier.classify(ex);
+        String msg = rsn.defaultMessage();
+        return new XXIConnectorException( rsn, Origin.LOCAL, msg, ex, details);
     }
 
     /** Для совместимости со старым стилем вызова */
@@ -269,15 +269,12 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
             details.put("requestId", requestId);
 
         if (!S.isNullOrEmpty(errorCode))
-            details.put("remoteErrorCode", errorCode);
+            details.put("remoteErrorCode", errorCode );
 
         String safeMessage = message;
 
         if (reason == Reason.INTERNAL_ERROR)
             safeMessage = reason.defaultMessage();
-
-        if (!S.isNullOrEmpty(requestId))
-            safeMessage += ". Request ID: " + requestId;
 
         return new XXIConnectorException( reason, Origin.REMOTE, safeMessage, null, details );
     }

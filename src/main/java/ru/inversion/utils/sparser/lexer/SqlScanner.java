@@ -41,7 +41,7 @@ public abstract class SqlScanner {
         // Конструирование токенов доступно только внутри пакета сканнера.
         public Token( Kind kind, int start, int end )
         {
-            this.kind = Objects.requireNonNull(kind, "kind");
+            this.kind = Objects.requireNonNull( kind, "kind" );
 
             if( start < 0 || end <= start )
                 throw new IllegalArgumentException("Invalid token range: " + start + ".." + end);
@@ -68,10 +68,8 @@ public abstract class SqlScanner {
             return kind == Kind.WORD ? SqlKeyword.of(source, start, end) : null;
         }
 
-        public boolean isKeyword(String source, SqlKeyword keyword) {
-            return kind == Kind.WORD
-                    && keyword != null
-                    && keyword.matches(source, start, end);
+        public boolean isKeyword( String source, SqlKeyword keyword) {
+            return kind == Kind.WORD && keyword != null && keyword.matches( source, start, end );
         }
 
         @Override
@@ -82,20 +80,23 @@ public abstract class SqlScanner {
 
     private final List<TokenRecognizer> recognizers;
 
-    SqlScanner(List<TokenRecognizer> recognizers) {
-        Objects.requireNonNull(recognizers, "recognizers");
-        if (recognizers.isEmpty()) {
-            throw new IllegalArgumentException("Empty recognizer list");
-        }
-        List<TokenRecognizer> copy = new ArrayList<>(recognizers.size());
-        for (TokenRecognizer recognizer : recognizers) {
-            copy.add(Objects.requireNonNull(recognizer, "recognizer"));
-        }
-        this.recognizers = Collections.unmodifiableList(copy);
+    SqlScanner( List<TokenRecognizer> recognizers ) {
+
+//        Objects.requireNonNull(recognizers, "recognizers");
+//        if (recognizers.isEmpty()) {
+//            throw new IllegalArgumentException("Empty recognizer list");
+//        }
+//        List<TokenRecognizer> copy = new ArrayList<>(recognizers.size());
+//        for (TokenRecognizer recognizer : recognizers) {
+//            copy.add(Objects.requireNonNull(recognizer, "recognizer"));
+//        }
+
+       //little optimization
+       this.recognizers = recognizers; //Collections.unmodifiableList(copy);
     }
 
-    public final List<Token> scan(String sql) {
-
+    public final List<Token> scan( String sql )
+    {
        Objects.requireNonNull(sql, "sql");
 
         List<Token> result = new ArrayList<>();
@@ -107,26 +108,27 @@ public abstract class SqlScanner {
             Token token = recognize(sql, offset);
 
             if( token == null )
-                throw new IllegalArgumentException(
-                        "Unsupported SQL syntax at offset " + offset
-                        + ": '" + sql.charAt(offset) + "'");
+                throw new IllegalArgumentException( "Unsupported SQL syntax at offset " + offset + ": '" + sql.charAt(offset) + "'");
 
-            if (token.start() != offset || token.end() > sql.length() )
+            if( token.start() != offset || token.end() > sql.length() )
                 throw new IllegalStateException("Recognizer returned invalid token at " + offset + ": " + token);
 
             result.add(token);
 
             offset = token.end();
         }
+
         return Collections.unmodifiableList(result);
     }
 
+    /** */
     private Token recognize(String sql, int offset) {
-        for (TokenRecognizer recognizer : recognizers) {
-            Token token = recognizer.recognize(sql, offset);
-            if (token != null) {
+
+        for( TokenRecognizer recognizer : recognizers )
+        {
+            Token token = recognizer.recognize( sql, offset );
+            if( token != null )
                 return token;
-            }
         }
         return null;
     }

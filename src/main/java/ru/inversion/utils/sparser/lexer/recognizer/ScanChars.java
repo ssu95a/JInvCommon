@@ -21,20 +21,22 @@ final class ScanChars {
         return Character.isLetterOrDigit(ch)
                 || ch == '_'
                 || ch == '$'
-                || (oracle && ch == '#');
+                || ( oracle && ch == '#' );
     }
 
     static boolean atPostgresWordBoundary(String sql, int at) {
-        return at == 0
-                || !identifierPart(sql.charAt(at - 1), false);
+        return at == 0 || !identifierPart(sql.charAt(at - 1), false);
     }
 
+    /** */
     static int quotedEnd(String sql, int quoteAt, char quote) {
-        for (int i = quoteAt + 1; i < sql.length(); i++) {
-            if (sql.charAt(i) != quote)
+
+       for( int i = quoteAt + 1; i < sql.length(); i++)
+        {
+            if( sql.charAt(i) != quote )
                 continue;
 
-            if (i + 1 < sql.length() && sql.charAt(i + 1) == quote) {
+            if( i + 1 < sql.length() && sql.charAt(i + 1) == quote ) {
                 i++;
                 continue;
             }
@@ -46,7 +48,6 @@ final class ScanChars {
     }
 
     static IllegalArgumentException unterminated(String what, int start) {
-        return new IllegalArgumentException(
-                "Unterminated " + what + " at offset " + start);
+        return new IllegalArgumentException( "Unterminated " + what + " at offset " + start);
     }
 }

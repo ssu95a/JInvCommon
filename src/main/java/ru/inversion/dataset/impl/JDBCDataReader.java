@@ -181,6 +181,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     }
 
     private void closeOrThrow() throws SQLException {
+
         SQLException failure = closeResources();
 
         if( failure != null )
@@ -188,6 +189,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
     }
 
     private void closeAfterFailure(Throwable failure) {
+
         SQLException closeFailure = closeResources();
 
         if( closeFailure != null )

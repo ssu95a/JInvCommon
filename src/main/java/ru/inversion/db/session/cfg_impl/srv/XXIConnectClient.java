@@ -250,13 +250,13 @@ public final class XXIConnectClient implements Closeable {
                     char[] dbPassword = PasswordTools.decrypt( clientPassword, login, pc );
 
                     return new AuthSuccess (
-                            httpStatus,
-                            responseRequestId,
-                            login,
-                            pc,
-                            dbPassword,
-                            alias,
-                            dburl, vendr
+                      httpStatus,
+                      responseRequestId,
+                      login,
+                      pc,
+                      dbPassword,
+                      alias,
+                      dburl, vendr
                     );
 
                 }catch (IllegalStateException ex) {
@@ -264,11 +264,12 @@ public final class XXIConnectClient implements Closeable {
                         "Failed to decrypt password container: requestId=" + responseRequestId + ", httpStatus=" + httpStatus + ", loginLength=" + login.length(), ex
                     );
                 }
-            }).orElseThrow(() -> new IllegalArgumentException("Bad response format"));
-        }
+         }).orElseThrow(() -> new IllegalArgumentException("Bad response format"));
+      }
 
-        throw XXIConnectorException.fromRemote( httpStatus, responseRequestId, null, null, responseDco );
-    }
+      throw XXIConnectorException.fromRemote( httpStatus, responseRequestId, null, null, responseDco );
+
+   }
 
     /** */
     private static String findHeader(Header[] headers, String name )
@@ -317,11 +318,11 @@ public final class XXIConnectClient implements Closeable {
         //private final String rawXml;
 
         public AuthSuccess (
-                int httpStatus,
-                String requestId,
-                String dbLogin,
-                PasswordTools.PasswordContainer passwordContainer,
-                char[] dbPassword, String dbAlias, String dbUrl, String dbVendor
+            int httpStatus,
+            String requestId,
+            String dbLogin,
+            PasswordTools.PasswordContainer passwordContainer,
+            char[] dbPassword, String dbAlias, String dbUrl, String dbVendor
         )
         {
             this.httpStatus = httpStatus;

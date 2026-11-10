@@ -38,9 +38,7 @@ import static ru.inversion.dataset.mark.MarkModeEnum.*;
  */
 public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
-    /**
-     * Слушатели пометки.
-     */
+    /* Слушатели пометки. */
     final private IListenerManEvent<IDataSetMarkListener<T>, DataSetMarkEvent<T>> markListeners =
             ListenerManFactory.createListenerManEvent(IDataSetMarkListener::markAction);
 
@@ -54,24 +52,14 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         }
     }
 
-    /**
-     * Признак используется ли автофильтр.
-     */
+    /*Признак используется ли автофильтре. */
 	private boolean enableAutoFilter = false;
 
-    /**
-     * ID маркера пометки.
-     */
+    /* ID маркера пометки.     */
 	protected Long markerID;
 
-    /**
-     * Количество отмеченных строк.
-     */
-    protected boolean useMarkedSet = false;
 
-    /**
-     * Параметры пометки для XXIDataSet.
-     */
+    /* Параметры пометки для XXIDataSet. */
     private MarkDescriptor markDescriptor = MarkDescriptor.g_emptyInstance;
 
     /** */
@@ -182,7 +170,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         if( isEnableAutoFilter() )
         {
             String name = XXIDataSet.this.getName();
-            String form = (String)XXIDataSet.this.getProperty("form_name");
+            String form = XXIDataSet.this.getProperty("form_name");
 
             if( U.containsNull( name, form ) )
                 return;
@@ -191,7 +179,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
                 XXIDsDao.FilterData filterData = null;
 
-                BiFunction<String,String,XXIDsDao.FilterData> handleAutoFilter = (BiFunction< String, String, XXIDsDao.FilterData >)getProperty("ds.handleAutoFilter");
+                BiFunction<String,String,XXIDsDao.FilterData> handleAutoFilter = getProperty("ds.handleAutoFilter");
 
                 if( handleAutoFilter == null )
                 {
@@ -217,7 +205,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                     setProperty("default_filter_name",    filterData.getFilterName() );
                 }
 
-            } catch(Throwable th ) {
+            } catch( Throwable th ) {
                 throw new DataSetException( Tags.PRODUCT_LABEL + "Error on load and init autoFilter or defaultFilter", th );
             }
         }

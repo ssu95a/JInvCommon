@@ -16,20 +16,20 @@ final class NumberRecognizer implements TokenRecognizer {
         char ch = sql.charAt(at);
 
         if( !ScanChars.digit(ch)
-                && !(ch == '.'
-                && at + 1 < sql.length()
-                && ScanChars.digit(sql.charAt(at + 1))
-                && (at == 0 || sql.charAt(at - 1) != '.')) ) {
+             && !(ch == '.'
+             && at + 1 < sql.length()
+             && ScanChars.digit(sql.charAt(at + 1))
+             && (at == 0 || sql.charAt(at - 1) != '.')
+             )
+        )
+        {
             return null;
         }
 
         int end = decimalEnd(sql, at);
 
-        if( end < sql.length()
-                && ScanChars.identifierPart(sql.charAt(end), false) ) {
-            throw new IllegalArgumentException(
-                    "Unsupported numeric literal at offset " + at);
-        }
+        if( end < sql.length() && ScanChars.identifierPart(sql.charAt(end), false) )
+            throw new IllegalArgumentException("Unsupported numeric literal at offset " + at);
 
         return new SqlScanner.Token(NUMBER, at, end);
     }

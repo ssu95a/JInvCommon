@@ -32,6 +32,8 @@ public class Srv_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
             else
                 cfgBuilder = new Ora_DataSourceCfgBuilder(appId);
 
+            cfgBuilder.property( "check_connection", true );
+
             return
                 cfgBuilder
                     .dbUrl(auth.dbUrl())

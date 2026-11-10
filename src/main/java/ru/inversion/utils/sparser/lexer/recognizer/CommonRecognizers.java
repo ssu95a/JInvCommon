@@ -61,9 +61,9 @@ final class CommonRecognizers {
     static final class StringLiteral implements TokenRecognizer {
         @Override
         public SqlScanner.Token recognize(String sql, int at) {
-            if (sql.charAt(at) != '\'') return null;
-            return new SqlScanner.Token(STRING, at,
-                    ScanChars.quotedEnd(sql, at, '\''));
+            if( sql.charAt(at) != '\'')
+                return null;
+            return new SqlScanner.Token( STRING, at, ScanChars.quotedEnd(sql, at, '\'') );
         }
     }
 

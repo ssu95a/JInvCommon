@@ -79,14 +79,14 @@ public enum SqlKeyword {
         return U.in(keyword, values);
     }
 
-    boolean matches(String source, int start, int end) {
+    boolean matches( String source, int start, int end)
+    {
         String text = name();
-        return end - start == text.length()
-                && source.regionMatches(true, start, text, 0, text.length());
+        return end - start == text.length() && source.regionMatches( true, start, text, 0, text.length() );
     }
 
     static SqlKeyword of(String source, int start, int end) {
-        return BY_NAME.get(source.substring(start, end));
+        return BY_NAME.get( source.substring(start, end) );
     }
 
     public static SqlKeyword of(String text) {

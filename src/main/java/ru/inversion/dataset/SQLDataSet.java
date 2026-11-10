@@ -228,14 +228,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /** {@inheritDoc } */
    @Override
-   public SQLDataSet set( String name, Object value ) {
+   public SQLDataSet<P> set( String name, Object value ) {
       super.set( name, value );
       return this;
    }
 
    /** {@inheritDoc } */
    @Override
-   public SQLDataSet< P > set( int index, Object value ) {
+   public SQLDataSet<P> set( int index, Object value ) {
       super.set( index, value );
       return this;
    }
@@ -250,7 +250,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     *
     * @see AbstractDataSetBase#setName
     */
-   public SQLDataSet< P > name( String name ) {
+   public SQLDataSet<P> name( String name ) {
       setName(name);
       return this;
    }
@@ -258,8 +258,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** {@inheritDoc}  */
    @Override
    public void setRowClass( Class rowClass ) {
-      if (getRowClass() != rowClass) {
-         // Сначала проверяем инвариант базового DataSet: нельзя менять тип при загруженных строках.
+
+      if( getRowClass() != rowClass )
+      {
+         // Сначала проверяем инвариант базового DataSet:
+         // нельзя менять тип при загруженных строках.
          super.setRowClass(rowClass);
          needReCreateReader();
       }
@@ -406,7 +409,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       String newNativeQueryName = ( nqn == null ? null : nqn.trim() );
 
       if( S.isNullOrEmpty( newNativeQueryName )  )
-         newNativeQueryName = null;
+          newNativeQueryName = null;
 
       // После явного вызова setter имя больше не считается автоматически выбранным,
       // в том числе когда оно совпадает с текущим.
@@ -909,19 +912,19 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             if( dataReader == null || needReCreateReader.getValue() )
             {
-               if (dataReader != null) {
+               if( dataReader != null )
+               {
                   dataReader.close();
                   dataReader = null;
                }
+
                preparedDataQuery = null;
                preparedSelectBuilder = null;
 
                PreparedSql sql = prepareDataQuery();
                preparedDataQuery = sql;
 
-               dataReader = new JDBCDataReader<>(
-                       getTaskContextForUse().getConnection(),
-                       sql, getRowMapper(), getRowClass(), isSupportMark());
+               dataReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), sql, getRowMapper(), getRowClass(), isSupportMark());
 
                needReCreateReader.setValue(false);
             }
@@ -956,12 +959,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          }
 
          if( getLoadedRowCount() > 0 )
-            setCurrentRowNum( 0 );
+             setCurrentRowNum( 0 );
 
          totalRowCount = -1;
 
          if( executeCount == 1 )
-            fireDataSetEvent( DataSetEvent.DataSetEventType.FIRST_TIME_EXECUTE, false );
+             fireDataSetEvent( DataSetEvent.DataSetEventType.FIRST_TIME_EXECUTE, false );
 
          fireDataSetEvent( DataSetEvent.DataSetEventType.EXECUTE, false );
 
@@ -1970,21 +1973,17 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * Ищет строку среди уже загруженных данных и, при необходимости,
     * продолжает поиск с подкачкой следующих страниц.
     */
-   public <K> boolean findRow(
-           BiPredicate<P,K> predicate,
-           K value,
-           boolean withCurrent,
-           boolean populateIfNeed
-   ) throws DataSetException {
+   public <K> boolean findRow( BiPredicate<P,K> predicate, K value, boolean withCurrent, boolean populateIfNeed ) throws DataSetException {
 
       if( predicate == null || isEmpty() )
-         return false;
+          return false;
 
       List<P> rowList = rows();
       int index = withCurrent ? getCurrentRowNum() : 0;
 
       do {
-         for( ; index < rowList.size(); index++ ) {
+         for( ; index < rowList.size(); index++ )
+         {
             if( predicate.test(rowList.get(index), value) )
                return setCurrentRowNum(index);
          }
@@ -2015,7 +2014,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** */
    @Override
    public IAggregatorBuilder< P > createAggregatorBuilder( boolean refreshOnExecute, boolean ignoreFilter ) {
-      return new AggregatorBuilder( refreshOnExecute, ignoreFilter );
+      return new AggregatorBuilder<>( refreshOnExecute, ignoreFilter );
    }
 
    /** */
@@ -2041,17 +2040,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       @Override
       public IAggregatorBuilder< T > add( String columnExpr, AggrFuncEnum func, String alias ) {
 
-         if( S.isNullOrEmpty(alias) ) {
+         if( S.isNullOrEmpty(alias) )
+             alias = '"' + "A$" + columnExpr + '"';
 
-            StringBuilder sb = new StringBuilder();
-
-            sb.append( '"'  )
-                    .append( "A$" )
-                    .append( columnExpr )
-                    .append( '"'  );
-
-            alias = sb.toString();
-         }
 
          // Todo:
          // Добавить проверку на дублирование уже существующих аггрегаторов
@@ -2063,287 +2054,222 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       /** */
       @Override
       public IAggregatorBuilder<T> addWherePredicate( String wherePredicate ) {
+
          if( S.isNotNullOrEmpty(wherePredicate) )
-            predicateList.add(wherePredicate);
+             predicateList.add(wherePredicate);
 
          return this;
       }
 
       /** */
       @Override
-      public IAggregator<T> build( ) throws DataSetException {
+      public IAggregator<T> build( ) throws DataSetException
+      {
          if( aggrList.isEmpty() )
-            throw new IllegalStateException(
-                    Tags.PRODUCT_LABEL + "Aggregator list is empty");
+             throw new IllegalStateException( Tags.PRODUCT_LABEL + "Aggregator list is empty");
 
-         return new Aggregator(
-                 new ArrayList<>(aggrList),
-                 new ArrayList<>(predicateList),
-                 refreshOnExecute,
-                 ignoreFilter
+         return new Aggregator<>(
+           new ArrayList<>(aggrList),
+           new ArrayList<>(predicateList),
+           refreshOnExecute,
+           ignoreFilter
          );
       }
 
    }
 
-   DataSetSelectBuilder createAggregateSourceBuilder(
-           boolean ignoreFilter
-   ) {
-      DataSetSelectBuilder source =
-              createDataSetSelectBuilder(ignoreFilter);
-
+   /** */
+   DataSetSelectBuilder createAggregateSourceBuilder( boolean ignoreFilter )
+   {
+      DataSetSelectBuilder source = createDataSetSelectBuilder(ignoreFilter);
       source.mark(null);
 
       // ORDER BY only affects aggregate membership when a runtime row limit
       // is active. Otherwise keep the aggregate source free of runtime sort.
       if( getRowLimit() == null )
-         source.orderBy((String)null);
+          source.orderBy( (String)null );
 
       return source;
    }
 
-   static PreparedSql prepareAggregateSql(
-           List<Triplet<String, AggrFuncEnum, String>> aggregates,
-           DataSetSelectBuilder source,
-           SqlDialect dialect
-   ) {
+   /** */
+   static PreparedSql prepareAggregateSql( List<Triplet<String, AggrFuncEnum, String>> aggregates, DataSetSelectBuilder source, SqlDialect dialect ) {
+
       Objects.requireNonNull(source, "source");
 
-      String sql = aggregateSelectSql(aggregates)
-              + " FROM ("
-              + source.buildSql()
-              + ") arslt";
+      String sql = aggregateSelectSql(aggregates) + " FROM (" + source.buildSql() + ") arslt";
 
-      PreparedSql prepared =
-              new SqlSelect(sql, dialect).prepare();
+      PreparedSql prepared = new SqlSelect(sql, dialect).prepare();
 
-      requireAggregateSourceSuffix(
-              prepared,
-              source.prepare()
-      );
+      requireAggregateSourceSuffix( prepared, source.prepare() );
 
       return prepared;
    }
 
-   static PreparedSql prepareAggregateTableSql(
-           List<Triplet<String, AggrFuncEnum, String>> aggregates,
-           String table,
-           List<String> predicates,
-           SqlDialect dialect
-   ) {
+
+   /** */
+   static PreparedSql prepareAggregateTableSql( List<Triplet<String, AggrFuncEnum, String>> aggregates,
+                                                String table, List<String> predicates, SqlDialect dialect )
+   {
       Objects.requireNonNull(table, "table");
       Objects.requireNonNull(predicates, "predicates");
 
-      StringBuilder sql = new StringBuilder(
-              aggregateSelectSql(aggregates)
-      );
+      StringBuilder sql = new StringBuilder( aggregateSelectSql(aggregates) );
 
-      sql.append(" FROM ")
-         .append(table);
+      sql.append(" FROM ") .append(table);
 
-      if( !predicates.isEmpty() ) {
+      if( !predicates.isEmpty() )
+      {
          sql.append(" WHERE null is null");
 
-         for( String predicate : predicates )
+         for( String predicate : predicates ) {
+
             if( S.isNotNullOrEmpty(predicate) )
-               sql.append(" AND (")
-                  .append(predicate)
-                  .append(')');
+                sql.append(" AND (").append(predicate).append(')');
+         }
       }
 
-      return new SqlSelect(
-              sql.toString(),
-              dialect
-      ).prepare();
+      return new SqlSelect( sql.toString(), dialect ).prepare();
    }
 
-   private static String aggregateSelectSql(
-           List<Triplet<String, AggrFuncEnum, String>> aggregates
-   ) {
+   /** */
+   private static String aggregateSelectSql( List<Triplet<String, AggrFuncEnum, String>> aggregates )
+   {
       Objects.requireNonNull(aggregates, "aggregates");
-
       StringBuilder sql = new StringBuilder("SELECT ");
 
-      for( int i = 0; i < aggregates.size(); i++ ) {
+      for( int i = 0; i < aggregates.size(); i++ )
+      {
          if( i > 0 )
             sql.append(", ");
 
-         sql.append(aggregateSql(aggregates.get(i)));
+         sql.append( aggregateSql(aggregates.get(i)) );
       }
 
       return sql.toString();
    }
 
-   static List<Object> aggregateJdbcValues(
-           PreparedSql aggregateSql,
-           DataSetSelectBuilder source,
-           IParameters primary
-   ) {
-      Objects.requireNonNull(aggregateSql, "aggregateSql");
-      Objects.requireNonNull(source, "source");
-      Objects.requireNonNull(primary, "primary");
+
+   /** */
+   static List<Object> aggregateJdbcValues( PreparedSql aggregateSql, DataSetSelectBuilder source, IParameters primary )
+   {
+      Objects.requireNonNull( aggregateSql, "aggregateSql");
+      Objects.requireNonNull( source,       "source" );
+      Objects.requireNonNull( primary,      "primary");
 
       PreparedSql sourceSql = source.prepare();
-      List<Parameter> aggregateParameters =
-              aggregateSql.getParameters();
-      List<Parameter> sourceParameters =
-              sourceSql.getParameters();
 
-      int prefixSize =
-              aggregateParameters.size() - sourceParameters.size();
+      List<Parameter> aggregateParameters = aggregateSql.getParameters();
+      List<Parameter> sourceParameters    = sourceSql.getParameters();
+
+      int prefixSize = aggregateParameters.size() - sourceParameters.size();
 
       if( prefixSize < 0 )
-         throw new IllegalStateException(
-                 "Aggregate PreparedSql has fewer parameters "
-                         + "than its source");
+         throw new IllegalStateException( "Aggregate PreparedSql has fewer parameters than its source");
 
-      requireAggregateSourceSuffix(
-              aggregateSql,
-              sourceSql
-      );
+      requireAggregateSourceSuffix( aggregateSql, sourceSql );
 
-      List<Object> raw =
-              new ArrayList<>(aggregateParameters.size());
+      List<Object> raw = new ArrayList<>(aggregateParameters.size());
 
       int positionalOffset = 0;
 
-      if( prefixSize > 0 ) {
-         List<Parameter> prefixParameters =
-                 new ArrayList<>(
-                         aggregateParameters.subList(
-                                 0,
-                                 prefixSize));
+      if( prefixSize > 0 )
+      {
+         List<Parameter> prefixParameters = new ArrayList<>( aggregateParameters.subList( 0, prefixSize));
 
          for( Parameter parameter : prefixParameters ) {
-            if( parameter.getKind()
-                    == Parameter.Kind.POSITIONAL )
-               positionalOffset++;
+            if( parameter.getKind() == Parameter.Kind.POSITIONAL )
+                positionalOffset++;
          }
 
-         raw.addAll(
-                 PreparedSqlValues.resolve(
-                         new PreparedSql(
-                                 "SELECT 1",
-                                 prefixParameters),
-                         primary
-                 )
-         );
+         raw.addAll( PreparedSqlValues.resolve( new PreparedSql( "SELECT 1", prefixParameters), primary ) );
       }
 
-      raw.addAll(
-              source.values(
-                      primary,
-                      positionalOffset)
-      );
+      raw.addAll( source.values(primary, positionalOffset) );
 
-      return PreparedSqlValues.jdbc(
-              aggregateSql,
-              raw
-      );
+      return PreparedSqlValues.jdbc( aggregateSql, raw );
    }
 
-   private static void requireAggregateSourceSuffix(
-           PreparedSql aggregateSql,
-           PreparedSql sourceSql
-   ) {
-      List<Parameter> aggregate =
-              aggregateSql.getParameters();
-      List<Parameter> source =
-              sourceSql.getParameters();
+   /** */
+   private static void requireAggregateSourceSuffix( PreparedSql aggregateSql, PreparedSql sourceSql )
+   {
+      List<Parameter> aggregate = aggregateSql.getParameters();
+      List<Parameter> source    = sourceSql.getParameters();
 
       int offset = aggregate.size() - source.size();
 
       if( offset < 0 )
-         throw new IllegalStateException(
-                 "Aggregate PreparedSql has fewer parameters "
-                         + "than its source");
+         throw new IllegalStateException( "Aggregate PreparedSql has fewer parameters than its source");
 
-      for( int i = 0; i < source.size(); i++ ) {
-         if( !sameParameter(
-                 aggregate.get(offset + i),
-                 source.get(i)) ) {
-            throw new IllegalStateException(
-                    "Aggregate source parameter plan mismatch "
-                            + "at index " + i);
-         }
+      for( int i = 0; i < source.size(); i++ )
+      {
+         if( !sameParameter( aggregate.get(offset + i), source.get(i)) )
+            throw new IllegalStateException( "Aggregate source parameter plan mismatch at index " + i);
       }
    }
 
-   private static boolean sameParameter(
-           Parameter left,
-           Parameter right
-   ) {
+   /** */
+   private static boolean sameParameter( Parameter left, Parameter right )
+   {
       if( left.getKind() != right.getKind() )
-         return false;
+          return false;
 
       switch( left.getKind() ) {
          case POSITIONAL:
-            return true;
+              return true;
          case NAMED:
-            return Objects.equals(
-                    left.getName(),
-                    right.getName());
+            return Objects.equals( left.getName(), right.getName());
          case NUMBERED:
             return left.getNumber() == right.getNumber();
          case LITERAL:
-            return Objects.equals(
-                    left.getValue(),
-                    right.getValue());
+            return Objects.equals( left.getValue(), right.getValue());
          default:
-            throw new IllegalStateException(
-                    "Unknown parameter kind: "
-                            + left.getKind());
+            throw new NoSuchElementException( "Unknown parameter kind: " + left.getKind());
       }
    }
 
-   static String aggregateSql(
-           Triplet<String, AggrFuncEnum, String> aggregate
-   ) {
-      String expression = aggregate.getFirst();
+   /** */
+   static String aggregateSql( Triplet<String, AggrFuncEnum, String> aggregate )
+   {
+      String expression     = aggregate.getFirst();
       AggrFuncEnum function = aggregate.getSecond();
 
       StringBuilder sql = new StringBuilder();
 
-      if( function == AggrFuncEnum.COUNT
-              && "1".equals(expression.trim()) ) {
+      if( function == AggrFuncEnum.COUNT && "1".equals(expression.trim()) ) {
          sql.append("COUNT(*)");
       }
-      else {
+      else
+      {
          if( function != AggrFuncEnum.NONE )
-            sql.append(function).append(' ');
+             sql.append(function).append(' ');
 
-         sql.append('(')
-            .append(expression)
-            .append(')');
+         sql.append('(') .append(expression) .append(')');
       }
 
-      return sql.append(' ')
-              .append(aggregate.third)
-              .toString();
+      return sql.append(' ').append(aggregate.third).toString();
    }
 
-   private static boolean isRowCountAggregate(
-           Triplet<String, AggrFuncEnum, String> aggregate
-   ) {
+   /** */
+   private static boolean isRowCountAggregate( Triplet<String, AggrFuncEnum, String> aggregate )
+   {
       if( aggregate.getSecond() != AggrFuncEnum.COUNT )
-         return false;
+          return false;
 
       String expression = aggregate.getFirst().trim();
       return "1".equals(expression) || "*".equals(expression);
    }
 
+   /** */
    private static String aggregateResultKey(String sqlAlias) {
+
       if( sqlAlias == null )
-         return null;
+          return null;
 
       String key = sqlAlias.trim();
 
-      if( key.length() >= 2
-              && key.charAt(0) == '"'
-              && key.charAt(key.length() - 1) == '"' ) {
-         return key.substring(1, key.length() - 1)
-                 .replace("\"\"", "\"");
-      }
+      if( key.length() >= 2 && key.charAt(0) == '"' && S.lastChar(key) == '"' )
+          return key.substring(1, key.length() - 1).replace("\"\"", "\"");
 
       return key;
    }
@@ -2364,75 +2290,72 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       private final IDataSetListener refreshListener;
       private final IProperty.ChangeListener<Boolean> readerInvalidationListener;
+
       private boolean closed;
 
       final private boolean ignoreFilter;
 
       /** */
       public Aggregator (
-              List< Triplet<String, AggrFuncEnum, String> > aggrList,
-              List< String > predicateList,
-              boolean refreshOnExecute,
-              boolean ignoreFilter
+         List< Triplet<String, AggrFuncEnum, String> > aggrList,
+         List< String > predicateList,
+         boolean refreshOnExecute,
+         boolean ignoreFilter
       )
       {
-         this.aggrList = Collections.unmodifiableList(
-                 new ArrayList<>(aggrList));
-         this.predicateList = Collections.unmodifiableList(
-                 new ArrayList<>(predicateList));
-         this.ignoreFilter = ignoreFilter;
+         this.aggrList      = Collections.unmodifiableList(new ArrayList<>(aggrList));
+         this.predicateList = Collections.unmodifiableList(new ArrayList<>(predicateList));
+         this.ignoreFilter  = ignoreFilter;
 
          refreshListener = refreshOnExecute
-                 ? (DataSetEvent e) -> {
-                    if( e.getEventType() == EXECUTE && e.isAfter() ) {
-                       try {
-                          execute(true);
-                       }
-                       catch( DataSetException ex ) {
-                          throw new RuntimeException(
-                                  Tags.PRODUCT_LABEL
-                                          + "Error on execute aggregator",
-                                  ex);
-                       }
-                    }
-                 }
-                 : null;
+         ? new IDataSetListener() {
+            @Override
+            public void dataSetChanged(DataSetEvent e) {
+               if (e.getEventType() == EXECUTE && e.isAfter()) {
+                  try {
+                     Aggregator.this.execute(true);
+                  } catch (DataSetException ex) {
+                     throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on execute aggregator", ex);
+                  }
+               }
+            }
+         }
+         : null;
 
          if( refreshListener != null )
-            SQLDataSet.this.addDataSetListener(refreshListener);
+             SQLDataSet.this.addDataSetListener(refreshListener);
 
-         readerInvalidationListener =
-                 (property, oldValue, newValue) -> {
-                    if( Boolean.TRUE.equals(newValue) )
-                       invalidateReader();
-                 };
+         readerInvalidationListener =(property, oldValue, newValue) ->
+         {
+            if( Boolean.TRUE.equals(newValue) ) invalidateReader();
+         };
 
-         SQLDataSet.this.needReCreateReader.addListener(
-                 readerInvalidationListener);
+         SQLDataSet.this.needReCreateReader.addListener( readerInvalidationListener );
       }
 
+      /** */
       private void requireOpen() {
          if( closed )
-            throw new IllegalStateException("Aggregator is closed");
+             throw new IllegalStateException("Aggregator is closed");
       }
 
-      private void invalidateReader() {
+      private void invalidateReader()
+      {
          JDBCDataReader<Map<String,Object>> reader = dataReader;
+
          dataReader = null;
-         preparedSql = null;
+         preparedSql= null;
+
          aggregateSourceBuilder = null;
 
          if( reader == null )
-            return;
+             return;
 
          try {
             reader.close();
          }
          catch( DataSetException ex ) {
-            throw new RuntimeException(
-                    Tags.PRODUCT_LABEL
-                            + "Error closing aggregator reader",
-                    ex);
+            throw new RuntimeException( Tags.PRODUCT_LABEL + "Error closing aggregator reader", ex);
          }
       }
 
@@ -2446,26 +2369,21 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       private void prepareReader( ) {
 
          if( dataReader != null )
-            return;
+             return;
 
-         aggregateSourceBuilder =
-                 createAggregateSourceBuilder(ignoreFilter);
+         aggregateSourceBuilder = createAggregateSourceBuilder(ignoreFilter);
 
          for( String predicate : predicateList )
-            aggregateSourceBuilder.addPredicate(predicate);
+             aggregateSourceBuilder.addPredicate(predicate);
 
-         preparedSql = prepareAggregateSql(
-                 aggrList,
-                 aggregateSourceBuilder,
-                 getTaskContextForUse().dialect()
-         );
+         preparedSql = prepareAggregateSql( aggrList, aggregateSourceBuilder, getTaskContextForUse().dialect() );
 
          dataReader = new JDBCDataReader<>(
-                 getTaskContextForUse().getConnection(),
-                 preparedSql,
-                 AggrRSMapper.instance,
-                 null,
-                 false
+            getTaskContextForUse().getConnection(),
+            preparedSql,
+            AggrRSMapper.instance,
+            null,
+            false
          );
       }
 
@@ -2493,36 +2411,25 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          requireOpen();
 
          if( onEvent && ( listeners.isEmpty() || getProperty("ds.execute_count") == null ) )
-            return;
+             return;
 
          values = null;
 
          prepareReader( );
 
-         dataReader.executeQuery(
-                 aggregateJdbcValues(
-                         preparedSql,
-                         aggregateSourceBuilder,
-                         mainSqlParameters)
-         );
+         dataReader.executeQuery( aggregateJdbcValues( preparedSql, aggregateSourceBuilder, mainSqlParameters) );
 
          values = dataReader.getNextPage(1).get(0);
 
-         if( totalRowCount == -1
-                 && !ignoreFilter
-                 && predicateList.isEmpty() )
+         if( totalRowCount == -1 && !ignoreFilter && predicateList.isEmpty() )
          {
             aggrList.stream()
-                    .filter(SQLDataSet::isRowCountAggregate)
-                    .findFirst()
-                    .map( (a)-> totalRowCount = U.nvl(
-                            TypeConverter.convert(
-                                    values.get(
-                                            aggregateResultKey(a.third)),
-                                    Integer.class
-                            ),
-                            -1
-                    ) );
+               .filter(SQLDataSet::isRowCountAggregate)
+                  .findFirst()
+                     .map( (a)-> totalRowCount = U.nvl(
+                            TypeConverter.convert( values.get( aggregateResultKey(a.third)), Integer.class ), -1
+                           )
+                     );
          }
 
          listeners.fire( (IAggregatorListener<T> l)->l.change(this) );
@@ -2543,24 +2450,26 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       /** */
       @Override
       public void close() throws DataSetException {
+
          if( closed )
-            return;
+             return;
 
          closed = true;
 
          if( refreshListener != null )
-            SQLDataSet.this.removeDataSetListener(refreshListener);
+             SQLDataSet.this.removeDataSetListener(refreshListener);
 
-         SQLDataSet.this.needReCreateReader.removeListener(
-                 readerInvalidationListener);
+         SQLDataSet.this.needReCreateReader.removeListener( readerInvalidationListener );
 
          JDBCDataReader<Map<String,Object>> reader = dataReader;
+
          dataReader = null;
-         preparedSql = null;
+         preparedSql= null;
+
          aggregateSourceBuilder = null;
 
          if( reader != null )
-            reader.close();
+             reader.close();
       }
    }
 }
