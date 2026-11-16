@@ -253,29 +253,38 @@ public class JsonSqlCall implements IDataCall {
                                           ArrayMetaData.get( tc, p.getElementType() );
 
                                     final Collection<?> col = (Collection< ? extends Object >)value;
-                                    Object obj = null;
-                                    for(Object o : col) { if( o != null ) { obj = o; break; } }
+                                    final Object obj = U.firstNotNull(col);
 
                                     final Array array;
 
                                     if( arrayMetaData.getBaseType() == Types.STRUCT )
                                     {
-                                        final IStructMapper sm = StructMetaData.get( tc, arrayMetaData.getBaseTypeName() ).getMapper(obj.getClass() );
+                                        if( obj == null )
+                                            array = arrayMetaData.makeArray( Collections.nCopies(col.size(), null) );
+                                        else
+                                        {
+                                            final IStructMapper sm = StructMetaData.get( tc, arrayMetaData.getBaseTypeName() ).getMapper(obj.getClass() );
 
-                                        final Struct sa[] = new Struct[col.size()];
-                                        int i = 0;
-                                        for(Object o : col)
-                                             sa[i++] = sm.toStruct( tc, o );
+                                            final Struct sa[] = new Struct[col.size()];
+                                            int i = 0;
+                                            for(Object o : col)
+                                                 sa[i++] = o == null ? null : sm.toStruct( tc, o );
 
-                                        array = arrayMetaData.makeArray( Arrays.asList(sa) );
+                                            array = arrayMetaData.makeArray( Arrays.asList(sa) );
+                                        }
                                     }
                                     else
                                         array = arrayMetaData.makeArray( col );
 
-                                    ob.add( "sqlType",    "ARRAY" );
-                                    ob.add( "typeName",   arrayMetaData.getSqlTypeName() );
-                                    ob.add( "elementType",arrayMetaData.getBaseTypeName() );
-                                    ob.add( "value",      arrayMetaData.toJson(array) );
+                                    try {
+                                        ob.add( "sqlType",    "ARRAY" );
+                                        ob.add( "typeName",   arrayMetaData.getSqlTypeName() );
+                                        ob.add( "elementType",arrayMetaData.getBaseTypeName() );
+                                        ob.add( "value",      arrayMetaData.toJson(array) );
+                                    }
+                                    finally {
+                                        array.free();
+                                    }
                                 }
                                 catch( Throwable th ) {
                                     throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on prepare '" + p.getElementType() + "' ARRAY value", th );
@@ -405,6 +414,31 @@ public class JsonSqlCall implements IDataCall {
         return json2Java( jv );
     }
 
+    /** */
+    static Object convertScalarOutValue( Object value, ParameterMetadata<?> parameter )
+    {
+        final Class<?> javaType = parameter.getParameterType();
+        return javaType == null ? value : TypeConverter.convert( value, javaType );
+    }
+
+    /** */
+    static void storeStructArrayOutValue(
+            ParametersValues parametersValues,
+            String parameterName,
+            List values,
+            IStructMapper mapper
+    )
+    {
+        if( mapper != null )
+            for( int i = 0; i < values.size(); i++ )
+            {
+                final Object value = values.get(i);
+                values.set( i, value == null ? null : mapper.from(value) );
+            }
+
+        parametersValues.setParameter( parameterName, values );
+    }
+
     /** Выполнение запроса */
     @Override
     public JsonSqlCall execute() throws CallException {
@@ -502,16 +536,12 @@ public class JsonSqlCall implements IDataCall {
                                       {
                                           final StructMetaData metaData = StructMetaData.get( tc, arrayMetaData.getBaseTypeName() );
                                           final List list = metaData.fromMapsArray( (List)v );
+                                          IStructMapper mapper = null;
 
                                           if( parameter.getParameterType() != null )
-                                          {
-                                              final IStructMapper mapper = metaData.getMapper( parameter.getParameterType() );
+                                              mapper = metaData.getMapper( parameter.getParameterType() );
 
-                                              for( int i = 0; i < list.size(); i++ )
-                                                   list.set( i, mapper.from(list.get(i) ) );
-
-                                              parametersValues.set( ns, list );
-                                          }
+                                          storeStructArrayOutValue( parametersValues, ns, list, mapper );
                                       }
                                       else
                                       {
@@ -524,7 +554,7 @@ public class JsonSqlCall implements IDataCall {
                                       }
                                   }
                                   else
-                                      parametersValues.set( ns, TypeConverter.convert( v,parameter.getParameterType() ) );
+                                      parametersValues.set( ns, convertScalarOutValue( v, parameter ) );
                         }
                     }
                 }
