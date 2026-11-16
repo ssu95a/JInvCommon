@@ -870,6 +870,27 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             return rows( ).stream( ).filter( mrkprdkt.and(predicate) ).iterator();
 	}
 
+    DataSetSelectBuilder createMarkedRSIteratorBuilder(
+            boolean ignoreFilter
+    ) {
+        DataSetSelectBuilder builder =
+                createDataSetSelectBuilder(ignoreFilter);
+
+        builder.mark("1");
+
+        String alias = getQueryAlias();
+
+        builder.addPredicate(
+                markExistsPredicate(
+                        S.isNullOrEmpty(alias)
+                                ? ""
+                                : alias + "."
+                )
+        );
+
+        return builder;
+    }
+
     /** {@inheritDoc} */
     @Override
 	public Iterator<T> createMarkedRSIterator( boolean ignoreFilter ) throws DataSetException {
@@ -877,15 +898,17 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         if( !isSupportMark() || getMarkerID() == null )
             return Collections.<T>emptyIterator();
 
-        DataSetSelectBuilder builder = createDataSetSelectBuilder( ignoreFilter );
-        builder.mark("1");
-
-        builder.addPredicate(markExistsPredicate(""));
+        DataSetSelectBuilder builder =
+                createMarkedRSIteratorBuilder(ignoreFilter);
 
         PreparedSql sql = builder.prepare();
         JDBCDataReader<T> reader = new JDBCDataReader<>(
                 getTaskContextForUse().getConnection(),
-                sql, getRowMapperForUse(), null, false );
+                sql,
+                getRowMapperForUse(),
+                getRowClass(),
+                false
+        );
         reader.executeQuery(builder.jdbcValues(mainSqlParameters));
 
         return IDataReader.iterator( reader, 50 );
