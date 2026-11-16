@@ -95,7 +95,7 @@ public class SQLTreeDataSetRefreshCurrentItemPlanTest {
 
         assertTrue(plan.sql.contains("NOTE = ':ID'"));
         assertTrue(plan.sql.contains("/* :ID */"));
-        assertEquals(2, plan.preparedSql.getParameters().size());
+        assertEquals(3, plan.preparedSql.getParameters().size());
 
         List<Object> values =
                 SQLTreeDataSet.refreshCurrentItemJdbcValues(
@@ -104,7 +104,10 @@ public class SQLTreeDataSetRefreshCurrentItemPlanTest {
                         ParametersByName.of(name -> 900)
                 );
 
-        assertEquals(Arrays.<Object>asList(900, 42), values);
+        assertEquals(
+                Arrays.<Object>asList(":ID", 900, 42),
+                values
+        );
     }
 
     @Test
