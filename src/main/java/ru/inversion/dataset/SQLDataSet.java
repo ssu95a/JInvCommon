@@ -1034,8 +1034,22 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * @see NamedNativeQueries
     */
    private String getNativeQuery( ) {
-      assert this.nativeQueryName != QUERY_TABLE;
-      return getRowClass() == null ? null : XXIDsDao.getNativeQuery( getTaskContext(), getRowClass(), this.nativeQueryName == QUERY_UNNAMED ? null : this.nativeQueryName  );
+
+      if( QUERY_TABLE.equals(nativeQueryName) )
+         return null;
+
+      String queryName =
+              QUERY_UNNAMED.equals(nativeQueryName)
+                      ? null
+                      : nativeQueryName;
+
+      return getRowClass() == null
+              ? null
+              : XXIDsDao.getNativeQuery(
+                      getTaskContext(),
+                      getRowClass(),
+                      queryName
+              );
    }
 
    /** {@inheritDoc} */
