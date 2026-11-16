@@ -2,6 +2,7 @@ package ru.inversion.tds;
 
 import ru.inversion.dataset.DataSetEvent;
 import ru.inversion.dataset.DataSetMarkEvent;
+import ru.inversion.dataset.DataSetRowEvent;
 import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.dataset.impl.XXIDsMarkerDao;
 import ru.inversion.dataset.mark.IMarkable;
@@ -183,6 +184,32 @@ public class XXITreeDataSet<P> extends SQLTreeDataSet <P> {
                 }
             });
 
+            addRowsListener(event -> {
+                if( !event.isAfter() )
+                    return;
+
+                final DataSetRowEvent.RowOperationEnum operation =
+                        event.getItemOperation();
+
+                if( operation != DataSetRowEvent.RowOperationEnum.INSERT
+                        && operation != DataSetRowEvent.RowOperationEnum.DELETE )
+                    return;
+
+                if( event.isAllItems() ) {
+                    if( operation == DataSetRowEvent.RowOperationEnum.DELETE )
+                        markedCount = 0;
+                    return;
+                }
+
+                final int changedMarkedCount =
+                        countMarkedItems(event.getItems());
+
+                if( operation == DataSetRowEvent.RowOperationEnum.INSERT )
+                    markedCount += changedMarkedCount;
+                else
+                    markedCount = Math.max(0, markedCount - changedMarkedCount);
+            });
+
             addItemListener(event -> {
 
                 if (event.getEventType() != TreeDataSetItemEvent.ItemEventType.CHANGE_VALUE)
@@ -244,6 +271,31 @@ public class XXITreeDataSet<P> extends SQLTreeDataSet <P> {
         markedCount = count[0];
     }
 
+    /** Counts marked values in the supplied subtrees. */
+    private int countMarkedItems( List<ITreeDataSetItem<P>> items ) {
+
+        if( items == null || items.isEmpty() )
+            return 0;
+
+        final int[] count = {0};
+
+        for( ITreeDataSetItem<P> item : items ) {
+            if( item == null )
+                continue;
+
+            item.acceptVisitor(treeItem -> {
+                if( treeItem != null
+                        && treeItem.getValue() instanceof IMarkable
+                        && ((IMarkable)treeItem.getValue()).isMark() )
+                    count[0]++;
+
+                return true;
+            });
+        }
+
+        return count[0];
+    }
+
     /**
      * Возвращает и если необходимо инициализирует markerId.
      * <p>
@@ -288,8 +340,17 @@ public class XXITreeDataSet<P> extends SQLTreeDataSet <P> {
     /** {@inheritDoc } */
     @Override
     public void clear() {
-        super.clear();
-        markedCount = 0;
+        try {
+            super.clear();
+        }
+        finally {
+            /*
+             * clear() can fail in an after-listener after the tree has
+             * already been emptied. Keep the derived counter consistent
+             * with the actual tree on every exit path.
+             */
+            recalcMarkedCount();
+        }
     }
 
     /** Реализация установки или снятия пометки на одну запись. */
@@ -367,7 +428,10 @@ public class XXITreeDataSet<P> extends SQLTreeDataSet <P> {
     /** */
     public boolean isMarkItem( ITreeDataSetItem<P> item )
     {
-        if( !isSupportMark() || item == null || item.getDataSet() != this)
+        if( !isSupportMark()
+                || item == null
+                || item.getDataSet() != this
+                || !containsItem(item) )
             return false;
 
         final P value = item.getValue();
@@ -390,32 +454,7 @@ public class XXITreeDataSet<P> extends SQLTreeDataSet <P> {
 
         try {
 
-            final CompositeAdapter<P, ?> ca = getCompositeAdapter();
-            final List<Comparable<?>> idsList = new ArrayList<>();
-
-            traversal(item -> {
-
-                if( item == null || !( item.getValue() instanceof IMarkable ) )
-                    return true;
-
-                if( leafOnly && !item.isLeaf() )
-                    return true;
-
-                final P value = item.getValue();
-                final IMarkable markable = (IMarkable) value;
-
-                if( !markable.isMark() )
-                {
-                    final Comparable<?> id = ca.getId(value);
-
-                    if( id == null )
-                        throw new TreeDataSetException( Tags.PRODUCT_LABEL + "Cannot mark row with null ID. Class: " + value.getClass().getName() );
-
-                    idsList.add(id);
-                }
-
-                return true;
-            });
+            final List<Object> idsList = collectUnmarkedMarkIds(leafOnly);
 
             if( idsList.isEmpty() )
                 return;
@@ -431,6 +470,41 @@ public class XXITreeDataSet<P> extends SQLTreeDataSet <P> {
         catch (Throwable th) {
             throw new TreeDataSetException( Tags.PRODUCT_LABEL + "Error on markAll", th );
         }
+    }
+
+    /**
+     * Returns mark-table keys, not the tree entity primary keys. These values
+     * differ for ROWID and string-key mark modes.
+     */
+    List<Object> collectUnmarkedMarkIds( boolean leafOnly )
+    {
+        final List<Object> idsList = new ArrayList<>();
+
+        traversal(item -> {
+
+            if( item == null || !( item.getValue() instanceof IMarkable ) )
+                return true;
+
+            if( leafOnly && !item.isLeaf() )
+                return true;
+
+            final P value = item.getValue();
+            final IMarkable markable = (IMarkable) value;
+
+            if( !markable.isMark() )
+            {
+                final Object id = markable.getMarkID1();
+
+                if( id == null )
+                    throw new TreeDataSetException( Tags.PRODUCT_LABEL + "Cannot mark row with null mark ID. Class: " + value.getClass().getName() );
+
+                idsList.add(id);
+            }
+
+            return true;
+        });
+
+        return idsList;
     }
 
     public void markAll( )
