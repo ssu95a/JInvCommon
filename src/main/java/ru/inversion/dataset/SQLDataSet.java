@@ -2061,7 +2061,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
               getTaskContextForUse().getConnection(),
               preparedSql,
               getRowMapperForUse(),
-              null,
+              getRowClass(),
               false
       );
       reader.executeQuery(values);
