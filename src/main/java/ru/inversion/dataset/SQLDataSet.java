@@ -898,17 +898,19 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
          fireDataSetEvent( DataSetEvent.DataSetEventType.EXECUTE, true );
 
+         Integer previousExecuteCount = getProperty("ds.execute_count");
+
          // увеличиваем счетчик выполнения запросов в dataSet
          int executeCount = incrementCounter( );
 
-         if( executeCount == 1 )
-         {
-            fireDataSetEvent( DataSetEvent.DataSetEventType.FIRST_TIME_EXECUTE, true );
-
-            onBeforeFirstExecute( );
-         }
-
          try {
+
+            if( executeCount == 1 )
+            {
+               fireDataSetEvent( DataSetEvent.DataSetEventType.FIRST_TIME_EXECUTE, true );
+
+               onBeforeFirstExecute( );
+            }
 
             if( dataReader == null || needReCreateReader.getValue() )
             {
@@ -936,6 +938,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             predicates.values().stream().filter(PredicateItem::isPre).forEach(PredicateItem::makeFinal);
          }
          catch( Throwable th ) {
+            // Первая инициализация не завершена: retry должен снова вызвать
+            // onBeforeFirstExecute() и восстановить auto/default filters.
+            if( executeCount == 1 )
+               setProperty("ds.execute_count", previousExecuteCount);
+
             // При ошибке исполнения ИЛИ чтения первой страницы pre-предикаты откатываются.
             predicates.entrySet().removeIf(entry -> entry.getValue().isPre());
             needReCreateReader();
