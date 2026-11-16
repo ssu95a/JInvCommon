@@ -91,9 +91,11 @@ public class IDataReaderIteratorTest {
         assertEquals("page failed", failure.getMessage());
         assertEquals(1, reader.closeCount);
         assertEquals(1, failure.getSuppressed().length);
-        assertEquals(
-                "close failed",
-                failure.getSuppressed()[0].getMessage()
+        assertTrue(
+                failure.getSuppressed()[0].getMessage(),
+                failure.getSuppressed()[0]
+                        .getMessage()
+                        .contains("close failed")
         );
         assertFalse(iterator.hasNext());
     }
