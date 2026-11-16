@@ -577,4 +577,107 @@ public class AggregatorContractTest {
         assertTrue(sql, sql.contains("a$.idrow = ID"));
     }
 
+
+    @Test
+    public void qualifiedAggregateExpressionKeepsExplicitQueryAliasVisible() {
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                new ru.inversion.dataset.impl.DataSetSelectBuilder(
+                        "select ID, AMOUNT from T",
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                ).queryAlias("q");
+
+        java.util.List<ru.inversion.utils.Triplet<String, AggrFuncEnum, String>>
+                aggregates = java.util.Collections.singletonList(
+                        ru.inversion.utils.Triplet.makeTriplet(
+                                "q.AMOUNT",
+                                AggrFuncEnum.SUM,
+                                "TOTAL"
+                        )
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                SQLDataSet.prepareAggregateSql(
+                        aggregates,
+                        source,
+                        "q",
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(
+                        "SUM (q.AMOUNT) TOTAL FROM ("
+                )
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().endsWith(") q")
+        );
+    }
+
+    @Test
+    public void aggregateWithoutQueryAliasKeepsArsltOuterAlias() {
+        assertEquals(
+                "arslt",
+                SQLDataSet.aggregateOuterAlias(null)
+        );
+        assertEquals(
+                "arslt",
+                SQLDataSet.aggregateOuterAlias("")
+        );
+        assertEquals(
+                "q",
+                SQLDataSet.aggregateOuterAlias("q")
+        );
+    }
+
+    @Test
+    public void markedQualifiedAggregateUsesSameExplicitAliasOutside() {
+        TestXXIDataSet ds = new TestXXIDataSet();
+        ds.setSQL("select ID, AMOUNT from T");
+        ds.setQueryAlias("q");
+        ds.setRowClass(MarkRow.class);
+
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                ds.createMarkedAggregateSourceBuilder(
+                        java.util.Collections.emptyList(),
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        java.util.List<ru.inversion.utils.Triplet<String, AggrFuncEnum, String>>
+                aggregates = java.util.Collections.singletonList(
+                        ru.inversion.utils.Triplet.makeTriplet(
+                                "q.AMOUNT",
+                                AggrFuncEnum.SUM,
+                                "TOTAL"
+                        )
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                SQLDataSet.prepareAggregateSql(
+                        aggregates,
+                        source,
+                        SQLDataSet.aggregateOuterAlias(ds.getQueryAlias()),
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains("a$.idrow = q.ID")
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains("SUM (q.AMOUNT) TOTAL")
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().endsWith(") q")
+        );
+        assertEquals(1, prepared.getParameters().size());
+        assertEquals(
+                "jinv_marker_id",
+                prepared.getParameters().get(0).getName()
+        );
+    }
+
 }

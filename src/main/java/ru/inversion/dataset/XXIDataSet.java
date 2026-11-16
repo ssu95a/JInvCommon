@@ -1072,6 +1072,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                 preparedSql = prepareAggregateSql(
                         aggrList,
                         aggregateSourceBuilder,
+                        aggregateOuterAlias(getQueryAlias()),
                         getTaskContextForUse().dialect()
                 );
             }

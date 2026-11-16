@@ -2093,17 +2093,34 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    /** */
-   static PreparedSql prepareAggregateSql( List<Triplet<String, AggrFuncEnum, String>> aggregates, DataSetSelectBuilder source, SqlDialect dialect ) {
+   static PreparedSql prepareAggregateSql( List<Triplet<String, AggrFuncEnum, String>> aggregates,
+                                           DataSetSelectBuilder source, SqlDialect dialect )
+   {
+      return prepareAggregateSql( aggregates, source, "arslt", dialect );
+   }
 
+   /** */
+   static PreparedSql prepareAggregateSql( List<Triplet<String, AggrFuncEnum, String>> aggregates,
+                                           DataSetSelectBuilder source, String outerAlias, SqlDialect dialect )
+   {
       Objects.requireNonNull(source, "source");
+      Checks.Require.text(outerAlias, "outerAlias");
 
-      String sql = aggregateSelectSql(aggregates) + " FROM (" + source.buildSql() + ") arslt";
+      String sql = aggregateSelectSql(aggregates)
+                 + " FROM (" + source.buildSql() + ") "
+                 + outerAlias;
 
       PreparedSql prepared = new SqlSelect(sql, dialect).prepare();
 
       requireAggregateSourceSuffix( prepared, source.prepare() );
 
       return prepared;
+   }
+
+   /** */
+   static String aggregateOuterAlias( String queryAlias )
+   {
+      return S.isNullOrEmpty(queryAlias) ? "arslt" : queryAlias;
    }
 
 
@@ -2376,7 +2393,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          for( String predicate : predicateList )
              aggregateSourceBuilder.addPredicate(predicate);
 
-         preparedSql = prepareAggregateSql( aggrList, aggregateSourceBuilder, getTaskContextForUse().dialect() );
+         preparedSql = prepareAggregateSql(
+            aggrList,
+            aggregateSourceBuilder,
+            aggregateOuterAlias(getQueryAlias()),
+            getTaskContextForUse().dialect()
+         );
 
          dataReader = new JDBCDataReader<>(
             getTaskContextForUse().getConnection(),
