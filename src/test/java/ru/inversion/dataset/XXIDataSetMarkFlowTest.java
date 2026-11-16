@@ -77,6 +77,28 @@ public class XXIDataSetMarkFlowTest {
         );
     }
 
+    @Test
+    public void markedIteratorSourceQualifiesKeyWithExplicitAlias() {
+        TestDataSet ds = new TestDataSet();
+        ds.setRowClass(IdRow.class);
+        ds.setQueryAlias("q");
+
+        PreparedSql prepared =
+                ds.createMarkedRSIteratorBuilder(false).prepare();
+
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(
+                        "a$.idrow = q.ID_A"
+                )
+        );
+        assertEquals(1, prepared.getParameters().size());
+        assertEquals(
+                "jinv_marker_id",
+                prepared.getParameters().get(0).getName()
+        );
+    }
+
     private static DataSetSelectBuilder markSource(TestDataSet ds)
             throws Exception {
         Method method = XXIDataSet.class.getDeclaredMethod(
@@ -102,9 +124,10 @@ public class XXIDataSetMarkFlowTest {
                 boolean ignoreFilters
         ) {
             return new DataSetSelectBuilder(
-                    "select id, rank from t",
+                    "select ID_A, rank from t",
                     SqlDialectFactory.POSTGRES
             )
+                    .queryAlias(getQueryAlias())
                     .orderBy("rank DESC")
                     .rowLimit(getRowLimit())
                     .mark("0");
