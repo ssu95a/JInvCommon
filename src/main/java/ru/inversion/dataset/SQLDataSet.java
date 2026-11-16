@@ -223,7 +223,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setTaskContext(tc);
       setCallbackParameters(parameters);
 
-      needReCreateReader.addListener( ( property, oldValue, newValue ) -> refreshCurrentRowSQL = null);
+      needReCreateReader.addListener(
+              (property, oldValue, newValue) -> refreshCurrentRowPlan = null);
    }
 
    /** {@inheritDoc } */
@@ -440,8 +441,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected void needReCreateReader() {
       // BooleanProperty не уведомляет слушателей при повторной установке true.
       // Зависимый SQL-кеш должен сбрасываться при КАЖДОМ структурном изменении.
-      refreshCurrentRowSQL = null;
-      refreshCurrentRowPreparedSql = null;
+      refreshCurrentRowPlan = null;
       needReCreateReader.setValue( true );
    }
 
@@ -1413,11 +1413,200 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return PreparedSqlRenderer.renderJdbc(preparedSql, values, scanner);
    }
 
-   private transient String refreshCurrentRowSQL;
-   private transient PreparedSql refreshCurrentRowPreparedSql;
+   static final class RefreshCurrentRowPlan {
+      final String sql;
+      final PreparedSql preparedSql;
+      final List<String> idParameterNames;
+
+      RefreshCurrentRowPlan(
+              String sql,
+              PreparedSql preparedSql,
+              List<String> idParameterNames
+      ) {
+         this.sql = Objects.requireNonNull(sql, "sql");
+         this.preparedSql = Objects.requireNonNull(
+                 preparedSql,
+                 "preparedSql"
+         );
+         this.idParameterNames =
+                 Collections.unmodifiableList(
+                         new ArrayList<>(idParameterNames));
+      }
+   }
+
+   private transient RefreshCurrentRowPlan refreshCurrentRowPlan;
+
+   RefreshCurrentRowPlan createRefreshCurrentRowPlan(
+           List<String> idColumns,
+           SqlDialect dialect
+   ) {
+      Objects.requireNonNull(idColumns, "idColumns");
+      Objects.requireNonNull(dialect, "dialect");
+
+      if( idColumns.isEmpty() )
+         throw new IllegalArgumentException(
+                 "Refresh current row PK list is empty");
+
+      String sourceSql = internalGetSQL();
+      String alias = getQueryAlias();
+
+      DataSetSelectBuilder builder =
+              new DataSetSelectBuilder(sourceSql, dialect);
+
+      if( S.isNotNullOrEmpty(alias) )
+         builder.queryAlias(alias);
+
+      Set<String> usedNames = new HashSet<>();
+      SqlScanner scanner = SqlScannerFactory.create(dialect);
+      collectNamedParameters(
+              usedNames,
+              sourceSql,
+              scanner
+      );
+
+      String mark = null;
+
+      if( isSupportMark() ) {
+         mark = getMarkSQLPart();
+         collectNamedParameters(
+                 usedNames,
+                 mark,
+                 scanner
+         );
+         builder.mark(mark == null ? "0" : mark);
+      }
+
+      List<String> idParameterNames =
+              new ArrayList<>(idColumns.size());
+      StringBuilder predicate = new StringBuilder();
+      String qualifier =
+              S.isNullOrEmpty(alias) ? "" : alias + ".";
+
+      for( int i = 0; i < idColumns.size(); i++ ) {
+         if( i > 0 )
+            predicate.append(" and ");
+
+         String parameterName =
+                 nextRefreshCurrentRowParameterName(
+                         usedNames,
+                         i
+                 );
+
+         idParameterNames.add(parameterName);
+
+         predicate.append(qualifier)
+                  .append(idColumns.get(i))
+                  .append(" = :")
+                  .append(parameterName);
+      }
+
+      builder.addPredicate(predicate.toString());
+
+      return new RefreshCurrentRowPlan(
+              builder.buildSql(),
+              builder.prepare(),
+              idParameterNames
+      );
+   }
+
+   static List<Object> refreshCurrentRowJdbcValues(
+           RefreshCurrentRowPlan plan,
+           List<?> idValues,
+           IParameters primary
+   ) {
+      Objects.requireNonNull(plan, "plan");
+      Objects.requireNonNull(idValues, "idValues");
+      Objects.requireNonNull(primary, "primary");
+
+      if( plan.idParameterNames.size() != idValues.size() )
+         throw new IllegalArgumentException(
+                 "Refresh current row PK parameter/value count mismatch: "
+                         + plan.idParameterNames.size()
+                         + " != "
+                         + idValues.size()
+         );
+
+      Map<String,Object> pkValues =
+              new HashMap<>(plan.idParameterNames.size());
+
+      for( int i = 0; i < plan.idParameterNames.size(); i++ )
+         pkValues.put(
+                 plan.idParameterNames.get(i),
+                 idValues.get(i)
+         );
+
+      IParameters refreshParameters = new IParameters() {
+         @Override
+         public Object getParameter( String parameterName ) {
+            return pkValues.containsKey(parameterName)
+                    ? pkValues.get(parameterName)
+                    : primary.getParameter(parameterName);
+         }
+
+         @Override
+         public Object getParameter( int parameterIndex ) {
+            return primary.getParameter(parameterIndex);
+         }
+
+         @Override
+         public boolean hasParameter( String parameterName ) {
+            return pkValues.containsKey(parameterName)
+                    || primary.hasParameter(parameterName);
+         }
+
+         @Override
+         public boolean hasParameter( int parameterIndex ) {
+            return primary.hasParameter(parameterIndex);
+         }
+      };
+
+      return PreparedSqlValues.jdbc(
+              plan.preparedSql,
+              refreshParameters
+      );
+   }
+
+   private static void collectNamedParameters(
+           Set<String> names,
+           String sql,
+           SqlScanner scanner
+   ) {
+      if( S.isNullOrEmpty(sql) )
+         return;
+
+      for( SqlScanner.Token token : scanner.scan(sql) ) {
+         if( token.kind()
+                 != SqlScanner.Kind.NAMED_PARAMETER )
+            continue;
+
+         names.add(
+                 token.text(sql)
+                         .substring(1)
+                         .toUpperCase(Locale.ROOT)
+         );
+      }
+   }
+
+   private static String nextRefreshCurrentRowParameterName(
+           Set<String> usedNames,
+           int index
+   ) {
+      String base = "jinv_refresh_pk_" + index;
+      String name = base;
+      int suffix = 0;
+
+      while( !usedNames.add(
+              name.toUpperCase(Locale.ROOT)) )
+         name = base + "_" + (++suffix);
+
+      return name;
+   }
 
    /** {@inheritDoc} */
-   public void refreshCurrentRowFromDB( boolean refreshDependentData, Consumer<SQLDataSet> onNoDataFound ) throws DataSetException {
+   public void refreshCurrentRowFromDB(
+           boolean refreshDependentData,
+           Consumer<SQLDataSet> onNoDataFound
+   ) throws DataSetException {
 
       final P row = getCurrentRow();
 
@@ -1425,109 +1614,100 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          return;
 
       try {
-
-         List<IEntityProperty< P,?>> idPropertyList = EntityMetadataFactory.getEntityMetaData( getRowClass() ).getIDList();
+         List<IEntityProperty<P,?>> idPropertyList =
+                 EntityMetadataFactory
+                         .getEntityMetaData(getRowClass())
+                         .getIDList();
 
          if( idPropertyList.isEmpty() )
-            throw new DataSetException( Tags.PRODUCT_LABEL + "In the class of entry '" + getRowClass().getName() + "' is not defined PK fields" );
+            throw new DataSetException(
+                    Tags.PRODUCT_LABEL
+                            + "In the class of entry '"
+                            + getRowClass().getName()
+                            + "' is not defined PK fields"
+            );
 
-         final Map<String,Object> idValuesMap = new HashMap<>( );
+         List<String> idColumns =
+                 new ArrayList<>(idPropertyList.size());
+         List<Object> idValues =
+                 new ArrayList<>(idPropertyList.size());
 
-         idPropertyList.forEach(new Consumer<IEntityProperty< P,?>>( ) {
-            @Override
-            public void accept(IEntityProperty< P,?> p) {
+         for( IEntityProperty<P,?> property : idPropertyList ) {
+            idColumns.add(
+                    property.getColumnInfo().getName());
 
-               Object value = null;
-
-               try {
-                  value = p.invokeGetter(row);
-               } catch ( Throwable th ) {
-                  throw new RuntimeException( Tags.PRODUCT_LABEL + "Error while retrieving the value PK for row class - " + getRowClass().getName(), th );
-               }
-
-               idValuesMap.put( p.getColumnInfo().getName().toUpperCase(Locale.ROOT), value );
-            }}
-         );
-
-         if( refreshCurrentRowPreparedSql == null )
-         {
-            StringBuilder sb = new StringBuilder( );
-
-            idPropertyList.forEach( (IEntityProperty p) -> {
-
-               String column = p.getColumnInfo().getName();
-
-               sb.append( column )
-                       .append(" = :")
-                       .append( column )
-                       .append(" and ");
-            });
-
-            sb.append("null is null");
-
-            DataSetSelectBuilder builder =
-                    new DataSetSelectBuilder( internalGetSQL(), getTaskContextForUse().dialect() );
-            builder.addPredicate( sb.toString() );
-
-            if( isSupportMark() ) {
-               String mark = getMarkSQLPart();
-               builder.mark( mark == null ? "0" : mark );
+            try {
+               idValues.add(
+                       property.invokeGetter(row));
             }
-
-            refreshCurrentRowSQL = builder.buildSql();
-            refreshCurrentRowPreparedSql = builder.prepare();
+            catch( Throwable th ) {
+               throw new RuntimeException(
+                       Tags.PRODUCT_LABEL
+                               + "Error while retrieving the value PK "
+                               + "for row class - "
+                               + getRowClass().getName(),
+                       th
+               );
+            }
          }
 
-         IParameters refreshParameters = new IParameters( ) {
-            @Override
-            public Object getParameter( String parameterName ) {
-               String key = parameterName.toUpperCase(Locale.ROOT);
-               return idValuesMap.containsKey(key)
-                       ? idValuesMap.get(key) : getParameterValue(parameterName);
-            }
-            @Override
-            public Object getParameter( int parameterIndex ) {
-               return getParameterValue( parameterIndex );
-            }
-            @Override
-            public boolean hasParameter( String parameterName ) {
-               return idValuesMap.containsKey(parameterName.toUpperCase(Locale.ROOT))
-                       || mainSqlParameters.hasParameter(parameterName);
-            }
-            @Override
-            public boolean hasParameter( int parameterIndex ) {
-               return mainSqlParameters.hasParameter(parameterIndex);
-            }
-         };
+         if( refreshCurrentRowPlan == null )
+            refreshCurrentRowPlan =
+                    createRefreshCurrentRowPlan(
+                            idColumns,
+                            getTaskContextForUse().dialect()
+                    );
 
-         List<Object> refreshValues = PreparedSqlValues.jdbc(
-                 refreshCurrentRowPreparedSql, refreshParameters);
+         List<Object> refreshValues =
+                 refreshCurrentRowJdbcValues(
+                         refreshCurrentRowPlan,
+                         idValues,
+                         mainSqlParameters
+                 );
 
-         try (JDBCDataReader<P> recordReader = new JDBCDataReader<>(
-                 getTaskContextForUse().getConnection(), refreshCurrentRowPreparedSql,
-                 getRowMapper(), getRowClass(), isSupportMark())) {
+         try( JDBCDataReader<P> recordReader =
+                      new JDBCDataReader<>(
+                              getTaskContextForUse().getConnection(),
+                              refreshCurrentRowPlan.preparedSql,
+                              getRowMapper(),
+                              getRowClass(),
+                              isSupportMark()
+                      ) ) {
+
             recordReader.executeQuery(refreshValues);
 
-         List< P > item = recordReader.getNextPage(1);
+            List<P> item = recordReader.getNextPage(1);
 
-         if( !item.isEmpty() ) {
+            if( !item.isEmpty() ) {
+               P newRow = item.get(0);
+               P oldRow = updateCurrentRow(newRow);
 
-            P newRow = item.get(0);
-            P oldRow = updateCurrentRow( newRow );
-
-            if( refreshDependentData )
-               fireRowEvent( REFRESH, oldRow, newRow, getCurrentRowNum(), 1 );
-         }
-         else {
-            if( onNoDataFound != null )
-               onNoDataFound.accept(this);
-            else
-               JInvDbException.throwNoDataFound( refreshCurrentRowSQL, idValuesMap.values() );
-         }
+               if( refreshDependentData )
+                  fireRowEvent(
+                          REFRESH,
+                          oldRow,
+                          newRow,
+                          getCurrentRowNum(),
+                          1
+                  );
+            }
+            else {
+               if( onNoDataFound != null )
+                  onNoDataFound.accept(this);
+               else
+                  JInvDbException.throwNoDataFound(
+                          refreshCurrentRowPlan.sql,
+                          idValues
+                  );
+            }
          }
       }
       catch( Throwable th ) {
-         throw new DataSetException( Tags.PRODUCT_LABEL + "Error refreshing the current record from DB", th );
+         throw new DataSetException(
+                 Tags.PRODUCT_LABEL
+                         + "Error refreshing the current record from DB",
+                 th
+         );
       }
    }
 
