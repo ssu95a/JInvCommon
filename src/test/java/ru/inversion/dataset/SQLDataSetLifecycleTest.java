@@ -14,6 +14,18 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SQLDataSetLifecycleTest {
 
+    private static void setTotalRowCount(SQLDataSet<?> ds, int value) {
+        try {
+            java.lang.reflect.Field field =
+                    SQLDataSet.class.getDeclaredField("totalRowCount");
+            field.setAccessible(true);
+            field.setInt(ds, value);
+        }
+        catch( ReflectiveOperationException ex ) {
+            throw new AssertionError(ex);
+        }
+    }
+
     private static final class TestDataSet extends SQLDataSet<String> {
         TestDataSet() {
             super(null, String.class);
@@ -456,6 +468,33 @@ class SQLDataSetLifecycleTest {
             else
                 System.setProperty(property, previous);
         }
+    }
+
+
+    @Test
+    void firstPageFailureInvalidatesPreviousTotalRowCount() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        reader.failPage = true;
+        ds.useReader(reader);
+        setTotalRowCount(ds, 123);
+
+        assertThrows(DataSetException.class, ds::executeQuery);
+
+        assertEquals(-1, ds.getTotalRowCount());
+    }
+
+    @Test
+    void executeFailureBeforeRowReplacementKeepsPreviousTotalRowCount() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        reader.failExecute = true;
+        ds.useReader(reader);
+        setTotalRowCount(ds, 123);
+
+        assertThrows(DataSetException.class, ds::executeQuery);
+
+        assertEquals(123, ds.getTotalRowCount());
     }
 
 }
