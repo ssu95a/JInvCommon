@@ -504,4 +504,77 @@ public class AggregatorContractTest {
         }
     }
 
+
+    @Test
+    public void markedAggregateSourceUsesExplicitQueryAlias() {
+        TestXXIDataSet ds = new TestXXIDataSet();
+        ds.setSQL("select ID, AMOUNT from T");
+        ds.setQueryAlias("q");
+        ds.setRowClass(MarkRow.class);
+
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                ds.createMarkedAggregateSourceBuilder(
+                        java.util.Collections.singletonList(
+                                "q.AMOUNT > :min_amount"
+                        ),
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+                source.prepare();
+
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(
+                        "SELECT q.* FROM ("
+                )
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(
+                        ") q"
+                )
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(
+                        "a$.idrow = q.ID"
+                )
+        );
+        assertTrue(
+                prepared.getSql(),
+                prepared.getSql().contains(
+                        "q.AMOUNT > ?"
+                )
+        );
+
+        assertEquals(2, prepared.getParameters().size());
+        assertEquals(
+                "min_amount",
+                prepared.getParameters().get(0).getName()
+        );
+        assertEquals(
+                "jinv_marker_id",
+                prepared.getParameters().get(1).getName()
+        );
+    }
+
+    @Test
+    public void markedAggregateSourceWithoutQueryAliasKeepsCurrentShape() {
+        TestXXIDataSet ds = new TestXXIDataSet();
+        ds.setSQL("select ID, AMOUNT from T");
+        ds.setRowClass(MarkRow.class);
+
+        ru.inversion.dataset.impl.DataSetSelectBuilder source =
+                ds.createMarkedAggregateSourceBuilder(
+                        java.util.Collections.emptyList(),
+                        ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+                );
+
+        String sql = source.buildSql();
+
+        assertFalse(sql, sql.contains("SELECT q.* FROM ("));
+        assertTrue(sql, sql.contains("a$.idrow = ID"));
+    }
+
 }

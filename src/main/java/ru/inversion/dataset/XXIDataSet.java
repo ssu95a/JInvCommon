@@ -891,6 +891,35 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         return IDataReader.iterator( reader, 50 );
     }
 
+    DataSetSelectBuilder createMarkedAggregateSourceBuilder(
+            List<String> predicates,
+            ru.inversion.db.dialect.SqlDialect dialect
+    ) {
+        DataSetSelectBuilder source =
+                new DataSetSelectBuilder(
+                        internalGetSQL(),
+                        dialect
+                );
+
+        String alias = getQueryAlias();
+
+        if( S.isNotNullOrEmpty(alias) )
+            source.queryAlias(alias);
+
+        for( String predicate : predicates )
+            source.addPredicate(predicate);
+
+        source.addPredicate(
+                markExistsPredicate(
+                        S.isNullOrEmpty(alias)
+                                ? ""
+                                : alias + "."
+                )
+        );
+
+        return source;
+    }
+
     /** {@inheritDoc} */
     @Override
     public IAggregatorBuilder<T> createMarkedAggregatorBuilder( boolean refreshOnExecute, String aggrTable ) {
@@ -1035,17 +1064,10 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
             if( S.isNullOrEmpty(aggrTable) ) {
                 aggregateSourceBuilder =
-                        new DataSetSelectBuilder(
-                                internalGetSQL(),
+                        createMarkedAggregateSourceBuilder(
+                                predicatList,
                                 getTaskContextForUse().dialect()
                         );
-
-                for( String predicate : predicatList )
-                    aggregateSourceBuilder.addPredicate(predicate);
-
-                aggregateSourceBuilder.addPredicate(
-                        markExistsPredicate("")
-                );
 
                 preparedSql = prepareAggregateSql(
                         aggrList,
