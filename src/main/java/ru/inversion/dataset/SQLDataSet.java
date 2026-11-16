@@ -928,6 +928,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             executePreparedDataQuery();
 
+            totalRowCount = -1;
             clear( );
             swappingData( fetchAllRows );
 
@@ -948,8 +949,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
          if( getLoadedRowCount() > 0 )
              setCurrentRowNum( 0 );
-
-         totalRowCount = -1;
 
          if( executeCount == 1 )
              fireDataSetEvent( DataSetEvent.DataSetEventType.FIRST_TIME_EXECUTE, false );
