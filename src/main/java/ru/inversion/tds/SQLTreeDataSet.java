@@ -6,7 +6,7 @@ import ru.inversion.dataset.impl.PreparedSqlValues;
 import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.dataset.impl.PreparedSqlRenderer;
 import ru.inversion.db.JInvDbException;
-import ru.inversion.meta.EntityMetadataFactory;
+import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.meta.IEntityProperty;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.S;
@@ -14,6 +14,7 @@ import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
 import ru.inversion.utils.sparser.SqlScannerFactory;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.utils.sparser.lexer.SqlScanner;
 import ru.inversion.utils.sparser.select.SqlSelect;
 
 import javax.persistence.NamedNativeQuery;
@@ -27,10 +28,8 @@ import java.util.stream.Collectors;
 
 import static ru.inversion.dataset.DataSetEvent.DataSetEventType.EXECUTE;
 import static ru.inversion.dataset.DataSetEvent.DataSetEventType.FIRST_TIME_EXECUTE;
-import static ru.inversion.dataset.DataSetRowEvent.RowOperationEnum.INSERT;
 import static ru.inversion.dataset.DataSetRowEvent.RowOperationEnum.REFRESH;
 import static ru.inversion.dataset.SQLDataSet.*;
-import static ru.inversion.meta.EntityMetadataFactory.getEntityMetaData;
 import static ru.inversion.tds.SQLTreeDataSet.PredicateTypeEnum.*;
 
 /** */
@@ -48,6 +47,9 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
      * Генератор идентификаторов для фильтров.
      */
     final static private AtomicInteger g_filterIDSequence = new AtomicInteger(0);
+
+    private static final String REFRESH_ID_PARAMETER_BASE =
+            "jinv_tree_refresh_pk_0";
 
 
     public enum PredicateTypeEnum {
@@ -289,7 +291,9 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
     }
 
     public void setQueryAlias( String qa ) {
-        queryAlias = qa;
+        queryAlias = qa == null || qa.trim().isEmpty()
+                ? null
+                : qa;
     }
 
     /** */
@@ -359,6 +363,15 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
         else
             sql = getNativeQuery();
 
+        if( sql == null || sql.trim().isEmpty() )
+            throw new IllegalStateException(
+                    Tags.PRODUCT_LABEL
+                            + "Native query '"
+                            + this.nativeQueryName
+                            + "' is not defined for "
+                            + clazz.getName()
+            );
+
         return sql;
     }
 
@@ -368,7 +381,11 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
     }
 
     /** */
-    public void setOrderBy( String s ) { orderByStmnt = s; }
+    public void setOrderBy( String s ) {
+        orderByStmnt = s == null || s.trim().isEmpty()
+                ? null
+                : s;
+    }
 
     /**
      *  Получить полное выражение OrderBy
@@ -561,10 +578,129 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
             appendPredicates(sb);
 
             if( S.isNotNullOrEmpty( getOrderBy() ) )
-                sb.append("\nORDER BY ").append( getCompletedOrderBy() );
+                /*
+                 * Keep the raw expression until SqlSelect.prepare(): the
+                 * dialect-aware parameterizer distinguishes paired legacy
+                 * markers from the real PostgreSQL regex operator '~'.
+                 */
+                sb.append("\nORDER BY ").append( getOrderBy() );
         }
 
         return sb.toString();
+    }
+
+    static final class RefreshCurrentItemPlan {
+        final String sql;
+        final PreparedSql preparedSql;
+        final String idParameterName;
+
+        RefreshCurrentItemPlan(
+                String sql,
+                PreparedSql preparedSql,
+                String idParameterName
+        ) {
+            this.sql = Objects.requireNonNull(sql, "sql");
+            this.preparedSql = Objects.requireNonNull(
+                    preparedSql,
+                    "preparedSql"
+            );
+            this.idParameterName = Objects.requireNonNull(
+                    idParameterName,
+                    "idParameterName"
+            );
+        }
+    }
+
+    static RefreshCurrentItemPlan createRefreshCurrentItemPlan(
+            String refreshSql,
+            String idColumn,
+            SqlDialect dialect
+    ) {
+        Objects.requireNonNull(refreshSql, "refreshSql");
+        Objects.requireNonNull(idColumn, "idColumn");
+        Objects.requireNonNull(dialect, "dialect");
+
+        final SqlScanner scanner = SqlScannerFactory.create(dialect);
+        final Set<String> usedNames = new HashSet<>();
+        SqlScanner.Token idToken = null;
+
+        for( SqlScanner.Token token : scanner.scan(refreshSql) ) {
+            if( token.kind() != SqlScanner.Kind.NAMED_PARAMETER )
+                continue;
+
+            final String name = token.text(refreshSql).substring(1);
+            usedNames.add(name.toUpperCase(Locale.ROOT));
+
+            /*
+             * prepareRowDataSql() appends the PK predicate after the source
+             * SELECT. Selecting the last matching bind preserves the protected
+             * compatibility hook while separating that bind from an equally
+             * named source parameter.
+             */
+            if( idColumn.equalsIgnoreCase(name) )
+                idToken = token;
+        }
+
+        String actualSql = refreshSql;
+        String idParameterName = idColumn;
+
+        if( idToken != null ) {
+            idParameterName = nextRefreshIdParameterName(usedNames);
+            actualSql = refreshSql.substring(0, idToken.start())
+                    + ':' + idParameterName
+                    + refreshSql.substring(idToken.end());
+        }
+
+        final PreparedSql preparedSql = new SqlSelect(
+                actualSql,
+                dialect
+        ).prepare();
+
+        return new RefreshCurrentItemPlan(
+                actualSql,
+                preparedSql,
+                idParameterName
+        );
+    }
+
+    private static String nextRefreshIdParameterName(
+            Set<String> usedNames
+    ) {
+        String name = REFRESH_ID_PARAMETER_BASE;
+        int suffix = 0;
+
+        while( !usedNames.add(name.toUpperCase(Locale.ROOT)) )
+            name = REFRESH_ID_PARAMETER_BASE + '_' + (++suffix);
+
+        return name;
+    }
+
+    static List<Object> refreshCurrentItemJdbcValues(
+            RefreshCurrentItemPlan plan,
+            Object currentId,
+            IParameters primary
+    ) {
+        Objects.requireNonNull(plan, "plan");
+        Objects.requireNonNull(primary, "primary");
+
+        final IParameters parameters = new IParameters() {
+            @Override
+            public Object getParameter( String parameterName ) {
+                return plan.idParameterName.equalsIgnoreCase(parameterName)
+                        ? currentId
+                        : primary.getParameter(parameterName);
+            }
+
+            @Override
+            public Object getParameter( int parameterIndex ) {
+                return primary.getParameter(parameterIndex);
+            }
+        };
+
+        return PreparedSqlValues.jdbc(
+                plan.preparedSql,
+                parameters
+        );
     }
 
     /** Обновить текущую запись из БД */
@@ -592,39 +728,19 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
             final String idColumn = idProperty.getColumnInfo().getName();
 
             final String refreshSql = prepareRowDataSql();
-
-            final IParameters prm = new ParametersByName() {
-
-                final IParameters parameters = getParameters();
-
-                @Override
-                public Object getParameter(String parameterName)
-                {
-                    if( idColumn.equalsIgnoreCase(parameterName) )
-                        return currentId;
-
-                    return parameters.getParameter(parameterName);
-                }
-
-                @Override
-                public Object getParameter(int index)
-                {
-                    return parameters.getParameter(index);
-                }
-            };
-
-            final PreparedSql preparedSql;
+            final RefreshCurrentItemPlan refreshPlan;
             final JDBCDataReader<P> recordReader;
 
             try {
-                preparedSql = new SqlSelect(
+                refreshPlan = createRefreshCurrentItemPlan(
                         refreshSql,
+                        idColumn,
                         getTaskContextForUse().dialect()
-                ).prepare();
+                );
 
                 recordReader = new JDBCDataReader<>(
                         getTaskContextForUse().getConnection(),
-                        preparedSql,
+                        refreshPlan.preparedSql,
                         getRowMapper(),
                         getRowClass(),
                         isEnableMark()
@@ -635,12 +751,16 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
             }
 
             final List<P> items;
+            final List<Object> jdbcValues =
+                    refreshCurrentItemJdbcValues(
+                            refreshPlan,
+                            currentId,
+                            getParameters()
+                    );
 
             try( final JDBCDataReader<P> reader = recordReader )
             {
-                reader.executeQuery(
-                        PreparedSqlValues.jdbc(preparedSql, prm)
-                );
+                reader.executeQuery(jdbcValues);
                 items = reader.getNextPage(2);
             }
 
@@ -652,7 +772,10 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
                 if( onNoDataFound != null )
                     onNoDataFound.accept(this);
                 else
-                    JInvDbException.throwNoDataFound( refreshSql, Collections.emptyList() );
+                    JInvDbException.throwNoDataFound(
+                            refreshPlan.preparedSql.getSql(),
+                            jdbcValues
+                    );
 
                 return;
             }
@@ -728,8 +851,12 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
                     index, NO_PARAMETER_VALUE);
 
         if( value == NO_PARAMETER_VALUE )
-            throw new TreeDataSetException("throwNoSetParameterValue");
-        //DataSetParameterException.throwNoSetParameterValue(index);
+            throw new TreeDataSetException(
+                    Tags.PRODUCT_LABEL
+                            + "No parameter value for '"
+                            + index
+                            + "'"
+            );
 
         return value;
     }
@@ -898,6 +1025,9 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
     public void dump( Map<String,Object> d ) {
 
         super.dump(d);
+
+        if( d == null )
+            return;
 
         try {
 
