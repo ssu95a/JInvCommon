@@ -131,9 +131,16 @@ public class SQLDataSetRefreshCurrentRowPlanTest {
                 plan.sql,
                 plan.sql.contains(") q")
         );
+        String pkParameter = plan.idParameterNames.get(0);
+
         assertTrue(
                 plan.sql,
-                plan.sql.contains("q.ID = ?")
+                plan.sql.contains(
+                        "q.ID = :" + pkParameter)
+        );
+        assertTrue(
+                plan.preparedSql.getSql(),
+                plan.preparedSql.getSql().contains("q.ID = ?")
         );
     }
 
