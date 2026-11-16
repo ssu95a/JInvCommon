@@ -1456,6 +1456,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if( S.isNotNullOrEmpty(alias) )
          builder.queryAlias(alias);
 
+      builder.optimizerHint(getOptimizerHint());
+
       Set<String> usedNames = new HashSet<>();
       SqlScanner scanner = SqlScannerFactory.create(dialect);
       collectNamedParameters(
