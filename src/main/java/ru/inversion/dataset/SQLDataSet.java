@@ -1762,7 +1762,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public void close( ) throws DataSetException {
 
       if( dataReader != null ) {
-         fireDataSetEvent( CLOSE, true  );
+         try {
+            fireDataSetEvent( CLOSE, true  );
+         }
+         catch( RuntimeException | Error failure ) {
+            closeDataReaderAfterFailure(failure);
+            throw failure;
+         }
+
          closeDataReader();
          fireDataSetEvent( CLOSE, false );
       }
