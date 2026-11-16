@@ -380,6 +380,35 @@ class SQLDataSetLifecycleTest {
         assertEquals(1, reader.closeCount);
     }
 
+    @Test
+    void closeListenerFailureStillDetachesReaderAndSuppressesCloseFailure() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        reader.failClose = true;
+        ds.useReader(reader);
+        ds.addDataSetListener(event -> {
+            if (event.getEventType() == DataSetEvent.DataSetEventType.CLOSE
+                    && event.isBefore())
+                throw new IllegalStateException("listener failed");
+        });
+
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                ds::close
+        );
+
+        assertEquals("listener failed", failure.getMessage());
+        assertNull(ds.reader());
+        assertEquals(1, reader.closeCount);
+        assertEquals(1, failure.getSuppressed().length);
+        assertTrue(
+                failure.getSuppressed()[0]
+                        .getMessage()
+                        .contains("close failed"),
+                failure.getSuppressed()[0].getMessage()
+        );
+    }
+
 
     @Test
     void readerReplacementCloseFailureIsNotRetried() {
