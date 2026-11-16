@@ -686,6 +686,10 @@ public interface ISQLDataSet<P> extends IDataSet<P>, ISQLExpression {
      *        Признак учитывать/не учитывать установленные фильтры внутри DataSet.
      *        {@code true } - не учитывать
      *        {@code false} - учитывать
+     * Реализация {@link SQLDataSet} возвращает объект, который также
+     * реализует {@link ru.inversion.utils.AutoCloseableIterator}. Если обход
+     * прекращается до EOF, итератор следует явно закрыть.
+     *
      * @return
      *        {@code Iterator} с записями
      * @throws
