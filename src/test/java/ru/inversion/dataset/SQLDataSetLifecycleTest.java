@@ -333,4 +333,39 @@ class SQLDataSetLifecycleTest {
         assertEquals(1, ds.swapCount);
     }
 
+
+    @Test
+    void closeFailureDetachesReaderFromDataSet() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        reader.failClose = true;
+        ds.useReader(reader);
+
+        DataSetException failure =
+                assertThrows(DataSetException.class, ds::close);
+
+        assertTrue(failure.getMessage().contains("close failed"));
+        assertNull(ds.reader());
+        assertEquals(1, reader.closeCount);
+
+        assertDoesNotThrow(ds::close);
+        assertEquals(1, reader.closeCount);
+    }
+
+    @Test
+    void successfulCloseDetachesReaderAndIsIdempotent()
+            throws DataSetException {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        ds.useReader(reader);
+
+        ds.close();
+
+        assertNull(ds.reader());
+        assertEquals(1, reader.closeCount);
+
+        ds.close();
+        assertEquals(1, reader.closeCount);
+    }
+
 }
