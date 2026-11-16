@@ -27,8 +27,18 @@ class SQLDataSetLifecycleTest {
     }
 
     private static final class TestDataSet extends SQLDataSet<String> {
+        Runnable beforeFirstExecute;
+        int beforeFirstExecuteCount;
+
         TestDataSet() {
             super(null, String.class);
+        }
+
+        @Override
+        protected void onBeforeFirstExecute() {
+            beforeFirstExecuteCount++;
+            if (beforeFirstExecute != null)
+                beforeFirstExecute.run();
         }
 
         void useReader(ISQLDataReader<String> reader) {
@@ -159,6 +169,52 @@ class SQLDataSetLifecycleTest {
         assertTrue(ds.readerNeedsRecreation());
         assertEquals(0, reader.pageCount);
         assertEquals(1, reader.closeCount);
+    }
+
+    @Test
+    void failedFirstQueryRetriesFirstInitialization() throws DataSetException {
+        TestDataSet ds = new TestDataSet();
+        ds.beforeFirstExecute = () -> pre(ds, 601);
+
+        Reader failure = new Reader();
+        failure.failExecute = true;
+        ds.useReader(failure);
+
+        assertThrows(DataSetException.class, ds::executeQuery);
+
+        assertEquals(1, ds.beforeFirstExecuteCount);
+        assertNull(ds.getProperty("ds.execute_count"));
+        assertFalse(ds.predicates().containsKey(601));
+
+        Reader retry = new Reader();
+        ds.useReader(retry);
+        ds.executeQuery();
+
+        assertEquals(2, ds.beforeFirstExecuteCount);
+        assertEquals(Integer.valueOf(1), ds.getProperty("ds.execute_count"));
+        assertTrue(ds.predicates().get(601).isFinal());
+        assertEquals(Arrays.asList("row"), ds.getRows());
+        assertEquals(1, retry.executeCount);
+    }
+
+    @Test
+    void firstInitializationFailureRollsBackPendingPredicateAndReader() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        ds.useReader(reader);
+        ds.beforeFirstExecute = () -> {
+            pre(ds, 602);
+            throw new IllegalStateException("initialization failed");
+        };
+
+        assertThrows(DataSetException.class, ds::executeQuery);
+
+        assertEquals(1, ds.beforeFirstExecuteCount);
+        assertNull(ds.getProperty("ds.execute_count"));
+        assertFalse(ds.predicates().containsKey(602));
+        assertNull(ds.reader());
+        assertEquals(1, reader.closeCount);
+        assertTrue(ds.readerNeedsRecreation());
     }
 
     @Test
