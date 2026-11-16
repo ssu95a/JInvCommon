@@ -4,18 +4,19 @@ import ru.inversion.dataset.IDataReader;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.IRowMapper;
 import ru.inversion.dataset.impl.JDBCDataReader;
+import ru.inversion.dataset.impl.XXIDsDao;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.meta.IEntityMetaData;
 import ru.inversion.meta.IEntityProperty;
 import ru.inversion.tc.TCStorage;
+import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
 import ru.inversion.utils.sparser.jdbc.PreparedSql;
 import ru.inversion.utils.sparser.select.SqlSelect;
 
-import javax.persistence.NamedNativeQuery;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -322,12 +323,10 @@ public class RSUtils {
 
             Objects.requireNonNull( entityClass, "entityClass is null");
 
-            SqlDialect dialect = TCStorage.INSTANCE().getByConnection(connection).dialect();
-            String strSQL = null;
-
-            NamedNativeQuery nnq = entityClass.getAnnotation(NamedNativeQuery.class);
-            if( nnq != null )
-                strSQL = nnq.query();
+            TaskContext tc = TCStorage.INSTANCE().getByConnection(connection);
+            SqlDialect dialect = tc.dialect();
+            String strSQL = XXIDsDao.getNativeQuery(
+                    tc, entityClass, null);
 
             if( strSQL == null ) {
 

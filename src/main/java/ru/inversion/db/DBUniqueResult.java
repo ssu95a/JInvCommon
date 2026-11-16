@@ -84,66 +84,22 @@ public class DBUniqueResult<T>  {
     /** */
     @SuppressWarnings("unchecked")    
     private String getSqlString( TaskContext tc, Class clazz, String namedQueryName, boolean doThrow ) {
-        
-        if( S.isNullOrEmpty(namedQueryName) ) {
-            
-            NamedNativeQuery nnq = (NamedNativeQuery) clazz.getAnnotation(NamedNativeQuery.class);
-            
-            if( nnq == null ) {
+        String queryName = S.isNullOrEmpty(namedQueryName)
+                ? null : namedQueryName;
+        String query = XXIDsDao.getNativeQuery(tc, clazz, queryName);
 
-                String q = XXIDsDao.getUnnamedNativeQuery(tc,clazz);
+        if( !S.isNullOrEmpty(query) )
+            return query;
 
-                if( S.isNullOrEmpty(q) )
-                    if( doThrow )
-                        throw new IllegalArgumentException( Tags.PRODUCT_LABEL + "The class '" + clazz.getName() + "' is not specified annotation 'NamedNativeQuery'");
-//return            
-                return q;
-            }
-//return            
-            return nnq.query();
-        }
-        else
-        {
-            String q =  XXIDsDao.getNativeQuery( tc, clazz, namedQueryName );
-            if(!S.isNullOrEmpty(q) )
-                return q;
-            /*
-            NamedNativeQueries nnqs = (NamedNativeQueries) clazz.getAnnotation(NamedNativeQueries.class);
-            
-            if( nnqs != null ) {
-
-                NamedNativeQuery[] value = nnqs.value();
-
-                for( NamedNativeQuery q : value ) {
-                    
-                    if( namedQueryName.equals( q.name() ) ) {
-//return
-                         return q.query();
-                    }
-                }//end for
-            }
-            
-            NamedNativeQuery nnq = (NamedNativeQuery) clazz.getAnnotation(NamedNativeQuery.class);
-
-            if( nnq != null ) {
-
-                if( !namedQueryName.equals( nnq.name() ) ) {
-                        
-                    if( doThrow )
-                        throw new IllegalArgumentException( Tags.PRODUCT_LABEL + "Not found the annotation 'NamedNativeQuery' with name = '" + namedQueryName + "', class - " + clazz.getName() );
-//return            
-                    return null;
-                }
-//return                
-                return nnq.query();
-            }
-            */
-
-        }//end else
+        if( doThrow && queryName == null )
+            throw new IllegalArgumentException(
+                    Tags.PRODUCT_LABEL
+                    + "The class '" + clazz.getName()
+                    + "' is not specified annotation 'NamedNativeQuery'");
 
         if( doThrow )
             throw new IllegalStateException( Tags.PRODUCT_LABEL + "SQL expression not specified ");
-        
+
         return null;
     }
     

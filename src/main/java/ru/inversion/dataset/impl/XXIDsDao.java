@@ -9,7 +9,6 @@ import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.ParametersValues;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
-import ru.inversion.utils.U;
 import ru.inversion.utils.converter.TypeConverter;
 
 import javax.persistence.NamedNativeQueries;
@@ -257,117 +256,111 @@ public class XXIDsDao {
         }
     }
 
-    /** */
-    private static <P> String getQueryString( final Class<P> clazz, final String nativeQueryName )
-    {
+    /** Exact lookup without dialect fallback. */
+    private static <P> String getQueryString(
+            final Class<P> clazz,
+            final String nativeQueryName
+    ) {
         NamedNativeQueries nnqs = clazz.getAnnotation(NamedNativeQueries.class);
 
         if( nnqs != null ) {
-
-            final NamedNativeQuery[] qList = nnqs.value();
-
-            for( NamedNativeQuery q : qList ) {
-
-                if( nativeQueryName.equals( q.name() ) ) {
-//return
+            for( NamedNativeQuery q : nnqs.value() ) {
+                if( nativeQueryName.equals(q.name()) )
                     return q.query();
-                }
-            }//end for
+            }
         }
 
         NamedNativeQuery nnq = clazz.getAnnotation(NamedNativeQuery.class);
-
-        if( nnq != null )
-        {
-            if( !nativeQueryName.equals( nnq.name() ) )
-                return null;
-//return
+        if( nnq != null && nativeQueryName.equals(nnq.name()) )
             return nnq.query();
-        }
 
         return null;
     }
 
     final static public String PG_POSTFIX = ".pg";
 
-    /** */
-    public static <P> String getNativeQuery( TaskContext tc, final Class<P> clazz, final String qn )
-    {
+    /**
+     * Resolves a logical native-query name for the current database.
+     * PostgreSQL first uses {@code qn + ".pg"} and falls back to {@code qn};
+     * Oracle uses {@code qn}. A name already ending in {@code .pg} is treated
+     * as an exact name and is not suffixed twice.
+     *
+     * <p>When {@code qn == null}, an unnamed {@link NamedNativeQuery} is used.
+     * A {@link NamedNativeQueries} container is also accepted when all its
+     * entries form one logical family: {@code name} and optional
+     * {@code name.pg}. More than one logical family is ambiguous.</p>
+     */
+    public static <P> String getNativeQuery(
+            TaskContext tc,
+            final Class<P> clazz,
+            final String qn
+    ) {
         if( clazz == null )
             return null;
 
-        if( qn == null ) {
+        boolean postgres = tc != null && tc.isPostgreSql();
 
-            String q = U.callIfNotNull( clazz.getAnnotation(NamedNativeQuery.class), NamedNativeQuery::query );
-
-            if( S.isNullOrEmpty(q) )
-            {
-                final NamedNativeQueries qs = clazz.getAnnotation(NamedNativeQueries.class);
-
-                if( qs != null && qs.value().length == 2 )
-                {
-                    final NamedNativeQuery[] aq = qs.value();
-
-                    if( Math.abs( aq[0].name().length() - aq[1].name().length() ) == PG_POSTFIX.length() )
-                    {
-                        final int pg = aq[0].name().length() > aq[1].name().length() ? 0 : 1;
-                        final int cm = pg == 0 ? 1 : 0;
-
-                        if( aq[pg].name().substring( 0, aq[cm].name().length() ).equals( aq[cm].name() ) )
-                        {
-                            if( tc == null || tc.isOracle() )
-                                q = aq[cm].query();
-                            else
-                                q = aq[pg].query();
-                        }
-                    }
-                }
-            }
-            return q;
-        }
-
-        if( tc == null || tc.isOracle() )
-            return getQueryString( clazz, qn );
-        else
-            return U.nvl( getQueryString( clazz, qn + PG_POSTFIX ), getQueryString( clazz, qn ) );
+        return qn == null
+                ? getUnnamedQuery(clazz, postgres)
+                : getDialectQuery(clazz, qn, postgres);
     }
 
-    /** */
-    public static <P> String getUnnamedNativeQuery( TaskContext tc, final Class<P> clazz )
-    {
-        if( clazz == null )
-            return null;
-
-        String q = U.callIfNotNull( clazz.getAnnotation(NamedNativeQuery.class), NamedNativeQuery::query );
-
-        if( !S.isNullOrEmpty(q) )
-            return q;
-
-        final NamedNativeQueries qs = clazz.getAnnotation(NamedNativeQueries.class);
-
-        if( qs != null && qs.value().length == 2 )
-        {
-            final NamedNativeQuery[] aq = qs.value();
-
-            int or = 0;
-            int pg = 1;
-
-            if( aq[0].name().length() > aq[1].name().length() ) {
-                pg = 0;
-                or = 1;
-            }
-
-            if( aq[pg].name().length() - aq[or].name().length() == PG_POSTFIX.length() )
-            {
-                if( aq[pg].name().startsWith(aq[or].name()) & aq[pg].name().endsWith(PG_POSTFIX) )
-                {
-                    if( tc == null || tc.isOracle() )
-                        return aq[or].query();
-                    return aq[pg].query();
-                }
-            }
+    private static <P> String getDialectQuery(
+            Class<P> clazz,
+            String queryName,
+            boolean postgres
+    ) {
+        if( postgres && !queryName.endsWith(PG_POSTFIX) ) {
+            String query = getQueryString(
+                    clazz, queryName + PG_POSTFIX);
+            if( query != null )
+                return query;
         }
-        return null;
+
+        return getQueryString(clazz, queryName);
+    }
+
+    private static <P> String getUnnamedQuery(
+            Class<P> clazz,
+            boolean postgres
+    ) {
+        NamedNativeQuery unnamed =
+                clazz.getAnnotation(NamedNativeQuery.class);
+        if( unnamed != null && !S.isNullOrEmpty(unnamed.query()) )
+            return unnamed.query();
+
+        NamedNativeQueries container =
+                clazz.getAnnotation(NamedNativeQueries.class);
+        if( container == null || container.value().length == 0 )
+            return unnamed == null ? null : unnamed.query();
+
+        String logicalName = null;
+
+        for( NamedNativeQuery query : container.value() ) {
+            String candidate = logicalName(query.name());
+
+            if( logicalName == null )
+                logicalName = candidate;
+            else if( !logicalName.equals(candidate) )
+                return null;
+        }
+
+        return getDialectQuery(clazz, logicalName, postgres);
+    }
+
+    private static String logicalName(String queryName) {
+        return queryName.endsWith(PG_POSTFIX)
+                ? queryName.substring(
+                        0, queryName.length() - PG_POSTFIX.length())
+                : queryName;
+    }
+
+    /** Compatibility alias for the unnamed lookup. */
+    public static <P> String getUnnamedNativeQuery(
+            TaskContext tc,
+            final Class<P> clazz
+    ) {
+        return getNativeQuery(tc, clazz, null);
     }
 
 }
