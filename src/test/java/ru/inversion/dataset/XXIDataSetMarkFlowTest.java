@@ -92,10 +92,14 @@ public class XXIDataSetMarkFlowTest {
                         "a$.idrow = q.ID_A"
                 )
         );
-        assertEquals(1, prepared.getParameters().size());
-        assertEquals(
-                "jinv_marker_id",
-                prepared.getParameters().get(0).getName()
+        assertEquals(2, prepared.getParameters().size());
+        assertTrue(
+                prepared.getParameters().stream()
+                        .anyMatch(parameter ->
+                                parameter.getKind()
+                                        == ru.inversion.utils.sparser.jdbc.Parameter.Kind.NAMED
+                                && "jinv_marker_id".equals(
+                                        parameter.getName()))
         );
     }
 
