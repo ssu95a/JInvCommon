@@ -1734,8 +1734,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       if( dataReader != null ) {
          fireDataSetEvent( CLOSE, true  );
-         dataReader.close( );
+
+         ISQLDataReader<P> reader = dataReader;
          dataReader = null;
+
+         reader.close( );
          fireDataSetEvent( CLOSE, false );
       }
    }
