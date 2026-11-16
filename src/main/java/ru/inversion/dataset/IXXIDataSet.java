@@ -186,6 +186,10 @@ public interface IXXIDataSet< P > extends ISQLDataSet<P> {
      *          признак учитывать/не учитывать установленные фильтры внутри XXIDataSet.
      *          {@code true } - не учитывать
      *          {@code false} - учитывать
+     * Реализация {@link XXIDataSet} возвращает объект, который также
+     * реализует {@link ru.inversion.utils.AutoCloseableIterator}. Если обход
+     * прекращается до EOF, итератор следует явно закрыть.
+     *
      * @return
      *        {@code Iterator} с помеченными записями  
      * @throws 
