@@ -3,10 +3,10 @@ package ru.inversion.dataset.impl;
 import org.junit.Test;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.db.dialect.SqlDialectFactory;
-import ru.inversion.utils.sparser.SqlScannerFactory;
-import ru.inversion.utils.sparser.jdbc.Parameter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.select.SqlSelect;
+import ru.inversion.dataset.parser.SqlScannerFactory;
+import ru.inversion.dataset.parser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.select.SqlSelect;
 
 import java.math.BigInteger;
 import java.util.Arrays;

@@ -31,7 +31,7 @@ import java.util.stream.StreamSupport;
 
 import static javax.persistence.ParameterMode.IN;
 import static javax.persistence.ParameterMode.OUT;
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 /**
  * Выполнение скрипта на сервере PostgreSQL, через jf_exec_pkg
@@ -103,7 +103,7 @@ public class JsonSqlCall implements IDataCall {
                 case INTEGER:
                 case DECIMAL:
                 case STRING:
-                    c.append( value2Str( t.getValue() ) ).sp();
+                    c.append( format( t.getValue() ) ).sp();
                 break;
                 default :
                     c.append( t );

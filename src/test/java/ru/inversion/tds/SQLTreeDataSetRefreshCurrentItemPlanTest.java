@@ -3,7 +3,7 @@ package ru.inversion.tds;
 import org.junit.Test;
 import ru.inversion.dataset.ParametersByName;
 import ru.inversion.db.dialect.SqlDialectFactory;
-import ru.inversion.utils.sparser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.Parameter;
 
 import java.util.Arrays;
 import java.util.HashMap;

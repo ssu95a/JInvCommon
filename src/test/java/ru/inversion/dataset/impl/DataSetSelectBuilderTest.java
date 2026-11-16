@@ -4,8 +4,8 @@ import org.junit.Test;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.ISQLExpression;
 import ru.inversion.db.dialect.SqlDialectFactory;
-import ru.inversion.utils.sparser.jdbc.Parameter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import java.util.*;
 

@@ -4,7 +4,7 @@ import ru.inversion.utils.U;
 
 import java.util.function.Consumer;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 /**
  *
@@ -171,7 +171,7 @@ public class Token<T> implements Consumer<StringBuilder> {
         else {
 
             if( U.in( getType(), TypeEnum.INTEGER, TypeEnum.UNTOUCHABLE_INTEGER, TypeEnum.DECIMAL, TypeEnum.STRING ) )
-                sb.append( value2Str(getValue()) ).append(' ');
+                sb.append( format(getValue()) ).append(' ');
             else
             {
                 if( this.getType() == TypeEnum.ARITHMETIC_OPERATOR )

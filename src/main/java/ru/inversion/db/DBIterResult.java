@@ -2,7 +2,7 @@ package ru.inversion.db;
 
 import ru.inversion.dataset.IRowMapper;
 import ru.inversion.tc.TaskContext;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;

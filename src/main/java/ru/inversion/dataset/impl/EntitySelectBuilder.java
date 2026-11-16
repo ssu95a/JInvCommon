@@ -4,9 +4,9 @@ import ru.inversion.dataset.SQLDataSet;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.S;
-import ru.inversion.utils.sparser.lexer.OracleSqlScanner;
-import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
-import ru.inversion.utils.sparser.lexer.SqlScanner;
+import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
+import ru.inversion.dataset.parser.lexer.PostgresSqlScanner;
+import ru.inversion.dataset.parser.lexer.SqlScanner;
 
 import javax.persistence.Table;
 import java.lang.reflect.Method;

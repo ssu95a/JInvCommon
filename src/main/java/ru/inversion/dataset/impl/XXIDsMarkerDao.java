@@ -11,7 +11,7 @@ import ru.inversion.db.StoredProc;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import javax.persistence.NamedNativeQuery;
 import java.sql.CallableStatement;

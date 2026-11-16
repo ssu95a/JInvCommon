@@ -219,15 +219,15 @@ public class AggregatorContractTest {
         assertTrue(predicate, predicate.contains("select NULL"));
         assertFalse(predicate, predicate.contains("select 1"));
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
-                new ru.inversion.utils.sparser.select.SqlSelect(
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
+                new ru.inversion.dataset.parser.select.SqlSelect(
                         "select count(*) from t where " + predicate,
                         ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
                 ).prepare();
 
         assertEquals(1, prepared.getParameters().size());
         assertEquals(
-                ru.inversion.utils.sparser.jdbc.Parameter.Kind.NAMED,
+                ru.inversion.dataset.parser.jdbc.Parameter.Kind.NAMED,
                 prepared.getParameters().get(0).getKind()
         );
         assertEquals(
@@ -264,7 +264,7 @@ public class AggregatorContractTest {
                         )
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 SQLDataSet.prepareAggregateSql(
                         aggregates,
                         source,
@@ -319,7 +319,7 @@ public class AggregatorContractTest {
                         )
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 SQLDataSet.prepareAggregateSql(
                         aggregates,
                         source,
@@ -371,7 +371,7 @@ public class AggregatorContractTest {
                         )
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 SQLDataSet.prepareAggregateSql(
                         aggregates,
                         source,
@@ -413,7 +413,7 @@ public class AggregatorContractTest {
                         )
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 SQLDataSet.prepareAggregateSql(
                         aggregates,
                         source,
@@ -448,7 +448,7 @@ public class AggregatorContractTest {
                         )
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 SQLDataSet.prepareAggregateTableSql(
                         aggregates,
                         "AGGR_T",
@@ -520,7 +520,7 @@ public class AggregatorContractTest {
                         ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 source.prepare();
 
         assertTrue(
@@ -595,7 +595,7 @@ public class AggregatorContractTest {
                         )
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 SQLDataSet.prepareAggregateSql(
                         aggregates,
                         source,
@@ -653,7 +653,7 @@ public class AggregatorContractTest {
                         )
                 );
 
-        ru.inversion.utils.sparser.jdbc.PreparedSql prepared =
+        ru.inversion.dataset.parser.jdbc.PreparedSql prepared =
                 SQLDataSet.prepareAggregateSql(
                         aggregates,
                         source,

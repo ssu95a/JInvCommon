@@ -14,8 +14,8 @@ import ru.inversion.utils.ParametersValues;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.converter.TypeConverter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.select.SqlSelect;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.select.SqlSelect;
 
 import javax.persistence.Entity;
 import java.lang.reflect.Array;

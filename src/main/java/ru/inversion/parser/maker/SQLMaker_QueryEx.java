@@ -2,7 +2,7 @@ package ru.inversion.parser.maker;
 
 import ru.inversion.parser.statement.PrepareContext;
 import ru.inversion.parser.token.Token;
-import ru.inversion.utils.sparser.SqlValueFormatter;
+import ru.inversion.dataset.parser.SqlValueFormatter;
 
 import java.util.List;
 import java.util.function.Function;

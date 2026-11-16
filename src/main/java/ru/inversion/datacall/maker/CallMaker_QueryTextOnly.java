@@ -4,7 +4,7 @@ import ru.inversion.datacall.AbstractCallMakerBase;
 import ru.inversion.datacall.CallPrepareContext;
 import ru.inversion.parser.token.Token;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 public class CallMaker_QueryTextOnly extends AbstractCallMakerBase {
 
@@ -34,10 +34,10 @@ public class CallMaker_QueryTextOnly extends AbstractCallMakerBase {
                 if( c.isReplaceConstantMode() ) {
                     c.sp().append("? ");
                     if( c.isCommentParameters() )
-                        c.append("/* ").append(nCounter++).append(", ").append( value2Str( t.getValue() ) ).append(" */ ");
+                        c.append("/* ").append(nCounter++).append(", ").append( format( t.getValue() ) ).append(" */ ");
                 }
                 else
-                    c.append( value2Str( t.getValue() ) ).sp();
+                    c.append( format( t.getValue() ) ).sp();
             break;
             default :
                 c.append( t );

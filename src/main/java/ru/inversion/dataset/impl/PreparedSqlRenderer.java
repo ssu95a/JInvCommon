@@ -1,9 +1,9 @@
 package ru.inversion.dataset.impl;
 
 import ru.inversion.dataset.IParameters;
-import ru.inversion.utils.sparser.SqlValueFormatter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.lexer.SqlScanner;
+import ru.inversion.dataset.parser.SqlValueFormatter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.lexer.SqlScanner;
 
 import java.util.List;
 import java.util.Objects;

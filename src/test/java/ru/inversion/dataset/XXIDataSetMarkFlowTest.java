@@ -5,7 +5,7 @@ import ru.inversion.dataset.impl.DataSetSelectBuilder;
 import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.dataset.mark.IIDMarkable;
 import ru.inversion.dataset.mark.IUMarkable;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import javax.persistence.Column;
 import javax.persistence.Id;
@@ -97,7 +97,7 @@ public class XXIDataSetMarkFlowTest {
                 prepared.getParameters().stream()
                         .anyMatch(parameter ->
                                 parameter.getKind()
-                                        == ru.inversion.utils.sparser.jdbc.Parameter.Kind.NAMED
+                                        == ru.inversion.dataset.parser.jdbc.Parameter.Kind.NAMED
                                 && "jinv_marker_id".equals(
                                         parameter.getName()))
         );

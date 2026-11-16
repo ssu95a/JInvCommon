@@ -1,6 +1,5 @@
 package ru.inversion.parser.token;
 
-import ru.inversion.dataset.parser.SQLItem;
 import ru.inversion.utils.ReaderScanner;
 import ru.inversion.utils.converter.TypeConverter;
 

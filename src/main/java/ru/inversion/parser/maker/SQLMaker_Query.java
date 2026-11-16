@@ -5,7 +5,7 @@ import ru.inversion.parser.token.Token;
 
 import java.util.List;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 public class SQLMaker_Query extends AbstractSQLMakerBase {
 
@@ -36,7 +36,7 @@ public class SQLMaker_Query extends AbstractSQLMakerBase {
                     parameters.add( t.getValue() );
                 }
                 else
-                    c.sp().append( value2Str( t.getValue() ) ).sp();
+                    c.sp().append( format( t.getValue() ) ).sp();
                 break;
             case UNTOUCHABLE_INTEGER:
             default :

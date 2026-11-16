@@ -6,7 +6,7 @@ import ru.inversion.db.JInvDbException;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;

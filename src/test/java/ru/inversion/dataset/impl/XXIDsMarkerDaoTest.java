@@ -7,8 +7,8 @@ import ru.inversion.dataset.mark.IUMarkable;
 import ru.inversion.dataset.mark.MarkDescriptor;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.tc.TaskContext;
-import ru.inversion.utils.sparser.jdbc.Parameter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import javax.persistence.Column;
 import javax.persistence.Id;

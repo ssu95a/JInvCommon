@@ -4,10 +4,10 @@ import org.junit.Test;
 import ru.inversion.dataset.DataSetException;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.IRowMapper;
-import ru.inversion.utils.sparser.jdbc.Parameter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.select.SqlSelect;
-import ru.inversion.utils.sparser.lexer.PostgresSqlScanner;
+import ru.inversion.dataset.parser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.select.SqlSelect;
+import ru.inversion.dataset.parser.lexer.PostgresSqlScanner;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;

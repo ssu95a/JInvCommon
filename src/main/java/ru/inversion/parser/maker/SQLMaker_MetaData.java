@@ -3,7 +3,7 @@ package ru.inversion.parser.maker;
 import ru.inversion.parser.statement.PrepareContext;
 import ru.inversion.parser.token.Token;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 public class SQLMaker_MetaData extends AbstractSQLMakerBase  {
 
@@ -25,7 +25,7 @@ public class SQLMaker_MetaData extends AbstractSQLMakerBase  {
                     c.append(" null ");
                 }
                 else
-                    c.sp().append( value2Str( t.getValue() ) ).sp();
+                    c.sp().append( format( t.getValue() ) ).sp();
                 break;
             default :
                 c.sp().append( t.getValue() );

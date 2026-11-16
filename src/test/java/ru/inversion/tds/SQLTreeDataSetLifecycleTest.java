@@ -10,8 +10,8 @@ import javax.persistence.Table;
 import java.util.Map;
 
 import ru.inversion.db.dialect.SqlDialectFactory;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.select.SqlSelect;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.select.SqlSelect;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;

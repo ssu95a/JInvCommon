@@ -1,8 +1,8 @@
 package ru.inversion.dataset;
 
 import org.junit.Test;
-import ru.inversion.utils.sparser.jdbc.Parameter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import java.util.Arrays;
 import java.util.Collections;

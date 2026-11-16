@@ -1,7 +1,7 @@
 package ru.inversion.db.expr.impl;
 
-import ru.inversion.dataset.parser.SQLItem;
-import ru.inversion.dataset.parser.SQLParser;
+import ru.inversion.dataset.parser.old.SQLItem;
+import ru.inversion.dataset.parser.old.SQLParser;
 import ru.inversion.db.expr.SQLExpressionException;
 import ru.inversion.utils.Pair;
 import ru.inversion.utils.S;
@@ -20,11 +20,11 @@ import java.net.URL;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
-//import ru.inversion.dataset.parser.SQLItem;
-//import ru.inversion.dataset.parser.SQLParser;
-//import static ru.inversion.dataset.parser.SQLParser.value2Str;
+//import ru.inversion.dataset.parser.old.SQLItem;
+//import ru.inversion.dataset.parser.old.SQLParser;
+//import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 /**
  *
@@ -238,7 +238,7 @@ public class SQLExprXMLLoader implements AutoCloseable {
                         break;
                     case STRING:
                         //sb.append("'").append( item.getValue() ).append("'");
-                        sb.append( value2Str(item.getValue()) );
+                        sb.append( format(item.getValue()) );
                         break;
                     default:
                         sb.append( item.getValue() );

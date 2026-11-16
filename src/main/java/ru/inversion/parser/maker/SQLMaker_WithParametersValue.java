@@ -3,7 +3,7 @@ package ru.inversion.parser.maker;
 import ru.inversion.parser.statement.PrepareContext;
 import ru.inversion.parser.token.Token;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 /** */
 public class SQLMaker_WithParametersValue extends AbstractSQLMakerBase {
@@ -17,15 +17,15 @@ public class SQLMaker_WithParametersValue extends AbstractSQLMakerBase {
             case UNCHANGED_MARK:
                 break;
             case INDEXED_PARAMETER:
-                c.append( value2Str( c.callBackParameters().getParameter(nIndex++) ) );
+                c.append( format( c.callBackParameters().getParameter(nIndex++) ) );
                 break;
             case NAMED_PARAMETER:
-                c.append( value2Str( c.callBackParameters().getParameter( t.getValue().toString() ) ) );
+                c.append( format( c.callBackParameters().getParameter( t.getValue().toString() ) ) );
                 break;
             case STRING:
             case INTEGER:
             case DECIMAL:
-                c.sp().append( value2Str( t.getValue() ) ).sp();
+                c.sp().append( format( t.getValue() ) ).sp();
             break;
             default:
                 c.sp().append( t.getValue() );

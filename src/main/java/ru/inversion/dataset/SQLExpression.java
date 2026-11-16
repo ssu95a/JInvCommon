@@ -1,13 +1,13 @@
 package ru.inversion.dataset;
 
-import ru.inversion.dataset.parser.SQLParser;
+import ru.inversion.dataset.parser.old.SQLParser;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.utils.Jt2St;
 import ru.inversion.utils.S;
 import ru.inversion.utils.U;
-import ru.inversion.utils.sparser.SqlScannerFactory;
-import ru.inversion.utils.sparser.SqlValueFormatter;
-import ru.inversion.utils.sparser.lexer.SqlScanner;
+import ru.inversion.dataset.parser.SqlScannerFactory;
+import ru.inversion.dataset.parser.SqlValueFormatter;
+import ru.inversion.dataset.parser.lexer.SqlScanner;
 
 import java.util.*;
 

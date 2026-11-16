@@ -3,11 +3,11 @@ package ru.inversion.dataset.impl;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.ISQLExpression;
 import ru.inversion.db.dialect.SqlDialect;
-import ru.inversion.utils.sparser.jdbc.Parameter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.SqlScannerFactory;
-import ru.inversion.utils.sparser.lexer.SqlScanner;
-import ru.inversion.utils.sparser.select.SqlSelect;
+import ru.inversion.dataset.parser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.SqlScannerFactory;
+import ru.inversion.dataset.parser.lexer.SqlScanner;
+import ru.inversion.dataset.parser.select.SqlSelect;
 
 import java.util.ArrayList;
 import java.util.Collections;

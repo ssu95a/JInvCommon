@@ -4,7 +4,7 @@ import ru.inversion.datacall.AbstractCallMakerBase;
 import ru.inversion.datacall.CallPrepareContext;
 import ru.inversion.parser.token.Token;
 import ru.inversion.utils.TriConsumer;
-import ru.inversion.utils.sparser.SqlValueFormatter;
+import ru.inversion.dataset.parser.SqlValueFormatter;
 
 public class CallMaker_Query extends AbstractCallMakerBase {
 

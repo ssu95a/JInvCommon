@@ -2,7 +2,7 @@ package ru.inversion.dataset;
 
 import org.junit.Test;
 import ru.inversion.db.dialect.SqlDialectFactory;
-import ru.inversion.utils.sparser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.Parameter;
 
 import java.util.Arrays;
 import java.util.Collections;

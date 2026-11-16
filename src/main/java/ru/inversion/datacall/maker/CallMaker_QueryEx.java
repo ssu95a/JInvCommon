@@ -7,7 +7,7 @@ import ru.inversion.parser.token.Token;
 import java.util.List;
 import java.util.function.Function;
 
-import static ru.inversion.dataset.parser.SQLParser.value2Str;
+import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 public class CallMaker_QueryEx extends AbstractCallMakerBase {
 
@@ -37,7 +37,7 @@ public class CallMaker_QueryEx extends AbstractCallMakerBase {
                     parameters.add( (o)->t.getValue() );
                 }
                 else
-                    c.sp().append( value2Str( t.getValue() ) ).sp();
+                    c.sp().append( format( t.getValue() ) ).sp();
             break;
             default :
                 c.append( t );

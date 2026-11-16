@@ -12,10 +12,10 @@ import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
-import ru.inversion.utils.sparser.SqlScannerFactory;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
-import ru.inversion.utils.sparser.lexer.SqlScanner;
-import ru.inversion.utils.sparser.select.SqlSelect;
+import ru.inversion.dataset.parser.SqlScannerFactory;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.lexer.SqlScanner;
+import ru.inversion.dataset.parser.select.SqlSelect;
 
 import javax.persistence.NamedNativeQuery;
 import javax.persistence.Table;

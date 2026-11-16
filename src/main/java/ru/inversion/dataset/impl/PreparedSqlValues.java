@@ -2,8 +2,8 @@ package ru.inversion.dataset.impl;
 
 import ru.inversion.dataset.IParameters;
 import ru.inversion.utils.Jt2St;
-import ru.inversion.utils.sparser.jdbc.Parameter;
-import ru.inversion.utils.sparser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.jdbc.Parameter;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
