@@ -52,7 +52,7 @@ class SQLDataSetLifecycleTest {
         }
     }
 
-    private static final class Reader implements ISQLDataReader<String> {
+    private static class Reader implements ISQLDataReader<String> {
         final List<Object> receivedParameters = new ArrayList<>();
         int executeCount;
         int pageCount;
@@ -366,6 +366,96 @@ class SQLDataSetLifecycleTest {
 
         ds.close();
         assertEquals(1, reader.closeCount);
+    }
+
+
+    @Test
+    void readerReplacementCloseFailureIsNotRetried() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        reader.failClose = true;
+        ds.useReader(reader);
+
+        ds.setSQL("select id from changed_source");
+
+        assertThrows(DataSetException.class, ds::executeQuery);
+
+        assertNull(ds.reader());
+        assertEquals(1, reader.closeCount);
+    }
+
+    @Test
+    void singleRowCloseFailureStillDetachesReader() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        reader.failClose = true;
+        ds.useReader(reader);
+        ds.setDataQueryModeEnum(
+                ISQLDataSet.DataQueryModeEnum.SINGLE_ROW
+        );
+
+        assertThrows(DataSetException.class, ds::swappingData);
+
+        assertNull(ds.reader());
+        assertEquals(1, reader.closeCount);
+        assertEquals(
+                Arrays.asList("row"),
+                ds.getRows()
+        );
+    }
+
+    @Test
+    void maximumFetchFailureRemainsPrimaryWhenCloseAlsoFails() {
+        String property =
+                "ru.inversion.db.maximum_records_fetched";
+        String previous = System.getProperty(property);
+
+        try {
+            System.setProperty(property, "1");
+
+            TestDataSet ds = new TestDataSet();
+            Reader reader = new Reader() {
+                @Override
+                public List<String> getNextPage(int pageSize) {
+                    pageCount++;
+                    eof = true;
+                    return Arrays.asList("one", "two");
+                }
+            };
+            reader.failClose = true;
+            ds.useReader(reader);
+
+            DataSetException failure =
+                    assertThrows(
+                            DataSetException.class,
+                            ds::swappingData
+                    );
+
+            Throwable cause = failure.getCause();
+
+            assertNotNull(cause);
+            assertTrue(
+                    cause.getMessage(),
+                    cause.getMessage().contains(
+                            "Exceeded the allowed number of records")
+            );
+            assertEquals(1, cause.getSuppressed().length);
+            assertTrue(
+                    cause.getSuppressed()[0].getMessage(),
+                    cause.getSuppressed()[0]
+                            .getMessage()
+                            .contains("close failed")
+            );
+            assertNull(ds.reader());
+            assertEquals(1, reader.closeCount);
+            assertTrue(ds.getRows().isEmpty());
+        }
+        finally {
+            if( previous == null )
+                System.clearProperty(property);
+            else
+                System.setProperty(property, previous);
+        }
     }
 
 }
