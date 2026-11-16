@@ -814,8 +814,10 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
     @Override
     public void executeQuery() throws TreeDataSetException {
 
+        final Integer previousExecuteCount = getProperty("ts.execute_count");
         final int executeCount = incrementCounter();
         final boolean firstExecute = executeCount == 1;
+        boolean firstInitializationCompleted = false;
 
         try {
 
@@ -848,6 +850,9 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
                 if(!predicates.isEmpty())
                     predicates.values().stream().filter(PredicateItem::isPending).forEach(PredicateItem::makeFinal);
 
+                if( firstExecute )
+                    firstInitializationCompleted = true;
+
                 final Object oldCurrentId = getCurrentItemId();
 
                 clear();
@@ -865,15 +870,14 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
 
                 fireDataSetEvent( EXECUTE, false );
             }
-            catch( Throwable th ) {
-
-                if(!predicates.isEmpty())
-                    predicates.entrySet().removeIf(entry -> entry.getValue().isPending());
-
-                throw th;
-            }
         }
         catch (Throwable th) {
+            if( firstExecute && !firstInitializationCompleted )
+                setProperty("ts.execute_count", previousExecuteCount);
+
+            if(!predicates.isEmpty())
+                predicates.entrySet().removeIf(entry -> entry.getValue().isPending());
+
             throw new TreeDataSetException( Tags.PRODUCT_LABEL + "Error in SQLTreeDataSet on executeQuery", th );
         }
     }
