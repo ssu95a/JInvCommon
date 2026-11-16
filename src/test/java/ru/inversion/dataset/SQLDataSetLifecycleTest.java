@@ -435,16 +435,16 @@ class SQLDataSetLifecycleTest {
 
             assertNotNull(cause);
             assertTrue(
-                    cause.getMessage(),
                     cause.getMessage().contains(
-                            "Exceeded the allowed number of records")
+                            "Exceeded the allowed number of records"),
+                    cause.getMessage()
             );
             assertEquals(1, cause.getSuppressed().length);
             assertTrue(
-                    cause.getSuppressed()[0].getMessage(),
                     cause.getSuppressed()[0]
                             .getMessage()
-                            .contains("close failed")
+                            .contains("close failed"),
+                    cause.getSuppressed()[0].getMessage()
             );
             assertNull(ds.reader());
             assertEquals(1, reader.closeCount);
