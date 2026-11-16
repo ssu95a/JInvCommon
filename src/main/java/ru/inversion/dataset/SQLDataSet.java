@@ -913,10 +913,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             if( dataReader == null || needReCreateReader.getValue() )
             {
                if( dataReader != null )
-               {
-                  dataReader.close();
-                  dataReader = null;
-               }
+                  closeDataReader();
 
                preparedDataQuery = null;
                preparedSelectBuilder = null;
@@ -943,18 +940,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             needReCreateReader();
 
             // Не оставляем открытый курсор/PreparedStatement после неудачной загрузки.
-            ISQLDataReader<P> failedReader = dataReader;
-            dataReader = null;
             preparedDataQuery = null;
             preparedSelectBuilder = null;
-            if (failedReader != null) {
-               try {
-                  failedReader.close();
-               } catch (Throwable closeError) {
-                  if (th != closeError)
-                     th.addSuppressed(closeError);
-               }
-            }
+            closeDataReaderAfterFailure(th);
             throw th;
          }
 
@@ -1725,6 +1713,34 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          fireRowEvent( REFRESH, curRow, curRow, getCurrentRowNum(), 1 );
    }
 
+   private ISQLDataReader<P> detachDataReader() {
+      ISQLDataReader<P> reader = dataReader;
+      dataReader = null;
+      return reader;
+   }
+
+   private void closeDataReader() throws DataSetException {
+      ISQLDataReader<P> reader = detachDataReader();
+
+      if( reader != null )
+         reader.close();
+   }
+
+   private void closeDataReaderAfterFailure( Throwable failure ) {
+      ISQLDataReader<P> reader = detachDataReader();
+
+      if( reader == null )
+         return;
+
+      try {
+         reader.close();
+      }
+      catch( Throwable closeError ) {
+         if( failure != closeError )
+            failure.addSuppressed(closeError);
+      }
+   }
+
    /**
     * Закрывает SQLDataSet и вязанные с ним ресурсы.
     * кидает событие CLOSE
@@ -1734,11 +1750,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       if( dataReader != null ) {
          fireDataSetEvent( CLOSE, true  );
-
-         ISQLDataReader<P> reader = dataReader;
-         dataReader = null;
-
-         reader.close( );
+         closeDataReader();
          fireDataSetEvent( CLOSE, false );
       }
    }
@@ -1795,9 +1807,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
                   if( rows().size() + realRowCount > maxFetchSize ) {
 
-                     dataReader.close(); dataReader = null;
+                     IllegalStateException failure =
+                             new IllegalStateException(
+                                     Tags.PRODUCT_LABEL
+                                             + "Exceeded the allowed number of records when reading. Max fetch size: "
+                                             + maxFetchSize);
 
-                     throw new IllegalStateException(Tags.PRODUCT_LABEL + "Exceeded the allowed number of records when reading. Max fetch size: " + maxFetchSize);
+                     closeDataReaderAfterFailure(failure);
+                     throw failure;
                   }
 
                }
@@ -1808,9 +1825,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             }
 
             if( isSingleRow() )
-            {
-               dataReader.close(); dataReader = null;
-            }
+               closeDataReader();
 
             return true;
          }
