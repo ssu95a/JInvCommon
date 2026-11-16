@@ -24,7 +24,7 @@ final class UnsupportedQuotedLiteralRecognizer implements TokenRecognizer {
         if (!ScanChars.identifierStart(sql.charAt(at)))
             return null;
 
-        int end = identifierEnd(sql, at);
+        int end = ScanChars.identifierEnd(sql, at, oracle);
 
         // E'...', N'...', q'...', B'...', X'...' and similar prefixes.
         if (end < sql.length() && sql.charAt(end) == '\'')
@@ -44,14 +44,6 @@ final class UnsupportedQuotedLiteralRecognizer implements TokenRecognizer {
             throw unsupported(at);
 
         return null;
-    }
-
-    private int identifierEnd(String sql, int at) {
-        int end = at + 1;
-        while (end < sql.length()
-                && ScanChars.identifierPart(sql.charAt(end), oracle))
-            end++;
-        return end;
     }
 
     private boolean typedQuotedLiteral(String sql, int at, int end) {
@@ -105,8 +97,7 @@ final class UnsupportedQuotedLiteralRecognizer implements TokenRecognizer {
         if (i >= sql.length() || !ScanChars.digit(sql.charAt(i)))
             return -1;
 
-        while (i < sql.length() && ScanChars.digit(sql.charAt(i)))
-            i++;
+        i = ScanChars.digitsEnd(sql, i);
 
         i = skipTrivia(sql, i);
 

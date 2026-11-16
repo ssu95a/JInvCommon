@@ -11,6 +11,10 @@ public class SqlValueFormatterTest {
     @Test
     public void quotesTextAndEscapesApostrophes() {
         assertEquals(" 'O''Brien' ", SqlValueFormatter.format("O'Brien"));
+        assertEquals(
+                " 'O''Brien' ",
+                SqlValueFormatter.format("O'Brien".toCharArray())
+        );
     }
 
     @Test

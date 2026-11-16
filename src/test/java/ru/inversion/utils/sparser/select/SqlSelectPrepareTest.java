@@ -36,6 +36,17 @@ public class SqlSelectPrepareTest {
         }
     }
 
+    @Test public void parameterizerRejectsClosingParenthesisBeforeOpeningOne() {
+        String sql = "select ) (";
+        PostgresSqlScanner scanner = new PostgresSqlScanner();
+
+        assertRejected(() -> SqlParameterizer.prepare(
+                sql,
+                scanner.scan(sql),
+                false
+        ));
+    }
+
     @Test public void mixedParameterSourcesAndRepeatedNames() {
         PreparedSql p = pg("select * from t where a=? and b=:userId and c=$2 and d='OPEN' and e=:userId and f=15 and g=?").prepare();
         assertEquals("select * from t where a=? and b=? and c=? and d=? and e=? and f=? and g=?", p.getSql());

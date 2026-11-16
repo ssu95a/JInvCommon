@@ -24,6 +24,25 @@ final class ScanChars {
                 || ( oracle && ch == '#' );
     }
 
+    static int identifierEnd(String sql, int at, boolean oracle) {
+        int end = at + 1;
+
+        while( end < sql.length()
+                && identifierPart(sql.charAt(end), oracle) )
+            end++;
+
+        return end;
+    }
+
+    static int digitsEnd(String sql, int at) {
+        int end = at;
+
+        while( end < sql.length() && digit(sql.charAt(end)) )
+            end++;
+
+        return end;
+    }
+
     static boolean atPostgresWordBoundary(String sql, int at) {
         return at == 0 || !identifierPart(sql.charAt(at - 1), false);
     }

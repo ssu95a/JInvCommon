@@ -301,8 +301,7 @@ public final class SqlSelect {
             }
         }
 
-        Collections.sort(
-                edits,
+        edits.sort(
                 Comparator.comparingInt((Edit edit) -> edit.start)
                         .thenComparingInt(edit -> edit.priority)
         );
@@ -420,6 +419,7 @@ public final class SqlSelect {
         int where = -1, order = -1, tail = -1;
         int limit = -1, fetch = -1, offset = -1, rowLock = -1;
         boolean hasGroupBy = false;
+        boolean hasHaving = false;
         int firstFollowingWhere = statementEndIndex;
         int firstFollowingOrder = statementEndIndex;
         int firstSelectBoundary = statementEndIndex;
@@ -454,6 +454,7 @@ public final class SqlSelect {
                 if (firstSelectBoundary == statementEndIndex) firstSelectBoundary = i;
             }
             if (groupClause) hasGroupBy = true;
+            if (keyword(i, HAVING)) hasHaving = true;
             if (orderClause && order < 0) {
                 order = i;
                 siblings = keywords(i, ORDER, SIBLINGS, BY);
@@ -473,7 +474,7 @@ public final class SqlSelect {
 
         int itemsBoundary = firstSelectBoundary;
         String markRestriction = null;
-        if (hasGroupBy || hasOuterHaving(selectIndex, statementEndIndex)) {
+        if (hasGroupBy || hasHaving) {
             markRestriction = "GROUP BY/HAVING";
         } else if (hasTopLevelDistinct(selectIndex + 1, itemsBoundary)) {
             markRestriction = DISTINCT.name();
@@ -486,18 +487,6 @@ public final class SqlSelect {
         result.compound = compoundQuery;
         result.orderSiblings = siblings;
         result.markRestriction = markRestriction;
-        result.whereWordEnd = -1;
-        result.wherePredicateEnd = -1;
-        result.orderStart = -1;
-        result.orderEnd = -1;
-        result.whereInsertion = -1;
-        result.orderInsertion = -1;
-        result.rowLimitStart = -1;
-        result.rowLimitEnd = -1;
-        result.rowLimitInsertion = -1;
-        result.rowLimitRestriction = null;
-        result.legacyWhereMarkerStart = -1;
-        result.legacyWhereMarkerEnd = -1;
 
         int[] legacyWhereMarker = findLegacyWhereMarker();
         if (legacyWhereMarker != null) {
@@ -631,17 +620,6 @@ public final class SqlSelect {
         return false;
     }
 
-    private boolean hasOuterHaving(int first, int end) {
-        int depth = 0;
-        for (int i = first; i < end; i++) {
-            SqlScanner.Token t = sourceTokens.get(i);
-            if (symbol(source, t, "(")) depth++;
-            else if (symbol(source, t, ")")) depth--;
-            else if (depth == 0 && keyword(i, HAVING)) return true;
-        }
-        return false;
-    }
-
     private boolean orderClauseAt(int i) {
         return keywords(i, ORDER, BY) || keywords(i, ORDER, SIBLINGS, BY);
     }
@@ -724,23 +702,23 @@ public final class SqlSelect {
 
         int selectItemsEnd;
 
-        int whereWordEnd;
+        int whereWordEnd = -1;
 
-        int wherePredicateEnd;
+        int wherePredicateEnd = -1;
 
-        int whereInsertion;
+        int whereInsertion = -1;
 
-        int legacyWhereMarkerStart;
-        int legacyWhereMarkerEnd;
+        int legacyWhereMarkerStart = -1;
+        int legacyWhereMarkerEnd = -1;
 
-        int orderStart;
-        int orderEnd;
+        int orderStart = -1;
+        int orderEnd = -1;
 
-        int orderInsertion;
+        int orderInsertion = -1;
 
-        int rowLimitStart;
-        int rowLimitEnd;
-        int rowLimitInsertion;
+        int rowLimitStart = -1;
+        int rowLimitEnd = -1;
+        int rowLimitInsertion = -1;
 
         String rowLimitRestriction;
 

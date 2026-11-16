@@ -81,18 +81,7 @@ public abstract class SqlScanner {
     private final List<TokenRecognizer> recognizers;
 
     SqlScanner( List<TokenRecognizer> recognizers ) {
-
-//        Objects.requireNonNull(recognizers, "recognizers");
-//        if (recognizers.isEmpty()) {
-//            throw new IllegalArgumentException("Empty recognizer list");
-//        }
-//        List<TokenRecognizer> copy = new ArrayList<>(recognizers.size());
-//        for (TokenRecognizer recognizer : recognizers) {
-//            copy.add(Objects.requireNonNull(recognizer, "recognizer"));
-//        }
-
-       //little optimization
-       this.recognizers = recognizers; //Collections.unmodifiableList(copy);
+       this.recognizers = recognizers;
     }
 
     public final List<Token> scan( String sql )

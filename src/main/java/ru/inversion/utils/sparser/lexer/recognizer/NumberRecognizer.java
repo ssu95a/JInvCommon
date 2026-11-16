@@ -40,13 +40,13 @@ final class NumberRecognizer implements TokenRecognizer {
         if( sql.charAt(end) == '.' )
             end++;
 
-        end = digitsEnd(sql, end);
+        end = ScanChars.digitsEnd(sql, end);
 
         if( end < sql.length()
                 && sql.charAt(end) == '.'
                 && (end + 1 == sql.length()
                 || sql.charAt(end + 1) != '.') ) {
-            end = digitsEnd(sql, end + 1);
+            end = ScanChars.digitsEnd(sql, end + 1);
         }
 
         if( end < sql.length()
@@ -62,17 +62,11 @@ final class NumberRecognizer implements TokenRecognizer {
 
             if( exponent < sql.length()
                     && ScanChars.digit(sql.charAt(exponent)) ) {
-                end = digitsEnd(sql, exponent);
+                end = ScanChars.digitsEnd(sql, exponent);
             }
         }
 
         return end;
     }
 
-    private static int digitsEnd(String sql, int at) {
-        int end = at;
-        while (end < sql.length() && ScanChars.digit(sql.charAt(end)))
-            end++;
-        return end;
-    }
 }

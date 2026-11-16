@@ -108,6 +108,11 @@ final class SqlParameterizer {
             }
 
             if (symbol(token, ")")) {
+                if (depth == 0)
+                    throw new IllegalArgumentException(
+                            "Unbalanced SQL parentheses at offset "
+                                    + token.start());
+
                 if (typeDepth == depth)
                     typeDepth = -1;
 

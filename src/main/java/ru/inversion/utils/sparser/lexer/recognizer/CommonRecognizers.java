@@ -106,8 +106,7 @@ final class CommonRecognizers {
             }
             if (ch != ':' || at + 1 == sql.length()
                     || !ScanChars.identifierStart(sql.charAt(at + 1))) return null;
-            int end = at + 2;
-            while (end < sql.length() && ScanChars.identifierPart(sql.charAt(end), oracle)) end++;
+            int end = ScanChars.identifierEnd(sql, at + 1, oracle);
             return new SqlScanner.Token(NAMED_PARAMETER, at, end);
         }
     }
@@ -122,13 +121,11 @@ final class CommonRecognizers {
         @Override
         public SqlScanner.Token recognize(String sql, int at) {
             if (!ScanChars.identifierStart(sql.charAt(at))) return null;
-
-            int end = at + 1;
-            while (end < sql.length()
-                    && ScanChars.identifierPart(sql.charAt(end), oracle))
-                end++;
-
-            return new SqlScanner.Token(WORD, at, end);
+            return new SqlScanner.Token(
+                    WORD,
+                    at,
+                    ScanChars.identifierEnd(sql, at, oracle)
+            );
         }
     }
 }

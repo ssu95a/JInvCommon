@@ -20,9 +20,7 @@ final class PostgresRecognizers {
                 return null;
             }
 
-            int end = at + 2;
-            while (end < sql.length() && ScanChars.digit(sql.charAt(end)))
-                end++;
+            int end = ScanChars.digitsEnd(sql, at + 1);
 
             return new SqlScanner.Token(NUMBERED_PARAMETER, at, end);
         }

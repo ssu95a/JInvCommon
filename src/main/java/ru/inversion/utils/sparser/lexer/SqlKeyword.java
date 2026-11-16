@@ -1,7 +1,5 @@
 package ru.inversion.utils.sparser.lexer;
 
-import ru.inversion.utils.U;
-
 import java.util.TreeMap;
 
 /**
@@ -74,9 +72,12 @@ public enum SqlKeyword {
             BY_NAME.put(keyword.name(), keyword);
     }
 
-    @SafeVarargs
     public static boolean in( SqlKeyword keyword, SqlKeyword ... values ) {
-        return U.in(keyword, values);
+        for( SqlKeyword value : values )
+            if( keyword == value )
+                return true;
+
+        return false;
     }
 
     boolean matches( String source, int start, int end)
