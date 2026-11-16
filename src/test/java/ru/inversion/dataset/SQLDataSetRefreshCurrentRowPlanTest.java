@@ -170,4 +170,53 @@ public class SQLDataSetRefreshCurrentRowPlanTest {
     private static final class TestDataSet
             extends SQLDataSet<Object> {
     }
+
+    @Test
+    public void optimizerHintIsPreservedInRefreshPlan() {
+        TestDataSet ds = new TestDataSet();
+        ds.setSQL("select ID, AMOUNT from T");
+        ds.setQueryAlias("q");
+        ds.setOptimizerHint("+ INDEX(q IDX_T_ID)");
+
+        SQLDataSet.RefreshCurrentRowPlan plan =
+                ds.createRefreshCurrentRowPlan(
+                        Collections.singletonList("ID"),
+                        SqlDialectFactory.POSTGRES
+                );
+
+        assertTrue(
+                plan.sql,
+                plan.sql.contains(
+                        "SELECT /*+ INDEX(q IDX_T_ID)*/  q.*"
+                )
+        );
+        assertEquals(1, plan.preparedSql.getParameters().size());
+        assertEquals(
+                plan.idParameterNames.get(0),
+                plan.preparedSql.getParameters().get(0).getName()
+        );
+    }
+
+    @Test
+    public void refreshPlanDoesNotInheritFiltersOrderOrRowLimit() {
+        TestDataSet ds = new TestDataSet();
+        ds.setSQL("select ID, AMOUNT from T");
+        ds.setFilter("AMOUNT > 10", true, true);
+        ds.setOrderBy("AMOUNT desc");
+        ds.setRowLimit(1);
+
+        SQLDataSet.RefreshCurrentRowPlan plan =
+                ds.createRefreshCurrentRowPlan(
+                        Collections.singletonList("ID"),
+                        SqlDialectFactory.POSTGRES
+                );
+
+        String sql = plan.sql.toUpperCase(java.util.Locale.ROOT);
+
+        assertFalse(plan.sql, sql.contains("AMOUNT > 10"));
+        assertFalse(plan.sql, sql.contains("ORDER BY"));
+        assertFalse(plan.sql, sql.contains("LIMIT"));
+        assertFalse(plan.sql, sql.contains("FETCH FIRST"));
+    }
+
 }
