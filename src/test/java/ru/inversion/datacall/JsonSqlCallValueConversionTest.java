@@ -3,7 +3,6 @@ package ru.inversion.datacall;
 import org.junit.jupiter.api.Test;
 import ru.inversion.dataset.ParametersByName;
 import ru.inversion.parser.statement.LangEnum;
-import ru.inversion.utils.ParametersValues;
 
 import javax.json.Json;
 import javax.json.JsonArray;
@@ -12,7 +11,6 @@ import javax.json.JsonReader;
 import java.io.StringReader;
 import java.sql.Types;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,7 +20,7 @@ import static javax.persistence.ParameterMode.INOUT;
 import static javax.persistence.ParameterMode.OUT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,7 +31,7 @@ class JsonSqlCallValueConversionTest {
         CallStatement statement = CallBuilder.NEW()
                 .sql("begin use_values("
                         + ":Block.Item, :outValue, :ioValue, :nullValue, "
-                        + ":BLOCK.ITEM); end;")
+                        + ":inferredValue, :untypedNull, :BLOCK.ITEM); end;")
                 .lang(LangEnum.PL_pgSQL)
                 .putParameter(new ParameterMetadataBuilder()
                         .name("Block.Item")
@@ -55,12 +53,22 @@ class JsonSqlCallValueConversionTest {
                         .mode(IN)
                         .sqlType(Types.VARCHAR)
                         .build())
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("inferredValue")
+                        .mode(IN)
+                        .build())
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("untypedNull")
+                        .mode(IN)
+                        .build())
                 .build();
 
         Map<String,Object> values = new HashMap<>();
         values.put("Block.Item", "alpha");
         values.put("ioValue", 7);
         values.put("nullValue", null);
+        values.put("inferredValue", 11);
+        values.put("untypedNull", null);
 
         JsonSqlCall call = new JsonSqlCall(
                 null,
@@ -86,7 +94,7 @@ class JsonSqlCallValueConversionTest {
         assertFalse(script.contains(":BLOCK.ITEM"));
 
         JsonArray parameterArray = expression.getJsonArray("parameters");
-        assertEquals(4, parameterArray.size());
+        assertEquals(6, parameterArray.size());
         Map<String,JsonObject> parameters = parametersByName(parameterArray);
 
         JsonObject input = parameters.get("p_block_item");
@@ -109,10 +117,22 @@ class JsonSqlCallValueConversionTest {
         assertEquals("varchar", nullInput.getString("sqlType"));
         assertTrue(nullInput.isNull("value"));
 
+        JsonObject inferredInput = parameters.get("p_inferredvalue");
+        assertEquals("IN", inferredInput.getString("mode"));
+        assertEquals("INTEGER", inferredInput.getString("sqlType"));
+        assertEquals("11", inferredInput.getString("value"));
+
+        JsonObject untypedNull = parameters.get("p_untypednull");
+        assertEquals("IN", untypedNull.getString("mode"));
+        assertTrue(untypedNull.isNull("sqlType"));
+        assertTrue(untypedNull.isNull("value"));
+
         assertEquals("Block.Item", substitutions.get("p_block_item"));
         assertEquals("outValue", substitutions.get("p_outvalue"));
         assertEquals("ioValue", substitutions.get("p_iovalue"));
         assertEquals("nullValue", substitutions.get("p_nullvalue"));
+        assertEquals("inferredValue", substitutions.get("p_inferredvalue"));
+        assertEquals("untypedNull", substitutions.get("p_untypednull"));
     }
 
     @Test
@@ -150,7 +170,7 @@ class JsonSqlCallValueConversionTest {
     }
 
     @Test
-    void scalarOutWithoutJavaTypeKeepsJsonValue() throws CallException {
+    void scalarOutUsesDefaultJavaTypeFromSqlMetadata() throws CallException {
         ParameterMetadata<?> parameter = new ParameterMetadataBuilder()
                 .name("IFF_INSERT")
                 .mode(OUT)
@@ -161,36 +181,80 @@ class JsonSqlCallValueConversionTest {
 
         Object converted = JsonSqlCall.convertScalarOutValue(value, parameter);
 
-        assertSame(value, converted);
-    }
-
-    @Test
-    void scalarOutWithJavaTypeStillUsesTypeConverter() throws CallException {
-        ParameterMetadata<?> parameter = new ParameterMetadataBuilder()
-                .name("IFF_INSERT")
-                .mode(OUT)
-                .sqlType(Types.INTEGER)
-                .javaType(Integer.class)
-                .build();
-
-        Object converted = JsonSqlCall.convertScalarOutValue(42L, parameter);
-
         assertEquals(Integer.valueOf(42), converted);
     }
 
     @Test
-    void structArrayOutWithoutJavaTypeIsStoredAsStructList() {
-        ParametersValues parametersValues = new ParametersValues();
-        List<Object> values = new ArrayList<>(Arrays.asList("first", "second"));
+    void scalarOutHonorsExplicitJavaType() throws CallException {
+        ParameterMetadata<?> parameter = new ParameterMetadataBuilder()
+                .name("IFF_INSERT")
+                .mode(OUT)
+                .sqlType(Types.VARCHAR)
+                .javaType(Long.class)
+                .build();
 
-        JsonSqlCall.storeStructArrayOutValue(
-                parametersValues,
-                "OUT_ITEMS",
-                values,
-                null
+        Object converted = JsonSqlCall.convertScalarOutValue("42", parameter);
+
+        assertEquals(Long.valueOf(42), converted);
+    }
+
+    @Test
+    void responseUpdatesOutValuesAndNotifiesListeners() throws CallException {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("begin use_values(:outValue, :ioValue, :nullValue); end;")
+                .lang(LangEnum.PL_pgSQL)
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("outValue")
+                        .mode(OUT)
+                        .sqlType(Types.INTEGER)
+                        .build())
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("ioValue")
+                        .mode(INOUT)
+                        .sqlType(Types.INTEGER)
+                        .build())
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("nullValue")
+                        .mode(OUT)
+                        .sqlType(Types.VARCHAR)
+                        .build())
+                .build();
+
+        Map<String,Object> values = new HashMap<>();
+        values.put("ioValue", 7);
+        JsonSqlCall call = new JsonSqlCall(
+                null,
+                statement,
+                ParametersByName.of(values),
+                "response-test"
         );
 
-        assertSame(values, parametersValues.getParameter("OUT_ITEMS"));
+        List<String> notifications = new ArrayList<>();
+        call.setValueListener((id, value) ->
+                notifications.add(id + "=" + value));
+        call.setValueListener("outValue", (id, value) ->
+                notifications.add("specific:" + id + "=" + value));
+
+        Map<String,String> substitutions = new HashMap<>();
+        call.prepareJson(substitutions);
+
+        call.applyJsonResponse(
+                "{\"parameters\":["
+                        + "{\"name\":\"p_outvalue\",\"value\":42},"
+                        + "{\"name\":\"p_iovalue\",\"value\":8},"
+                        + "{\"name\":\"p_nullvalue\",\"value\":null}"
+                        + "]}",
+                substitutions
+        );
+
+        assertEquals(Integer.valueOf(42), call.getParameter("outValue"));
+        assertEquals(Integer.valueOf(8), call.getParameter("ioValue"));
+        assertNull(call.getParameter("nullValue"));
+        assertEquals(4, notifications.size());
+        assertEquals("outValue=42", notifications.get(0));
+        assertEquals("specific:outValue=42", notifications.get(1));
+        assertEquals("ioValue=8", notifications.get(2));
+        assertEquals("nullValue=null", notifications.get(3));
     }
 
     private static Map<String,JsonObject> parametersByName(JsonArray values) {

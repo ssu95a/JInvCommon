@@ -27,7 +27,6 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.StreamSupport;
 
 import static javax.persistence.ParameterMode.IN;
 import static javax.persistence.ParameterMode.OUT;
@@ -198,229 +197,251 @@ public class JsonSqlCall implements IDataCall {
         this.storedProcWork = initStoredProc(tc);
     }
 
-    /** */
+    /** Builds the request understood by the PostgreSQL jf_exec launcher. */
     String prepareJson( Map<String,String> substMap )
     {
-        final StringWriter sw = new StringWriter( );
+        Objects.requireNonNull(substMap, "substMap");
 
-        final JsonArrayBuilder ab = Json.createArrayBuilder( );
-
-        final String plSql = callStatement.prepareSql(new CallMaker_Json(), new TriConsumer< Integer, Comparable, Object>() {
-            @Override
-            public void accept( Integer integer, Comparable newName, Object oldName ) {
-                registerNormalizedParameterName(
+        final String plSql = callStatement.prepareSql(
+                new CallMaker_Json(),
+                (index, newName, oldName) -> registerNormalizedParameterName(
                         substMap,
                         newName.toString(),
                         oldName.toString()
-                );
-            }
-        });
-
-//System.out.println(plSql);
-        final TaskContext tc = storedProcWork.getTaskContext( );
-
-        Iterator<ParameterMetadata<?>> iter =
-            StreamSupport.stream(callStatement.getParameterIter().spliterator(),false).sorted(new Comparator< ParameterMetadata<?> >() {
-                @Override
-                public int compare( ParameterMetadata p1, ParameterMetadata p2 ) {
-                    return Integer.compare(
-                            p2.getIdentifier().toString().length(),
-                            p1.getIdentifier().toString().length()
-                    );
-                }
-            }).map(new Function<ParameterMetadata<?>, ParameterMetadata<?>>() {
-                @Override
-                public ParameterMetadata<?> apply(ParameterMetadata<?> pm) {
-/*
-                    if( !S.isNullOrEmpty(pm.getElementType() ) )
-                        return new SqlParameterMetadata( pm,tc.dialect() );
-                    return pm;
-*/
-                   return castParameter(tc,pm);
-                }
-            }).iterator();
-
-        final Map<String,String> emittedNames = new HashMap<>();
-
-        for( ParameterMetadata<?> p : U.iterable(iter) )
-        {
-            final String sourceName = p.isIndexed()
-                    ? Integer.toString(p.getPosition())
-                    : p.getName();
-            final String name = p.isIndexed()
-                    ? sourceName
-                    : normalizeParameterName(sourceName);
-
-            registerNormalizedParameterName(substMap, name, sourceName);
-
-            if( !registerNormalizedParameterName(
-                    emittedNames, name, sourceName) )
-                continue;
-
-            final JsonObjectBuilder ob =
-                Json.createObjectBuilder( )
-                    .add( "name", name )
-                    .add( "mode", p.getMode().name());
-
-            Object value = null;
-
-            if( p.getMode() != OUT )
-            {
-                value = getInputValue(p);
-
-                if( value == null ) {
-                    ob.addNull( "value" );
-                }
-                else
-                {
-                    if( p.getSQLType() != null )
-                    {
-                        if( p.getSQLType() == Types.STRUCT )
-                        {
-                            final String elementType = p.getElementType();
-                            try {
-
-                                final StructMetaData structMetaData = StructMetaData.get( tc, elementType );
-                                final Struct struct = value instanceof Struct
-                                        ? (Struct)value
-                                        : structMetaData.getMapper((Class<Object>)value.getClass()).toStruct(tc, value);
-
-                                ob.add( "sqlType",  "STRUCT" );
-                                ob.add( "typeName", elementType );
-                                ob.add( "value",    structMetaData.toJson(struct) );
-                            }
-                            catch( Throwable th ) {
-                                throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on prepare '" + elementType + "' STRUCT value", th );
-                            }
-                        }
-                        else
-                            if( p.getSQLType() == Types.ARRAY )
-                            {
-                                try {
-
-                                    final ArrayMetaData arrayMetaData =
-                                          ArrayMetaData.get( tc, p.getElementType() );
-
-                                    final Array array;
-                                    final boolean arrayOwned;
-
-                                    if( value instanceof Array )
-                                    {
-                                        array = (Array)value;
-                                        arrayOwned = false;
-                                    }
-                                    else
-                                    {
-                                        final Collection<?> col = (Collection<?>)value;
-                                        final Object obj = U.firstNotNull(col);
-
-                                        if( arrayMetaData.getBaseType() == Types.STRUCT )
-                                        {
-                                            if( obj == null )
-                                                array = arrayMetaData.makeArray(Collections.nCopies(col.size(), null));
-                                            else
-                                            {
-                                                final IStructMapper sm = StructMetaData.get(tc, arrayMetaData.getBaseTypeName()).getMapper(obj.getClass());
-
-                                                final Struct sa[] = new Struct[col.size()];
-                                                int i = 0;
-                                                for( Object o : col )
-                                                    sa[i++] = o == null ? null : sm.toStruct(tc, o);
-
-                                                array = arrayMetaData.makeArray(Arrays.asList(sa));
-                                            }
-                                        }
-                                        else
-                                            array = arrayMetaData.makeArray(col);
-
-                                        arrayOwned = true;
-                                    }
-
-                                    try {
-                                        ob.add( "sqlType",    "ARRAY" );
-                                        ob.add( "typeName",   arrayMetaData.getSqlTypeName() );
-                                        ob.add( "elementType",arrayMetaData.getBaseTypeName() );
-                                        ob.add( "value",      arrayMetaData.toJson(array) );
-                                    }
-                                    finally {
-                                        if( arrayOwned )
-                                            array.free();
-                                    }
-                                }
-                                catch( Throwable th ) {
-                                    throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on prepare '" + p.getElementType() + "' ARRAY value", th );
-                                }
-                            }
-                            else
-                                ob.add( "value", value.toString() );
-                    }
-                    else
-                        ob.add( "value", value.toString() );
-                }
-            }//end if
-
-            if( p.getSQLType() != null )
-            {
-                if( p.getSQLType() == Types.STRUCT && ( p.getMode() == OUT || value == null ) )
-                {
-                    ob.add( "sqlType",  "STRUCT" );
-                    ob.add( "typeName", p.getElementType() );
-                }
-                else if( p.getSQLType() == Types.ARRAY && ( p.getMode() == OUT || value == null ) )
-                {
-                    final ArrayMetaData arrayMetaData = ArrayMetaData.get( tc, p.getElementType() );
-                    ob.add( "sqlType",     "ARRAY" );
-                    ob.add( "typeName",    arrayMetaData.getSqlTypeName() );
-                    ob.add( "elementType", arrayMetaData.getBaseTypeName() );
-                }
-                else
-                {
-                    ob.add( "sqlType", g_pgTypesMap.apply( p.getSQLType() ) );
-                    //Для null значений, разных типов
-                    if(!S.isNullOrEmpty( p.getElementType() ) )
-                        ob.add( "typeName", p.getElementType() );
-                }
-            }
-            else
-            {
-                if( p.getMode() != OUT )
-                {
-                    if( value != null )
-                        ob.add( "sqlType", g_pgTypesMap.apply( Jt2St.get( value.getClass()) ) );
-                    else
-                        ob.addNull("sqlType");
-                }
-                else
-                    throw new CallException( Tags.PRODUCT_LABEL + "Не описан тип OUT параметра '" + p.getName()
-                                             + "' для PL/xxx выражения '" + name + "'. Необходимо задать тип данных." );
-            }
-
-            ab.add(ob);
-
-        }//end for
-
-        final JsonObjectBuilder obExpr = Json.createObjectBuilder();
-
-        obExpr.add( "expression",
-            Json.createObjectBuilder()
-                .add( "name",    U.nvl( name, "<unnamed>" )  )
-                .add( "lang",    callStatement.getLang().toString() )
-                .add( "script",  plSql )
-                .add( "parameters", ab )
+                )
         );
 
-        try( JsonWriter jw = Json.createWriterFactory(
-                U.toMap( JsonGenerator.PRETTY_PRINTING, true )
-        ).createWriter(sw) ) {
-            jw.writeObject( obExpr.build() );
+        final TaskContext tc = storedProcWork.getTaskContext();
+        final JsonArrayBuilder parameters = Json.createArrayBuilder();
+
+        for( ParameterMetadata<?> parameter : requestParameters(tc, substMap) )
+            parameters.add(requestParameter(parameter, tc));
+
+        final JsonObject request = Json.createObjectBuilder()
+                .add("expression", Json.createObjectBuilder()
+                        .add("name", U.nvl(name, "<unnamed>"))
+                        .add("lang", callStatement.getLang().toString())
+                        .add("script", plSql)
+                        .add("parameters", parameters))
+                .build();
+
+        final StringWriter result = new StringWriter();
+        try( JsonWriter writer = Json.createWriterFactory(
+                U.toMap(JsonGenerator.PRETTY_PRINTING, true)
+        ).createWriter(result) ) {
+            writer.writeObject(request);
+        }
+        return result.toString();
+    }
+
+    /** Returns parameters in the legacy order and validates launcher names first. */
+    private List<ParameterMetadata<?>> requestParameters(
+            TaskContext tc,
+            Map<String,String> substMap
+    ) {
+        final List<ParameterMetadata<?>> parameters = new ArrayList<>();
+        for( ParameterMetadata<?> parameter : callStatement.getParameterIter() )
+            parameters.add(castParameter(tc, parameter));
+
+        parameters.sort((left, right) -> Integer.compare(
+                right.getIdentifier().toString().length(),
+                left.getIdentifier().toString().length()
+        ));
+
+        for( ParameterMetadata<?> parameter : parameters ) {
+            final String sourceName = sourceParameterName(parameter);
+            final String launcherName = launcherParameterName(parameter, sourceName);
+
+            registerNormalizedParameterName(substMap, launcherName, sourceName);
+        }
+        return parameters;
+    }
+
+    private static String sourceParameterName( ParameterMetadata<?> parameter ) {
+        return parameter.isIndexed()
+                ? Integer.toString(parameter.getPosition())
+                : parameter.getName();
+    }
+
+    private static String launcherParameterName(
+            ParameterMetadata<?> parameter,
+            String sourceName
+    ) {
+        return parameter.isIndexed()
+                ? sourceName
+                : normalizeParameterName(sourceName);
+    }
+
+    private JsonObjectBuilder requestParameter(
+            ParameterMetadata<?> parameter,
+            TaskContext tc
+    ) {
+        final String sourceName = sourceParameterName(parameter);
+        final JsonObjectBuilder result = Json.createObjectBuilder()
+                .add("name", launcherParameterName(parameter, sourceName))
+                .add("mode", parameter.getMode().name());
+
+        final Object value = parameter.isIn()
+                ? getInputValue(parameter)
+                : null;
+        final Integer sqlType = parameter.getSQLType();
+
+        if( sqlType == null )
+            addUntypedParameter(result, parameter, value);
+        else if( sqlType == Types.STRUCT )
+            addStructParameter(result, parameter, value, tc);
+        else if( sqlType == Types.ARRAY )
+            addArrayParameter(result, parameter, value, tc);
+        else
+            addScalarParameter(result, parameter, value, sqlType);
+
+        return result;
+    }
+
+    private void addUntypedParameter(
+            JsonObjectBuilder result,
+            ParameterMetadata<?> parameter,
+            Object value
+    ) {
+        if( !parameter.isIn() )
+            throw new CallException(
+                    Tags.PRODUCT_LABEL + "Не описан тип OUT параметра '"
+                            + parameter.getName() + "' для PL/xxx выражения '"
+                            + name + "'. Необходимо задать тип данных."
+            );
+
+        addStringValue(result, value);
+        if( value == null )
+            result.addNull("sqlType");
+        else
+            result.add("sqlType", g_pgTypesMap.apply(Jt2St.get(value.getClass())));
+    }
+
+    private static void addScalarParameter(
+            JsonObjectBuilder result,
+            ParameterMetadata<?> parameter,
+            Object value,
+            int sqlType
+    ) {
+        if( parameter.isIn() )
+            addStringValue(result, value);
+
+        result.add("sqlType", g_pgTypesMap.apply(sqlType));
+        if( !S.isNullOrEmpty(parameter.getElementType()) )
+            result.add("typeName", parameter.getElementType());
+    }
+
+    private static void addStringValue(JsonObjectBuilder result, Object value) {
+        if( value == null )
+            result.addNull("value");
+        else
+            result.add("value", value.toString());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void addStructParameter(
+            JsonObjectBuilder result,
+            ParameterMetadata<?> parameter,
+            Object value,
+            TaskContext tc
+    ) {
+        final String elementType = parameter.getElementType();
+        result.add("sqlType", "STRUCT");
+        result.add("typeName", elementType);
+
+        if( !parameter.isIn() )
+            return;
+        if( value == null ) {
+            result.addNull("value");
+            return;
         }
 
-        final String jsonStr = sw.toString();
+        try {
+            final StructMetaData metaData = StructMetaData.get(tc, elementType);
+            final Struct struct = value instanceof Struct
+                    ? (Struct)value
+                    : metaData.getMapper((Class<Object>)value.getClass())
+                            .toStruct(tc, value);
+            result.add("value", metaData.toJson(struct));
+        }
+        catch( Throwable th ) {
+            throw new RuntimeException(
+                    Tags.PRODUCT_LABEL + "Error on prepare '" + elementType
+                            + "' STRUCT value",
+                    th
+            );
+        }
+    }
 
-//        logger.debug( "json_call: " );
-//        logger.debug( jsonStr       );
+    private static void addArrayParameter(
+            JsonObjectBuilder result,
+            ParameterMetadata<?> parameter,
+            Object value,
+            TaskContext tc
+    ) {
+        final String elementType = parameter.getElementType();
+        try {
+            final ArrayMetaData metaData = ArrayMetaData.get(tc, elementType);
+            result.add("sqlType", "ARRAY");
+            result.add("typeName", metaData.getSqlTypeName());
+            result.add("elementType", metaData.getBaseTypeName());
 
-        return jsonStr;
+            if( !parameter.isIn() )
+                return;
+            if( value == null ) {
+                result.addNull("value");
+                return;
+            }
+
+            final Array array;
+            final boolean owned;
+            if( value instanceof Array ) {
+                array = (Array)value;
+                owned = false;
+            }
+            else {
+                array = createInputArray(metaData, (Collection<?>)value, tc);
+                owned = true;
+            }
+
+            try {
+                result.add("value", metaData.toJson(tc, array));
+            }
+            finally {
+                if( owned )
+                    array.free();
+            }
+        }
+        catch( Throwable th ) {
+            throw new RuntimeException(
+                    Tags.PRODUCT_LABEL + "Error on prepare '" + elementType
+                            + "' ARRAY value",
+                    th
+            );
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Array createInputArray(
+            ArrayMetaData metaData,
+            Collection<?> values,
+            TaskContext tc
+    ) throws Exception {
+        if( metaData.getBaseType() != Types.STRUCT )
+            return metaData.makeArray(values);
+
+        final Object first = U.firstNotNull(values);
+        if( first == null )
+            return metaData.makeArray(Collections.nCopies(values.size(), null));
+
+        final IStructMapper mapper = StructMetaData
+                .get(tc, metaData.getBaseTypeName())
+                .getMapper(first.getClass());
+        final List<Struct> structs = new ArrayList<>(values.size());
+        for( Object value : values )
+            structs.add(value == null ? null : mapper.toStruct(tc, value));
+
+        return metaData.makeArray(structs);
     }
 
     /** */
@@ -540,22 +561,147 @@ public class JsonSqlCall implements IDataCall {
         return javaType == null ? value : TypeConverter.convert( value, javaType );
     }
 
-    /** */
-    static void storeStructArrayOutValue(
-            ParametersValues parametersValues,
-            String parameterName,
-            List values,
-            IStructMapper mapper
-    )
-    {
-        if( mapper != null )
-            for( int i = 0; i < values.size(); i++ )
-            {
-                final Object value = values.get(i);
-                values.set( i, value == null ? null : mapper.from(value) );
-            }
+    /** Applies a jf_exec response without coupling JSON decoding to JDBC execution. */
+    void applyJsonResponse( String response, Map<String,String> substMap ) {
+        if( response == null )
+            return;
 
-        parametersValues.setParameter( parameterName, values );
+        final JsonObject root;
+        try( JsonReader reader = Json.createReader(new StringReader(response)) ) {
+            root = reader.readObject();
+        }
+
+        if( !root.containsKey("parameters") || root.isNull("parameters") )
+            return;
+
+        final TaskContext tc = storedProcWork.getTaskContext();
+        for( JsonValue jsonValue : root.getJsonArray("parameters") )
+            applyOutputParameter((JsonObject)jsonValue, substMap, tc);
+    }
+
+    private void applyOutputParameter(
+            JsonObject jsonParameter,
+            Map<String,String> substMap,
+            TaskContext tc
+    ) {
+        final Comparable parameterId = resolveOutputParameterId(
+                jsonParameter.getString("name"), substMap
+        );
+        final ParameterMetadata<?> parameter = castParameter(
+                tc, callStatement.getParameter(parameterId)
+        );
+        final Object value = getJsonValue(jsonParameter, "value");
+
+        setOutputValue(parameterId, convertOutputValue(value, parameter, tc));
+    }
+
+    private static Object convertOutputValue(
+            Object value,
+            ParameterMetadata<?> parameter,
+            TaskContext tc
+    ) {
+        if( parameter == null || parameter.getSQLType() == null || value == null )
+            return value;
+
+        switch( parameter.getSQLType() ) {
+            case Types.STRUCT:
+                return convertStructOutputValue(value, parameter, tc);
+            case Types.ARRAY:
+                return convertArrayOutputValue(value, parameter, tc);
+            default:
+                return convertScalarOutValue(value, parameter);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object convertStructOutputValue(
+            Object value,
+            ParameterMetadata<?> parameter,
+            TaskContext tc
+    ) {
+        final StructMetaData metaData = StructMetaData.get(
+                tc, parameter.getElementType()
+        );
+        final Struct struct = S.isString(value)
+                ? metaData.fromJson(tc, (String)value)
+                : metaData.fromMap(tc, (Map)value);
+
+        return parameter.getParameterType() == null
+                ? struct
+                : metaData.map(struct, parameter.getParameterType());
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static List<?> convertArrayOutputValue(
+            Object value,
+            ParameterMetadata<?> parameter,
+            TaskContext tc
+    ) {
+        final ArrayMetaData arrayMetaData = ArrayMetaData.get(
+                tc, parameter.getElementType()
+        );
+
+        if( arrayMetaData.getBaseType() == Types.STRUCT ) {
+            final StructMetaData structMetaData = StructMetaData.get(
+                    tc, arrayMetaData.getBaseTypeName()
+            );
+            final List result = S.isString(value)
+                    ? structMetaData.fromJsonArray(tc, (String)value)
+                    : structMetaData.fromMapsArray(tc, (List)value);
+
+            if( parameter.getParameterType() != null ) {
+                final IStructMapper mapper = structMetaData.getMapper(
+                        parameter.getParameterType()
+                );
+                for( int i = 0; i < result.size(); i++ ) {
+                    final Object item = result.get(i);
+                    result.set(i, item == null ? null : mapper.from(item));
+                }
+            }
+            return result;
+        }
+
+        final List<Object> result = S.isString(value)
+                ? arrayMetaData.fromJson((String)value)
+                : (List<Object>)value;
+        if( parameter.getParameterType() != null )
+            result.replaceAll(item -> TypeConverter.convert(
+                    item, parameter.getParameterType()
+            ));
+        return result;
+    }
+
+    private String executeRequest( String request ) {
+        storedProcWork.set("plSql", request);
+
+        final TaskContext tc = storedProcWork.getTaskContext();
+        final boolean switchAutoCommit = callStatement.isAutoCommit()
+                && !tc.isAutoCommit();
+        Throwable failure = null;
+
+        try {
+            if( switchAutoCommit )
+                tc.setAutoCommit(true);
+
+            storedProcWork.execute();
+            return storedProcWork.get("rsltInf");
+        }
+        catch( RuntimeException | Error th ) {
+            failure = th;
+            throw th;
+        }
+        finally {
+            if( switchAutoCommit ) {
+                try {
+                    tc.setAutoCommit(false);
+                }
+                catch( RuntimeException | Error restoreFailure ) {
+                    if( failure == null )
+                        throw restoreFailure;
+                    failure.addSuppressed(restoreFailure);
+                }
+            }
+        }
     }
 
     /** Выполнение запроса */
@@ -568,132 +714,37 @@ public class JsonSqlCall implements IDataCall {
         dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true  ) );
 
         String jsonSql = null;
+        CallException failure = null;
 
         try {
-
             final Map<String,String> substMap = new HashMap<>();
-
             jsonSql = prepareJson(substMap);
-
-            storedProcWork.set( "plSql", jsonSql );
-
-            final TaskContext tc = storedProcWork.getTaskContext();
-            final boolean switchAutoCommit = callStatement.isAutoCommit() && !tc.isAutoCommit();
-
-            try {
-                if( switchAutoCommit )
-                    tc.setAutoCommit(true);
-
-                storedProcWork.execute();
-            }
-            finally {
-                if( switchAutoCommit )
-                    tc.setAutoCommit(false);
-            }
-
-            String o = storedProcWork.get("rsltInf");
+            final String response = executeRequest(jsonSql);
 
             logger.debug( "json_return: " );
-            logger.debug( o );
+            logger.debug( response );
 
-            if( parametersValues != null && o != null )
-            {
-                final JsonObject jo;
-                try( JsonReader jr = Json.createReader(new StringReader(o)) ) {
-                    jo = jr.readObject();
-                }
-
-                if( jo.containsKey("parameters") && !jo.isNull("parameters") )
-                {
-                    final JsonArray parameters = jo.getJsonArray("parameters");
-                    for ( JsonValue p : parameters )
-                    {
-                        JsonObject j = (JsonObject)p;
-                        final Object v = getJsonValue( j, "value" );
-
-                        final Comparable parameterId = resolveOutputParameterId(
-                                j.getString("name"), substMap
-                        );
-
-                        final ParameterMetadata parameter = castParameter(
-                                tc, callStatement.getParameter(parameterId)
-                        );
-
-                        if( parameter == null || parameter.getSQLType() == null || v == null )
-                        {
-                            setOutputValue(parameterId, v);
-                        }
-                        else
-                        {
-                            if( parameter.getSQLType() == Types.STRUCT )
-                            {
-                                final StructMetaData metaData
-                                        = StructMetaData
-                                            .get( tc, parameter.getElementType() );
-
-                                final Struct struct = S.isString(v) ? metaData.fromJson( (String)v ) : metaData.fromMap((Map)v);
-
-                                final Object value;
-
-                                if( parameter.getParameterType() != null )
-                                    value = metaData.map( struct, parameter.getParameterType() );
-                                else
-                                    value = struct;
-
-                                setOutputValue(parameterId, value);
-                            }
-                            else
-                                  if( parameter.getSQLType() == Types.ARRAY )
-                                  {
-                                      final ArrayMetaData arrayMetaData =
-                                            ArrayMetaData.get( tc, parameter.getElementType() );
-
-                                      if( arrayMetaData.getBaseType() == Types.STRUCT )
-                                      {
-                                          final StructMetaData metaData = StructMetaData.get( tc, arrayMetaData.getBaseTypeName() );
-                                          final List list = S.isString(v)
-                                                  ? metaData.fromJsonArray((String)v)
-                                                  : metaData.fromMapsArray((List)v);
-                                          IStructMapper mapper = null;
-
-                                          if( parameter.getParameterType() != null )
-                                              mapper = metaData.getMapper( parameter.getParameterType() );
-
-                                          if( mapper != null )
-                                              for( int i = 0; i < list.size(); i++ )
-                                              {
-                                                  final Object value = list.get(i);
-                                                  list.set( i, value == null ? null : mapper.from(value) );
-                                              }
-
-                                          setOutputValue(parameterId, list);
-                                      }
-                                      else
-                                      {
-                                          final List<Object> list = S.isString(v) ? arrayMetaData.fromJson( (String)v ) : (List)v;
-
-                                          if( parameter.getParameterType() != null )
-                                              list.replaceAll(value -> TypeConverter.convert( value, parameter.getParameterType()) );
-
-                                          setOutputValue(parameterId, list);
-                                      }
-                                  }
-                                  else
-                                      setOutputValue(
-                                              parameterId,
-                                              convertScalarOutValue(v, parameter)
-                                      );
-                        }
-                    }
-                }
-            }
+            applyJsonResponse(response, substMap);
         }
         catch( Throwable th ) {
-            throw new CallException( Tags.PRODUCT_LABEL + "Error on execute JSON work", null, jsonSql, th );
+            failure = new CallException(
+                    Tags.PRODUCT_LABEL + "Error on execute JSON work",
+                    null,
+                    jsonSql,
+                    th
+            );
+            throw failure;
         }
         finally {
             try {
-                storedProcWork.set( "plSql", null );
+                try {
+                    storedProcWork.set("plSql", null);
+                }
+                catch( RuntimeException | Error cleanupFailure ) {
+                    if( failure == null )
+                        throw cleanupFailure;
+                    failure.addSuppressed(cleanupFailure);
+                }
             }
             finally {
                 dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
