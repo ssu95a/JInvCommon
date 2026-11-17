@@ -68,12 +68,41 @@ public class JsonSqlCall implements IDataCall {
         return JDBCType.valueOf(jdbcType).getName();
     };
 
-    private String normalize_Name( String name, boolean p )
+    static String normalizeParameterName( String name )
     {
-        return p ?
-           new StringBuilder(":p_").append( name.replace('.', '_').toLowerCase()).toString()
-           :
-           new StringBuilder("p_").append( name.replace('.', '_').toLowerCase()).toString();
+        return "p_" + Objects.requireNonNull(name, "name")
+                .replace('.', '_')
+                .toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Registers one name in the PostgreSQL launcher namespace.
+     * Repeated occurrences of the same case-insensitive source identifier are
+     * valid; distinct identifiers must never silently share a normalized name.
+     *
+     * @return true when the normalized name was registered for the first time
+     */
+    static boolean registerNormalizedParameterName(
+            Map<String,String> normalizedNames,
+            String normalizedName,
+            String sourceName
+    ) {
+        final String existing = normalizedNames.putIfAbsent(
+                Objects.requireNonNull(normalizedName, "normalizedName"),
+                Objects.requireNonNull(sourceName, "sourceName")
+        );
+
+        if( existing == null )
+            return true;
+
+        if( existing.equalsIgnoreCase(sourceName) )
+            return false;
+
+        throw new IllegalArgumentException(
+                "PostgreSQL parameter name collision: '" + existing
+                        + "' and '" + sourceName
+                        + "' both normalize to '" + normalizedName + "'"
+        );
     }
 
     public class CallMaker_Json extends AbstractCallMakerBase {
@@ -97,9 +126,10 @@ public class JsonSqlCall implements IDataCall {
                     break;
                 case NAMED_PARAMETER:
                 {
-                    String newName = normalize_Name(t.getValue().toString(), true ); //new StringBuilder(":p_").append(t.getValue().toString().toLowerCase()).toString();
-                    c.sp().append(newName).sp();
-                    c.parameterHandler().accept(0, newName.substring(1), t.getValue().toString() );
+                    final String sourceName = t.getValue().toString();
+                    final String normalizedName = normalizeParameterName(sourceName);
+                    c.sp().append(':').append(normalizedName).sp();
+                    c.parameterHandler().accept(0, normalizedName, sourceName);
                 }
                 break;
                 case INTEGER:
@@ -178,7 +208,11 @@ public class JsonSqlCall implements IDataCall {
         final String plSql = callStatement.prepareSql(new CallMaker_Json(), new TriConsumer< Integer, Comparable, Object>() {
             @Override
             public void accept( Integer integer, Comparable newName, Object oldName ) {
-                substMap.put( newName.toString(), oldName.toString() );
+                registerNormalizedParameterName(
+                        substMap,
+                        newName.toString(),
+                        oldName.toString()
+                );
             }
         });
 
@@ -206,16 +240,22 @@ public class JsonSqlCall implements IDataCall {
                 }
             }).iterator();
 
-        Set<String> pms = new HashSet<>();
+        final Map<String,String> emittedNames = new HashMap<>();
 
         for( ParameterMetadata<?> p : U.iterable(iter) )
         {
-            String name = p.isIndexed() ? Integer.toString( p.getPosition() ) : normalize_Name( p.getName(), false );// "p_" + p.getName().toLowerCase() )
+            final String sourceName = p.isIndexed()
+                    ? Integer.toString(p.getPosition())
+                    : p.getName();
+            final String name = p.isIndexed()
+                    ? sourceName
+                    : normalizeParameterName(sourceName);
 
-            if( pms.contains(name) )
+            registerNormalizedParameterName(substMap, name, sourceName);
+
+            if( !registerNormalizedParameterName(
+                    emittedNames, name, sourceName) )
                 continue;
-
-            pms.add(name);
 
             final JsonObjectBuilder ob =
                 Json.createObjectBuilder( )
