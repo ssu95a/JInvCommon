@@ -1,6 +1,7 @@
 package ru.inversion.datacall;
 
 import org.junit.Test;
+import ru.inversion.dataset.ParametersByName;
 import ru.inversion.tc.TaskContext;
 
 import javax.persistence.Column;
@@ -12,9 +13,17 @@ import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.BatchUpdateException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import static org.junit.Assert.*;
 
@@ -69,6 +78,20 @@ public class BatchBuilderExecutionTest {
         }
     }
 
+    public static final class NoTableRow {
+        private Integer id;
+
+        @Id
+        @Column(name = "ID")
+        public Integer getId() {
+            return id;
+        }
+
+        public void setId(Integer id) {
+            this.id = id;
+        }
+    }
+
     @Test
     public void builderRebuildsDefaultMapperWhenModeChanges() throws Exception {
         Jdbc jdbc = new Jdbc();
@@ -89,6 +112,66 @@ public class BatchBuilderExecutionTest {
         delete.execute();
         assertEquals(Arrays.asList(1), jdbc.boundIndexes);
         delete.close();
+    }
+
+    @Test
+    public void customModeUsesPojoAndCallbackParameters() throws Exception {
+        Path xml = Files.createTempFile("batch-custom-", ".xml");
+        try {
+            Files.write(xml, ("<sql_expr_list><expression name=\"update_item\" lang=\"SQL\">"
+                    + "<script><![CDATA[UPDATE BATCH_ITEMS SET PAYLOAD = :payload "
+                    + "WHERE ID = :id AND TENANT = :tenant]]></script>"
+                    + "</expression></sql_expr_list>").getBytes(StandardCharsets.UTF_8));
+
+            Jdbc jdbc = new Jdbc();
+            IBatchLoader<WideRow> loader = new BatchBuilder<WideRow>(context(jdbc))
+                    .valueClass(WideRow.class)
+                    .batchMode(BatchBuilder.BatchModeEnum.CUSTOM)
+                    .name("update_item")
+                    .url(xml.toUri().toURL())
+                    .callBackParameters((ParametersByName)name -> 9)
+                    .build();
+
+            loader.iterator(Arrays.asList(new WideRow(1, 2)).iterator());
+            loader.execute();
+
+            assertTrue(jdbc.sql.toUpperCase(Locale.ROOT).contains("BATCH_ITEMS"));
+            assertEquals(Arrays.asList(1, 2, 3), jdbc.boundIndexes);
+            assertEquals(Integer.valueOf(2), jdbc.boundValues.get(1));
+            assertEquals(Integer.valueOf(1), jdbc.boundValues.get(2));
+            assertEquals(Integer.valueOf(9), jdbc.boundValues.get(3));
+            loader.close();
+        }
+        finally {
+            Files.deleteIfExists(xml);
+        }
+    }
+
+    @Test
+    public void invalidModeFailsBeforeOpeningStatement() throws Exception {
+        Jdbc jdbc = new Jdbc();
+
+        assertThrows(UnsupportedOperationException.class,
+                () -> builder(jdbc).batchMode(BatchBuilder.BatchModeEnum.CUSTOM).build());
+        assertThrows(UnsupportedOperationException.class,
+                () -> builder(jdbc).batchMode(BatchBuilder.BatchModeEnum.CUSTOM)
+                        .url(new java.net.URL("file:/unused.xml")).build());
+        CallException unsupported = assertThrows(CallException.class,
+                () -> builder(jdbc).batchMode(BatchBuilder.BatchModeEnum.MERGE).build());
+        assertTrue(unsupported.getCause() instanceof UnsupportedOperationException);
+        assertEquals(0, jdbc.prepares);
+    }
+
+    @Test
+    public void tableModeRejectsMissingTableBeforeOpeningStatement() throws Exception {
+        Jdbc jdbc = new Jdbc();
+
+        CallException error = assertThrows(CallException.class,
+                () -> new BatchBuilder<NoTableRow>(context(jdbc))
+                        .valueClass(NoTableRow.class).build());
+
+        assertTrue(error.getCause().getMessage().contains("No table name"));
+        assertEquals(0, jdbc.prepares);
     }
 
     @Test
@@ -154,6 +237,20 @@ public class BatchBuilderExecutionTest {
         assertSame(jdbc.addFailure, error.getCause());
         assertEquals(0, jdbc.batchExecutions);
         assertTrue(jdbc.pending.isEmpty());
+        loader.close();
+    }
+
+    @Test
+    public void jdbcBindingFailureIsNotSkippedAsBadRow() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        jdbc.bindFailure = new SQLException("binding failed");
+        IBatchLoader<Row> loader = builder(jdbc).continueOnError(true).build();
+        loader.iterator(Arrays.asList(new Row(1), new Row(2)).iterator());
+
+        CallException error = assertThrows(CallException.class, loader::execute);
+
+        assertSame(jdbc.bindFailure, error.getCause().getCause());
+        assertEquals(0, jdbc.batchExecutions);
         loader.close();
     }
 
@@ -319,6 +416,138 @@ public class BatchBuilderExecutionTest {
         assertEquals(2, jdbc.closes);
     }
 
+    @Test
+    public void driverReportedExecuteFailedIsNotCommitted() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        jdbc.countsOverride = new int[]{Statement.EXECUTE_FAILED};
+        IBatchLoader<Row> loader = builder(jdbc)
+                .batchSize(1)
+                .commitBatch(true)
+                .build();
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+
+        CallException error = assertThrows(CallException.class, loader::execute);
+
+        assertTrue(error.getCause() instanceof BatchUpdateException);
+        assertEquals(0, jdbc.commits);
+        assertEquals(1, jdbc.rollbacks);
+        loader.close();
+    }
+
+    @Test
+    public void driverReportedSuccessWithoutCountsIsCommitted() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        jdbc.countsOverride = new int[]{Statement.SUCCESS_NO_INFO};
+        IBatchLoader<Row> loader = builder(jdbc).batchSize(1).commitBatch(true).build();
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+
+        loader.execute();
+
+        assertEquals(1, jdbc.commits);
+        assertEquals(0, jdbc.rollbacks);
+        loader.close();
+    }
+
+    @Test
+    public void incompleteUpdateCountsAreNotTakenForSuccess() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        jdbc.countsOverride = new int[]{1};
+        IBatchLoader<Row> loader = builder(jdbc).batchSize(2).build();
+        loader.iterator(Arrays.asList(new Row(1), new Row(2)).iterator());
+
+        CallException error = assertThrows(CallException.class, loader::execute);
+
+        assertTrue(error.getCause() instanceof BatchUpdateException);
+        assertEquals(1, jdbc.batchExecutions);
+        loader.close();
+    }
+
+    @Test
+    public void failureAttemptsBothJdbcCleanupOperations() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        jdbc.executeFailure = new SQLException("execute failed");
+        jdbc.clearBatchFailure = new SQLException("clear batch failed");
+        IBatchLoader<Row> loader = builder(jdbc).batchSize(1).build();
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+
+        CallException error = assertThrows(CallException.class, loader::execute);
+
+        assertSame(jdbc.executeFailure, error.getCause());
+        assertTrue(jdbc.clearBatchCalls >= 2);
+        assertEquals(1, jdbc.clearParametersAfterFailure);
+        loader.close();
+    }
+
+    @Test
+    public void closedLoaderRejectsFurtherExecution() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        IBatchLoader<Row> loader = builder(jdbc).build();
+        loader.close();
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+
+        CallException error = assertThrows(CallException.class, loader::execute);
+
+        assertTrue(error.getCause().getMessage().contains("closed"));
+        assertEquals(0, jdbc.batchExecutions);
+    }
+
+    @Test
+    public void nextExecutionStartsWithEmptyBatch() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        IBatchLoader<Row> loader = builder(jdbc).batchSize(2).build();
+
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+        loader.execute();
+        loader.iterator(Arrays.asList(new Row(2)).iterator());
+        loader.execute();
+
+        assertEquals(Arrays.asList(1, 2), jdbc.executed);
+        assertEquals(2, jdbc.batchExecutions);
+        loader.close();
+    }
+
+    @Test
+    public void executeListenerCannotReenterOrCloseActiveLoader() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        IBatchLoader<Row> loader = builder(jdbc).batchSize(1).build();
+        loader.addBatchListener(event -> {
+            if (event.getEventType() == BatchEvent.Type.EXECUTE
+                    && event.isBefore()) {
+                assertThrows(CallException.class, loader::execute);
+                assertThrows(IllegalStateException.class, loader::close);
+                assertThrows(IllegalStateException.class,
+                        () -> loader.iterator(Arrays.asList(new Row(99)).iterator()));
+            }
+        });
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+
+        loader.execute();
+
+        assertEquals(Arrays.asList(1), jdbc.executed);
+        loader.close();
+        assertEquals(1, jdbc.closes);
+    }
+
+    @Test
+    public void closeListenerCanCallCloseWithoutRecursion() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        IBatchLoader<Row> loader = builder(jdbc).build();
+        loader.addBatchListener(event -> {
+            if (event.getEventType() == BatchEvent.Type.CLOSE && event.isBefore()) {
+                try {
+                    loader.close();
+                }
+                catch (Exception ex) {
+                    throw new AssertionError(ex);
+                }
+            }
+        });
+
+        loader.close();
+
+        assertEquals(1, jdbc.closes);
+    }
+
     private static BatchBuilder<Row> builder(Jdbc jdbc) throws Exception {
         return new BatchBuilder<Row>(context(jdbc)).valueClass(Row.class);
     }
@@ -333,6 +562,7 @@ public class BatchBuilderExecutionTest {
         Field connection = TaskContext.class.getDeclaredField("connection");
         connection.setAccessible(true);
         connection.set(tc, jdbc.connection);
+        tc.setProperty("ru.inversion.db_prod_name", 1);
         return tc;
     }
 
@@ -350,14 +580,22 @@ public class BatchBuilderExecutionTest {
         final List<Integer> pending = new ArrayList<>();
         final List<Integer> executed = new ArrayList<>();
         final List<Integer> boundIndexes = new ArrayList<>();
+        final Map<Integer, Integer> boundValues = new HashMap<>();
         SQLException executeFailure;
         SQLException addFailure;
+        SQLException bindFailure;
         SQLException commitFailure;
         SQLException rollbackFailure;
         SQLException closeFailure;
+        SQLException clearBatchFailure;
+        int[] countsOverride;
+        String sql;
         boolean autoCommit;
         int currentValue;
         int batchExecutions;
+        int clearBatchCalls;
+        int clearParametersAfterFailure;
+        int prepares;
         int commits;
         int rollbacks;
         int closes;
@@ -365,12 +603,14 @@ public class BatchBuilderExecutionTest {
         Jdbc() {
             connection = (Connection)Proxy.newProxyInstance(
                     getClass().getClassLoader(), new Class<?>[]{Connection.class},
-                    (proxy, method, args) -> connectionCall(method.getName()));
+                    (proxy, method, args) -> connectionCall(method.getName(), args));
         }
 
-        private Object connectionCall(String name) throws SQLException {
+        private Object connectionCall(String name, Object[] args) throws SQLException {
             switch (name) {
                 case "prepareStatement":
+                    prepares++;
+                    sql = (String)args[0];
                     return Proxy.newProxyInstance(
                             getClass().getClassLoader(),
                             new Class<?>[]{PreparedStatement.class},
@@ -392,10 +632,15 @@ public class BatchBuilderExecutionTest {
         private Object statementCall(String name, Object[] args) throws SQLException {
             switch (name) {
                 case "setObject":
+                    if (bindFailure != null) throw bindFailure;
                     boundIndexes.add((Integer)args[0]);
+                    boundValues.put((Integer)args[0], ((Number)args[1]).intValue());
                     currentValue = ((Number)args[1]).intValue();
                     return null;
-                case "clearParameters": return null;
+                case "clearParameters":
+                    if (executeFailure != null && batchExecutions > 0)
+                        clearParametersAfterFailure++;
+                    return null;
                 case "addBatch":
                     if (addFailure != null) throw addFailure;
                     pending.add(currentValue);
@@ -404,10 +649,13 @@ public class BatchBuilderExecutionTest {
                     batchExecutions++;
                     if (executeFailure != null) throw executeFailure;
                     executed.addAll(pending);
+                    if (countsOverride != null) return countsOverride;
                     int[] counts = new int[pending.size()];
                     Arrays.fill(counts, 1);
                     return counts;
                 case "clearBatch":
+                    clearBatchCalls++;
+                    if (clearBatchFailure != null) throw clearBatchFailure;
                     pending.clear();
                     return null;
                 case "getConnection": return connection;

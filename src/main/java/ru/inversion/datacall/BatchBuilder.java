@@ -13,8 +13,10 @@ import ru.inversion.utils.lstn.ListenerManFactory;
 
 import java.io.StringReader;
 import java.net.URL;
+import java.sql.BatchUpdateException;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
@@ -132,6 +134,7 @@ BatchBuilder<T> {
      * Продолжает работу после ошибки преобразования строки. После ошибки JDBC batch
      * продолжение возможно лишь при autoCommit либо после успешного rollback
      * при commitBatch(true). Внешнюю транзакцию загрузчик не откатывает.
+     * Пропущенные ошибки доступны через IBatchListener.
      */
     public BatchBuilder<T> continueOnError(boolean v)
     {
@@ -161,6 +164,10 @@ BatchBuilder<T> {
 
             if( TABLE.equals(name) )
             {
+                if( S.isNullOrEmpty(metaData.getTableName()) )
+                    throw new IllegalStateException(
+                            Tags.PRODUCT_LABEL + "No table name for '" + valueClass.getName() + "'");
+
                 StringBuilder sb = new StringBuilder();
 
                 final List<IEntityProperty<T,?>> columnList = new ArrayList<>();
@@ -230,7 +237,7 @@ BatchBuilder<T> {
                                 for( IEntityProperty<T,?> p : columnList )
                                      ps.setObject( i++, Jt2St.convert( p.invokeGetter(t) ));
                             }
-                            catch( Throwable th ) {
+                            catch( Exception th ) {
                                 throw new RuntimeException(
                                         Tags.PRODUCT_LABEL + "Error on map entity '"
                                                 + (t == null ? "<null>" : t.getClass())
@@ -264,6 +271,9 @@ BatchBuilder<T> {
                                     );
                                 } else if(id instanceof Token.TypeEnum) {
                                     valuesMap.put(pos, ( t ) -> value);
+                                } else {
+                                    throw new IllegalArgumentException(
+                                            "Unsupported batch parameter: " + id);
                                 }
                             }
                     );
@@ -291,7 +301,7 @@ BatchBuilder<T> {
                                             ps.setObject( k,  Jt2St.convert(v) );
                                     }
                                 }
-                                catch( Throwable th ) {
+                                catch( Exception th ) {
                                     throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on set parameter value to JDBC PreparedStatement, with key " + k + " and value " + v, th );
                                 }
                             }
@@ -338,11 +348,16 @@ BatchBuilder<T> {
         if( batchSize <= 0 )
             throw new IllegalArgumentException("'batchSize' must be greater than zero");
 
-        if( U.in( batchMode, INSERT, DELETE ) && !TABLE.equals(name) )
-            throw new UnsupportedOperationException( Tags.PRODUCT_LABEL + "Only 'TABLE' mode support now. Если нужны другие режимы обращайтесь по известному адресу.");
-
-        if( batchMode == BatchModeEnum.CUSTOM && ( this.url == null || S.isNullOrEmpty(name) ) )
-            throw new UnsupportedOperationException( Tags.PRODUCT_LABEL + "Для режима 'CUSTOM' необходимо установить атрибут 'url' и 'name'");
+        if( batchMode == BatchModeEnum.CUSTOM ) {
+            if( TABLE.equals(name) || url == null )
+                throw new UnsupportedOperationException(
+                        Tags.PRODUCT_LABEL + "Для режима 'CUSTOM' необходимо установить атрибуты 'url' и 'name'");
+        }
+        else if( U.in( batchMode, INSERT, DELETE ) ) {
+            if( !TABLE.equals(name) )
+                throw new UnsupportedOperationException(
+                        Tags.PRODUCT_LABEL + "Only 'TABLE' mode support now. Если нужны другие режимы обращайтесь по известному адресу.");
+        }
 
         return createBatchLoader();
     }
@@ -355,6 +370,10 @@ BatchBuilder<T> {
         private Iterator<T> iter;
         /** */
         private PreparedStatement ps;
+        /** */
+        private boolean executing;
+        /** */
+        private boolean closing;
         /** */
         final private BiConsumer<T,PreparedStatement> mapper;
         /** */
@@ -378,14 +397,29 @@ BatchBuilder<T> {
         }
 
         @Override
-        public BatchLoaderImp iterator( Iterator iter ) throws CallException {
+        public synchronized BatchLoaderImp iterator( Iterator iter ) throws CallException {
+            if( executing || closing )
+                throw new IllegalStateException("Cannot change batch iterator during execution or close");
             this.iter = iter;
             return this;
         }
 
         @Override
-        public BatchLoaderImp execute() throws CallException {
+        public synchronized BatchLoaderImp execute() throws CallException {
 
+            if( executing || closing )
+                throw new CallException("Batch loader is already executing or closing");
+            executing = true;
+
+            try {
+                return executeInternal();
+            }
+            finally {
+                executing = false;
+            }
+        }
+
+        private BatchLoaderImp<T> executeInternal() {
             boolean executeStarted = false;
             CallException failure = null;
 
@@ -393,6 +427,8 @@ BatchBuilder<T> {
 
                 if( iter == null )
                     throw new IllegalStateException( Tags.PRODUCT_LABEL + "Iterator 'iter' is null" );
+                if( ps == null )
+                    throw new IllegalStateException( Tags.PRODUCT_LABEL + "Batch loader is closed" );
 
                 fireBatchEvent( BatchEvent.Type.EXECUTE, true, 0, null );
                 executeStarted = true;
@@ -412,8 +448,8 @@ BatchBuilder<T> {
                         try {
                             mapper.accept( t, ps );
                         }
-                        catch( Throwable th ) {
-                            if( !continueOnError )
+                        catch( RuntimeException th ) {
+                            if( !continueOnError || hasSqlCause(th) )
                                 throw th;
                             fireThrowableEvent( BatchEvent.Type.PREPARE_ITEM, itemCount, t, th );
                             continue;
@@ -428,7 +464,7 @@ BatchBuilder<T> {
 
                     if( pendingCount == batchSize )
                     {
-                        processBatch(batchCount);
+                        processBatch(batchCount, pendingCount);
                         batchCount++;
                         pendingCount = 0;
                     }
@@ -436,15 +472,22 @@ BatchBuilder<T> {
                 }//end while
 
                 if( pendingCount > 0 )
-                    processBatch(batchCount);
+                    processBatch(batchCount, pendingCount);
             }
             catch( Throwable th ) {
-                try {
-                    ps.clearBatch();
-                    ps.clearParameters();
-                }
-                catch( Throwable cleanupFailure ) {
-                    th.addSuppressed(cleanupFailure);
+                if( ps != null ) {
+                    try {
+                        ps.clearBatch();
+                    }
+                    catch( Throwable cleanupFailure ) {
+                        th.addSuppressed(cleanupFailure);
+                    }
+                    try {
+                        ps.clearParameters();
+                    }
+                    catch( Throwable cleanupFailure ) {
+                        th.addSuppressed(cleanupFailure);
+                    }
                 }
                 failure = new CallException( Tags.PRODUCT_LABEL + "Error on execute batch loader", th );
             }
@@ -469,7 +512,7 @@ BatchBuilder<T> {
         }
 
         /** */
-        private void processBatch( int batchIndex ) throws Throwable {
+        private void processBatch( int batchIndex, int pendingCount ) throws Throwable {
 
             Throwable failure = null;
             boolean clearFailed = false;
@@ -479,7 +522,19 @@ BatchBuilder<T> {
             fireBatchEvent( BatchEvent.Type.PROCESS_BATCH, true, batchIndex, null );
 
             try {
-                ps.executeBatch();
+                int[] counts = ps.executeBatch();
+                // Не считаем частичный результат успешно выполненным batch.
+                if( counts == null || counts.length != pendingCount )
+                    throw new BatchUpdateException(
+                            "Unexpected JDBC batch result count: "
+                                    + (counts == null ? "null" : counts.length)
+                                    + " != " + pendingCount,
+                            counts == null ? new int[0] : counts);
+                for( int count : counts ) {
+                    if( count == Statement.EXECUTE_FAILED )
+                        throw new BatchUpdateException(
+                                "JDBC batch returned EXECUTE_FAILED", counts);
+                }
 
                 if( commitBatch ) {
                     try {
@@ -546,6 +601,14 @@ BatchBuilder<T> {
                 listeners.fire( new BatchEvent( this, eventType, before, dataIndex, item, null ) );
         }
 
+        private static boolean hasSqlCause( Throwable th ) {
+            for( Throwable cause = th; cause != null; cause = cause.getCause() ) {
+                if( cause instanceof SQLException )
+                    return true;
+            }
+            return false;
+        }
+
         private void fireThrowableEvent( BatchEvent.Type eventType, int dataIndex, T item, Throwable th ) {
             if(!listeners.isEmpty() )
                 listeners.fire( new BatchEvent( this, eventType, false, dataIndex, item, th ) );
@@ -564,49 +627,62 @@ BatchBuilder<T> {
         }
 
         @Override
-        public void close() {
+        public synchronized void close() {
 
-            if( ps != null )
-            {
-                Throwable failure = null;
+            if( executing )
+                throw new IllegalStateException("Cannot close batch loader during execution");
 
-                try {
-                    fireBatchEvent( BatchEvent.Type.CLOSE, true, 0, null );
-                }
-                catch( Throwable th ) {
-                    failure = th;
-                }
+            if( ps == null || closing )
+                return;
 
-                try {
-                    ps.close();
-                    ps = null;
-                }
-                catch( Throwable closeFailure ) {
-                    if( failure == null )
-                        failure = closeFailure;
-                    else
-                        failure.addSuppressed(closeFailure);
-                }
-
-                try {
-                    fireBatchEvent( BatchEvent.Type.CLOSE, false, 0, null );
-                }
-                catch( Throwable afterFailure ) {
-                    if( failure == null )
-                        failure = afterFailure;
-                    else
-                        failure.addSuppressed(afterFailure);
-                }
-
-                if( failure instanceof RuntimeException )
-                    throw (RuntimeException) failure;
-                if( failure instanceof Error )
-                    throw (Error) failure;
-                if( failure != null )
-                    throw new CallException(
-                            Tags.PRODUCT_LABEL + "Error on close batch loader",
-                            failure );
+            closing = true;
+            try {
+                closeStatement();
             }
+            finally {
+                closing = false;
+            }
+        }
+
+        private void closeStatement() {
+            Throwable failure = null;
+
+            try {
+                fireBatchEvent( BatchEvent.Type.CLOSE, true, 0, null );
+            }
+            catch( Throwable th ) {
+                failure = th;
+            }
+
+            try {
+                ps.close();
+                ps = null;
+            }
+            catch( Throwable closeFailure ) {
+                if( failure == null )
+                    failure = closeFailure;
+                else
+                    failure.addSuppressed(closeFailure);
+            }
+
+            try {
+                fireBatchEvent( BatchEvent.Type.CLOSE, false, 0, null );
+            }
+            catch( Throwable afterFailure ) {
+                if( failure == null )
+                    failure = afterFailure;
+                else
+                    failure.addSuppressed(afterFailure);
+            }
+
+            if( failure instanceof RuntimeException )
+                throw (RuntimeException) failure;
+            if( failure instanceof Error )
+                throw (Error) failure;
+            if( failure != null )
+                throw new CallException(
+                        Tags.PRODUCT_LABEL + "Error on close batch loader",
+                        failure );
         }
     }
 
