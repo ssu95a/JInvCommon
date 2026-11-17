@@ -24,6 +24,14 @@ class XXIDsDaoNativeQueryTest {
 
     @NamedNativeQueries({
             @NamedNativeQuery(
+                    name = "byEntryId",
+                    query = "SELECT * FROM V_SM_003_MF WHERE idsm_entry = ?")
+    })
+    private static final class OneNamedQueryInContainer {
+    }
+
+    @NamedNativeQueries({
+            @NamedNativeQuery(
                     name = "alpha", query = "ORA_ALPHA"),
             @NamedNativeQuery(
                     name = "alpha.pg", query = "PG_ALPHA"),
@@ -123,6 +131,17 @@ class XXIDsDaoNativeQueryTest {
         );
         assertNull(XXIDsDao.getNativeQuery(
                 postgres, MultipleLogicalQueries.class, null));
+    }
+
+    @Test
+    void singleNamedQueryInContainerIsNotImplicitDefault() {
+        assertNull(XXIDsDao.getNativeQuery(
+                null, OneNamedQueryInContainer.class, null));
+        assertEquals(
+                "SELECT * FROM V_SM_003_MF WHERE idsm_entry = ?",
+                XXIDsDao.getNativeQuery(
+                        null, OneNamedQueryInContainer.class, "byEntryId")
+        );
     }
 
     @Test

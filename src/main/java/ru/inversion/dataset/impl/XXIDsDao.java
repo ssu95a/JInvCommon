@@ -280,15 +280,10 @@ public class XXIDsDao {
     final static public String PG_POSTFIX = ".pg";
 
     /**
-     * Resolves a logical native-query name for the current database.
-     * PostgreSQL first uses {@code qn + ".pg"} and falls back to {@code qn};
-     * Oracle uses {@code qn}. A name already ending in {@code .pg} is treated
-     * as an exact name and is not suffixed twice.
-     *
-     * <p>When {@code qn == null}, an unnamed {@link NamedNativeQuery} is used.
-     * A {@link NamedNativeQueries} container is also accepted when all its
-     * entries form one logical family: {@code name} and optional
-     * {@code name.pg}. More than one logical family is ambiguous.</p>
+     * Находит native query для текущей БД. При явном имени PostgreSQL сначала
+     * ищет вариант с суффиксом {@code .pg}, затем общий запрос.
+     * При отсутствии имени контейнер выбирается только для пары общего
+     * и PostgreSQL-запроса, как в прежнем контракте SQLDataSet.
      */
     public static <P> String getNativeQuery(
             TaskContext tc,
@@ -331,19 +326,16 @@ public class XXIDsDao {
 
         NamedNativeQueries container =
                 clazz.getAnnotation(NamedNativeQueries.class);
-        if( container == null || container.value().length == 0 )
+        if( container == null || container.value().length != 2 )
             return unnamed == null ? null : unnamed.query();
 
-        String logicalName = null;
+        final String first = container.value()[0].name();
+        final String second = container.value()[1].name();
+        final String logicalName = logicalName(first);
 
-        for( NamedNativeQuery query : container.value() ) {
-            String candidate = logicalName(query.name());
-
-            if( logicalName == null )
-                logicalName = candidate;
-            else if( !logicalName.equals(candidate) )
-                return null;
-        }
+        if( first.equals(second)
+                || !logicalName.equals(logicalName(second)) )
+            return null;
 
         return getDialectQuery(clazz, logicalName, postgres);
     }
