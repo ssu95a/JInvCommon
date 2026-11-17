@@ -5,6 +5,7 @@ import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.parser.statement.PrepareModeEnum;
 import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
+import ru.inversion.utils.ParametersValues;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.TriConsumer;
 import ru.inversion.utils.U;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.BiConsumer;
 import java.util.stream.StreamSupport;
 
@@ -50,7 +52,14 @@ public class CallStatement {
         //this.outParameterOrder    = outParameterOrder;
         this.removeAdditionalInfo = removeAdditionalInfo;
         this.replaceConstants     = replaceConstants;
-        this.parametersMetaData   = parametersMetaData;
+        if( parametersMetaData == null || parametersMetaData.isEmpty() )
+            this.parametersMetaData = Collections.emptyMap();
+        else {
+            final Map<Comparable<?>,ParameterMetadata<?>> copy =
+                    new TreeMap<>((java.util.Comparator)ParametersValues.ParamIdComparator);
+            copy.putAll(parametersMetaData);
+            this.parametersMetaData = Collections.unmodifiableMap(copy);
+        }
         this.autoCommit           = autoCommit;
 
 //        isPrepared = isAnonymousBlock() && getLang() == LangEnum.SQL;// && !hasOutParameters();
@@ -130,7 +139,6 @@ public class CallStatement {
     /** Имеются ли OUT параметры в выражении */
     public boolean hasOutParameters()
     {
-        //return outParameterOrder != null && !outParameterOrder.isEmpty();
         return parametersMetaData.values().stream().anyMatch(ParameterMetadata::isOut);
     }
 

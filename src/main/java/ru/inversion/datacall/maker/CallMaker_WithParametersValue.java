@@ -10,10 +10,10 @@ public class CallMaker_WithParametersValue extends AbstractCallMakerBase {
     public void accept( Token t, CallPrepareContext c ) {
         switch( t.getType() ) {
             case INDEXED_PARAMETER:
-                //c.append( value2Str( c.callBackParameters().getParameter(nIndex++) ) );
+                c.append(t);
                 break;
             case NAMED_PARAMETER:
-                //c.append( value2Str( c.callBackParameters().getParameter( t.getValue().toString() ) ) );
+                c.append(t);
                 break;
             default:
                 c.append( t );

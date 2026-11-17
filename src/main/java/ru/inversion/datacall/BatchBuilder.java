@@ -153,7 +153,7 @@ BatchBuilder<T> {
 
             final IEntityMetaData<T> metaData = EntityMetadataFactory.getEntityMetaData(valueClass);
 
-            if( name.equals(TABLE) )
+            if( TABLE.equals(name) )
             {
                 StringBuilder sb = new StringBuilder();
 
@@ -177,6 +177,11 @@ BatchBuilder<T> {
 
                     }//end for
 
+                    if( columnList.isEmpty() )
+                        throw new IllegalStateException(
+                                Tags.PRODUCT_LABEL + "No insertable columns for '" + valueClass.getName() + "'"
+                        );
+
                     sb.append(") values( ");
                     columnList.forEach( (c)->sb.append("?,") );
                     sb.setCharAt( sb.length() - 1, ' ' );
@@ -197,6 +202,11 @@ BatchBuilder<T> {
                         sb.append( p.getColumnInfo().getName() ).append("=?");
 
                     }//end for
+
+                    if( columnList.isEmpty() )
+                        throw new IllegalStateException(
+                                Tags.PRODUCT_LABEL + "No ID columns for delete of '" + valueClass.getName() + "'"
+                        );
                 }
 
                 if( mapper == null )
@@ -207,7 +217,7 @@ BatchBuilder<T> {
                             try {
 
                                 if( t == null )
-                                    return;
+                                    throw new IllegalArgumentException("Batch item is null");
 
                                 int i = 1;
 
@@ -215,7 +225,12 @@ BatchBuilder<T> {
                                      ps.setObject( i++, Jt2St.convert( p.invokeGetter(t) ));
                             }
                             catch( Throwable th ) {
-                                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on map entity '" + t.getClass() + "' to JDBC PreparedStatement", th );
+                                throw new RuntimeException(
+                                        Tags.PRODUCT_LABEL + "Error on map entity '"
+                                                + (t == null ? "<null>" : t.getClass())
+                                                + "' to JDBC PreparedStatement",
+                                        th
+                                );
                             }
                         }
                     };
@@ -228,17 +243,18 @@ BatchBuilder<T> {
                 if ( batchMode == BatchModeEnum.CUSTOM )
                 {
                     final CallStatement cs = SQLCallBuilder.NEW(tc).url(url).name(name).buildStatement();
+                    final IParameters parameters = U.nvl(callBackParameters, IParameters.EMPTY);
 
                     Map<Integer, Function<T,Object> > valuesMap = new TreeMap<>();
 
                     final String st = cs.prepareSql(AbstractCallMakerBase.createPLSqlMaker(QUERY),
                             ( pos, id, value ) -> {
                                 if(id instanceof Integer) {
-                                    valuesMap.put(pos, ( t ) -> callBackParameters.getParameter((Integer)id));
+                                    valuesMap.put(pos, ( t ) -> parameters.getParameter((Integer)id));
                                 } else if(id instanceof String) {
                                     final IEntityProperty< T, ? > p = metaData.getProperty((String)id);
                                     valuesMap.put(pos,
-                                        p == null ? ( t ) -> callBackParameters.getParameter((String)id) : ( t ) -> p.invokeGetter(t)
+                                        p == null ? ( t ) -> parameters.getParameter((String)id) : ( t ) -> p.invokeGetter(t)
                                     );
                                 } else if(id instanceof Token.TypeEnum) {
                                     valuesMap.put(pos, ( t ) -> value);
@@ -246,33 +262,34 @@ BatchBuilder<T> {
                             }
                     );
 
-                    mapper = new BiConsumer< T, PreparedStatement >() {
-                        @Override
-                        public void accept( T t, PreparedStatement ps ) {
+                    if( mapper == null )
+                        mapper = new BiConsumer< T, PreparedStatement >() {
+                            @Override
+                            public void accept( T t, PreparedStatement ps ) {
 
-                            int    k = -1;
-                            Object v = null;
+                                int    k = -1;
+                                Object v = null;
 
-                            try {
+                                try {
 
-                                if( t == null )
-                                    return;
+                                    if( t == null )
+                                        throw new IllegalArgumentException("Batch item is null");
 
-                                for( Map.Entry<Integer, Function<T,Object> > e : valuesMap.entrySet() ) {
+                                    for( Map.Entry<Integer, Function<T,Object> > e : valuesMap.entrySet() ) {
 
-                                    k = e.getKey();
-                                    v = e.getValue().apply(t);
-                                    if( S.isString(v) && ((String)v).length() > 500 )
-                                        ps.setCharacterStream( k, new StringReader( ((String)v )) );
-                                    else
-                                        ps.setObject( k,  Jt2St.convert(v) );
+                                        k = e.getKey();
+                                        v = e.getValue().apply(t);
+                                        if( S.isString(v) && ((String)v).length() > 500 )
+                                            ps.setCharacterStream( k, new StringReader( ((String)v )) );
+                                        else
+                                            ps.setObject( k,  Jt2St.convert(v) );
+                                    }
+                                }
+                                catch( Throwable th ) {
+                                    throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on set parameter value to JDBC PreparedStatement, with key " + k + " and value " + v, th );
                                 }
                             }
-                            catch( Throwable th ) {
-                                throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on set parameter value to JDBC PreparedStatement, with key " + k + " and value " + v, th );
-                            }
-                        }
-                    };
+                        };
 
                     statementText = st;
 
@@ -294,13 +311,22 @@ BatchBuilder<T> {
     /** */
     public IBatchLoader<T> build( ) throws CallException {
 
+        if( tc == null )
+            throw new IllegalArgumentException("'tc' is null");
+
         if( valueClass == null )
             throw new IllegalArgumentException("'valueClass' is null");
 
         if( S.isNullOrEmpty(name) )
             throw new IllegalArgumentException("'name' is null");
 
-        if( U.in( batchMode, INSERT, DELETE ) && name != TABLE  )
+        if( batchMode == null )
+            throw new IllegalArgumentException("'batchMode' is null");
+
+        if( batchSize <= 0 )
+            throw new IllegalArgumentException("'batchSize' must be greater than zero");
+
+        if( U.in( batchMode, INSERT, DELETE ) && !TABLE.equals(name) )
             throw new UnsupportedOperationException( Tags.PRODUCT_LABEL + "Only 'TABLE' mode support now. Если нужны другие режимы обращайтесь по известному адресу.");
 
         if( batchMode == BatchModeEnum.CUSTOM && ( this.url == null || S.isNullOrEmpty(name) ) )
@@ -309,7 +335,7 @@ BatchBuilder<T> {
         return new BatchLoaderImp<T>(
             createPreparedStatement(),
             mapper,
-            Math.max( 50, batchSize ),
+            batchSize,
             commitBatch,
             continueOnError
         );
@@ -354,16 +380,19 @@ BatchBuilder<T> {
         @Override
         public BatchLoaderImp execute() throws CallException {
 
+            boolean executeStarted = false;
+
             try {
 
                 if( iter == null )
                     throw new IllegalStateException( Tags.PRODUCT_LABEL + "Iterator 'iter' is null" );
 
                 fireBatchEvent( BatchEvent.Type.EXECUTE, true, 0, null );
+                executeStarted = true;
 
                 int itemCount = 0;
                 int batchCount= 0;
-                int count     = 0;
+                int pendingCount = 0;
 
                 while( iter.hasNext() )
                 {
@@ -373,9 +402,11 @@ BatchBuilder<T> {
 
                     try {
 
+                        ps.clearParameters();
                         mapper.accept( t, ps );
 
                         ps.addBatch();
+                        pendingCount++;
 
                         fireBatchEvent( BatchEvent.Type.PREPARE_ITEM, false, itemCount, t );
                     }
@@ -383,54 +414,90 @@ BatchBuilder<T> {
                         if( continueOnError )
                         {
                             fireThrowableEvent( BatchEvent.Type.PREPARE_ITEM, itemCount, t, th );
-                            continue;
                         }
                         else
                             throw th;
                     }
-
-                    count++;
-
-                    if( count == batchSize || !iter.hasNext() )
-                    {
-                        count = 0;
-
-                        try {
-
-                            fireBatchEvent( BatchEvent.Type.PROCESS_BATCH, true,  batchCount, null );
-                            ps.executeBatch();
-                            fireBatchEvent( BatchEvent.Type.PROCESS_BATCH, false, batchCount, null );
-
-                            if( commitBatch )
-                                ps.getConnection().commit();
-                        }
-                        catch( Throwable th ) {
-
-                            if( commitBatch )
-                                ps.getConnection().rollback();
-
-                            if( continueOnError )
-                            {
-                                fireThrowableEvent( BatchEvent.Type.PROCESS_BATCH, batchCount, null, th );
-                                continue;
-                            }
-                            else
-                                throw th;
-                        }
-
-                        batchCount++;
+                    finally {
+                        itemCount++;
                     }
 
-                    itemCount++;
+                    if( pendingCount == batchSize )
+                    {
+                        processBatch(batchCount);
+                        batchCount++;
+                        pendingCount = 0;
+                    }
 
                 }//end while
 
-                fireBatchEvent( BatchEvent.Type.EXECUTE, false, 0, null );
+                if( pendingCount > 0 )
+                    processBatch(batchCount);
             }
             catch( Throwable th ) {
+                try {
+                    ps.clearBatch();
+                    ps.clearParameters();
+                }
+                catch( Throwable cleanupFailure ) {
+                    th.addSuppressed(cleanupFailure);
+                }
                 throw new CallException( Tags.PRODUCT_LABEL + "Error on execute batch loader", th );
             }
+            finally {
+                if( executeStarted )
+                    fireBatchEvent( BatchEvent.Type.EXECUTE, false, 0, null );
+            }
             return this;
+        }
+
+        /** */
+        private void processBatch( int batchIndex ) throws Throwable {
+
+            Throwable failure = null;
+            boolean clearFailed = false;
+
+            fireBatchEvent( BatchEvent.Type.PROCESS_BATCH, true, batchIndex, null );
+
+            try {
+                ps.executeBatch();
+
+                if( commitBatch )
+                    ps.getConnection().commit();
+            }
+            catch( Throwable th ) {
+                failure = th;
+
+                if( commitBatch )
+                    try {
+                        ps.getConnection().rollback();
+                    }
+                    catch( Throwable rollbackFailure ) {
+                        th.addSuppressed(rollbackFailure);
+                    }
+            }
+            finally {
+                try {
+                    ps.clearBatch();
+                }
+                catch( Throwable clearFailure ) {
+                    clearFailed = true;
+                    if( failure == null )
+                        failure = clearFailure;
+                    else
+                        failure.addSuppressed(clearFailure);
+                }
+            }
+
+            if( failure == null ) {
+                fireBatchEvent( BatchEvent.Type.PROCESS_BATCH, false, batchIndex, null );
+                return;
+            }
+
+            if( continueOnError && !clearFailed )
+                fireThrowableEvent( BatchEvent.Type.PROCESS_BATCH, batchIndex, null, failure );
+            else
+                throw failure;
         }
 
         private void fireBatchEvent( BatchEvent.Type eventType, boolean before,  int dataIndex, T item ) {

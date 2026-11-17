@@ -124,7 +124,10 @@ public class CallBuilder {
         else
             pmb.position(position);
 
-        pmb.mode(mode).javaType(javaType).sqlType(sqlType).elementType(elementType).defaultValue(defaultValue).logValue(logValue?"1":"0");
+        pmb.mode(mode).javaType(javaType).elementType(elementType).defaultValue(defaultValue).logValue(logValue?"1":"0");
+
+        if( sqlType != null )
+            pmb.sqlType(sqlType);
 
         return putParameter( pmb.build() );
     }

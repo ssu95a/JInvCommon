@@ -14,7 +14,9 @@ import ru.inversion.utils.*;
 import ru.inversion.utils.converter.TypeConverter;
 
 import javax.json.Json;
+import javax.json.JsonArrayBuilder;
 import javax.json.JsonObject;
+import javax.json.JsonWriter;
 import java.io.*;
 import java.sql.*;
 import java.util.*;
@@ -386,6 +388,17 @@ public class CallWork implements AutoCloseable {
                     U.copyStreams( is, sqlXmlStream );
                 }
             }
+            else
+            if( value instanceof File )
+            {
+                try( InputStream is = new FileInputStream((File)value);
+                     OutputStream sqlXmlStream = sqlXml.setBinaryStream() ) {
+                    U.copyStreams( is, sqlXmlStream );
+                }
+            }
+            else
+                throw new IllegalArgumentException( Tags.PRODUCT_LABEL + "Unsupported SQLXML value type: " + value.getClass().getName() );
+
             return sqlXml;
         }
         catch( Throwable th ) {
@@ -414,7 +427,9 @@ public class CallWork implements AutoCloseable {
                     .toJson( getStructValue(pm, value) );
 
             StringWriter sw = new StringWriter();
-            Json.createWriter(sw).writeObject(jo);
+            try( JsonWriter writer = Json.createWriter(sw) ) {
+                writer.writeObject(jo);
+            }
             return sw.toString();
         }
         else
@@ -445,8 +460,6 @@ public class CallWork implements AutoCloseable {
             }
 
             final Object o = U.firstNotNull(col);
-            if( o == null )
-                return null;
 
             if( pm.getElementType() != null )
             {
@@ -455,19 +468,24 @@ public class CallWork implements AutoCloseable {
 
                 if( arrayMetaData.getBaseType() == Types.STRUCT )
                 {
-                    final IStructMapper mapper = StructMetaData.get( getTaskContext(), arrayMetaData.getBaseTypeName() ).getMapper( o.getClass() );
+                    if( o == null )
+                        array = arrayMetaData.makeArray( Collections.nCopies(col.size(), null) );
+                    else
+                    {
+                        final IStructMapper mapper = StructMetaData.get( getTaskContext(), arrayMetaData.getBaseTypeName() ).getMapper( o.getClass() );
 
-                    final List sol = new ArrayList(col.size());
+                        final List sol = new ArrayList(col.size());
 
-                    col.forEach( (e)-> {
-                        try {
-                            sol.add( mapper.toStruct( getTaskContext(), e ) );
-                        } catch(SQLException ex) {
-                            throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on map " + e.getClass() + " to Struct", ex );
-                        }
-                    });
+                        col.forEach( (e)-> {
+                            try {
+                                sol.add( e == null ? null : mapper.toStruct( getTaskContext(), e ) );
+                            } catch(SQLException ex) {
+                                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on map " + e.getClass() + " to Struct", ex );
+                            }
+                        });
 
-                    array = arrayMetaData.makeArray(sol);
+                        array = arrayMetaData.makeArray(sol);
+                    }
                 }
                 else
                 {
@@ -483,6 +501,18 @@ public class CallWork implements AutoCloseable {
             }
             else
             {
+                if( o == null )
+                {
+                    final JsonArrayBuilder builder = Json.createArrayBuilder();
+                    col.forEach( ignored -> builder.addNull() );
+
+                    final StringWriter sw = new StringWriter();
+                    try( JsonWriter writer = Json.createWriter(sw) ) {
+                        writer.writeArray(builder.build());
+                    }
+                    return sw.toString();
+                }
+
                 return EntityMetadataFactory.getEntityMetaData( o.getClass() ).getJSonMapper().toJsonArray( col );
             }
         }
@@ -541,7 +571,7 @@ public class CallWork implements AutoCloseable {
                     }
                     else if( pv.pm().getSQLType() == Types.SQLXML )
                     {
-                        if( !(originalValue instanceof SQLXML) && !(originalValue instanceof File) )
+                        if( !(originalValue instanceof SQLXML) )
                         {
                             handleValue = getSqlXmlValue( pv.pm, originalValue );
                             final SQLXML sqlXml = (SQLXML)handleValue;
@@ -557,7 +587,7 @@ public class CallWork implements AutoCloseable {
             {
                 Object positionValue = handleValue;
 
-                if( originalValue instanceof File )
+                if( originalValue instanceof File && handleValue == originalValue )
                 {
                     final FileInputStream is = new FileInputStream( (File)originalValue );
                     resources.add(is);
@@ -627,7 +657,13 @@ public class CallWork implements AutoCloseable {
                         else
                         {
                             if( v == null )
-                                cs.setNull  ( idx,    type2code( pv.pm().getSQLType() ), pv.pm().getElementType() );
+                            {
+                                final int sqlType = type2code( pv.pm().getSQLType() );
+                                if( S.isNullOrEmpty(pv.pm().getElementType()) )
+                                    cs.setNull( idx, sqlType );
+                                else
+                                    cs.setNull( idx, sqlType, pv.pm().getElementType() );
+                            }
                             else
                                 cs.setObject( idx, v, type2code( pv.pm().getSQLType() ) );
                         }
@@ -652,7 +688,7 @@ public class CallWork implements AutoCloseable {
 
         try {
 
-            if( pv.pm().getSQLType() == Types.ARRAY )
+            if( Integer.valueOf(Types.ARRAY).equals(pv.pm().getSQLType()) )
                 value = cs.getArray (parameterIndex);
             else
                 value = cs.getObject(parameterIndex);
@@ -734,38 +770,45 @@ public class CallWork implements AutoCloseable {
                 else if( pv.pm.getSQLType() == -1024 ) // JSON_STRUCT
                 {
                     final String s = (String)value;
+                    final Class<?> javaType = pv.pm().getParameterType();
 
                     if( pv.pm.getElementType() == null )
                     {
-                        value = getEntityMetaData( pv.pm().getParameterType() ).getJSonMapper().fromJson(s);
+                        if( javaType != null )
+                            value = getEntityMetaData( javaType ).getJSonMapper().fromJson(s);
                     }
                     else //через Struct
                     {
                         final StructMetaData smd = StructMetaData.get( getTaskContext(), pv.pm.getElementType() );
                         final Struct struct = smd.fromJson(s);
-                        value = smd.getMapper(pv.pm().getParameterType()).from(struct);
+                        value = javaType == null ? struct : smd.getMapper(javaType).from(struct);
                     }
                 }
                 else if( pv.pm.getSQLType() == -1025 ) // JSON_ARRAY
                 {
                     final String s = (String)value;
+                    final Class<?> javaType = pv.pm().getParameterType();
 
                     if( pv.pm.getElementType() == null )
                     {
-                        value = getEntityMetaData( pv.pm().getParameterType() ).getJSonMapper().fromJsonArray(s);
+                        if( javaType != null )
+                            value = getEntityMetaData( javaType ).getJSonMapper().fromJsonArray(s);
                     }
                     else //через Struct
                     {
                         final ArrayMetaData  amd = ArrayMetaData.get( getTaskContext(), pv.pm.getElementType() );
                         final StructMetaData smd = StructMetaData.get( getTaskContext(), amd.getBaseTypeName() );
-                        final IStructMapper    m = smd.getMapper(pv.pm().getParameterType());
 
                         final List<Struct> ls = smd.fromJsonArray(s);
-
-                        final List lo = new ArrayList( ls.size() );
-                        ls.forEach( v->lo.add(m.from(v)) );
-
-                        value = lo;
+                        if( javaType == null )
+                            value = ls;
+                        else
+                        {
+                            final IStructMapper m = smd.getMapper(javaType);
+                            final List lo = new ArrayList( ls.size() );
+                            ls.forEach( v->lo.add(v == null ? null : m.from(v)) );
+                            value = lo;
+                        }
                     }
                 }
                 else

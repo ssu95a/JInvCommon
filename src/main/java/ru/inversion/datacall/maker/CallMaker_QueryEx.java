@@ -1,46 +1,10 @@
 package ru.inversion.datacall.maker;
 
-import ru.inversion.datacall.AbstractCallMakerBase;
-import ru.inversion.datacall.CallPrepareContext;
-import ru.inversion.parser.token.Token;
-
-import java.util.List;
-import java.util.function.Function;
-
-import static ru.inversion.dataset.parser.SqlValueFormatter.format;
-
-public class CallMaker_QueryEx extends AbstractCallMakerBase {
-
-    /** */
-    @Override
-    public void accept( Token t, CallPrepareContext c ) {
-
-        List ps = null;//c.parametersValues();
-        List< Function > parameters = (List<Function>)ps;
-
-        switch( t.getType() ) {
-            case INDEXED_PARAMETER:
-                nIndex++;
-                c.append(" ?");
-                //parameters.add( (Object o) -> c.callBackParameters().getParameter(nIndex) );
-            break;
-            case NAMED_PARAMETER:
-                c.append(" ?");
-                String name = (String)t.getValue();
-                //parameters.add( (Object o) -> c.callBackParameters().getParameter(name) );
-            break;
-            case INTEGER:
-            case DECIMAL:
-            case STRING:
-                if( c.isReplaceConstantMode() ) {
-                    c.append(" ?");
-                    parameters.add( (o)->t.getValue() );
-                }
-                else
-                    c.sp().append( format( t.getValue() ) ).sp();
-            break;
-            default :
-                c.append( t );
-        }
-    }
+/**
+ * Extended query preparation uses the same explicit parameter-handler contract
+ * as the regular query maker. The former implementation depended on a removed
+ * parameter list in {@code CallPrepareContext} and failed on the first replaced
+ * literal.
+ */
+public class CallMaker_QueryEx extends CallMaker_Query {
 }

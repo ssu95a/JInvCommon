@@ -5,10 +5,12 @@ import ru.inversion.dataset.IDataLink;
 import ru.inversion.dataset.IDataSet;
 import ru.inversion.dataset.IDataSetListener;
 import ru.inversion.utils.Pair;
+import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -40,13 +42,18 @@ public class DataCallLinkBuilder {
 
     /** */
     public DataCallLinkBuilder autoRequery( Supplier<Boolean> requeryIf ) {
-        this.requeryIf = requeryIf;
+        this.requeryIf = Objects.requireNonNull(requeryIf, "'requeryIf' is null");
         return this;
     }
 
     /** */
     public <T> DataCallLinkBuilder join( Function<T,Object> sourceValue, String destinationParam ) {
-        pairsColumn.add( Pair.makePair( sourceValue, destinationParam ));
+        if( S.isNullOrEmpty(destinationParam) )
+            throw new IllegalArgumentException("'destinationParam' is null or empty");
+        pairsColumn.add(Pair.makePair(
+                Objects.requireNonNull(sourceValue, "'sourceValue' is null"),
+                destinationParam
+        ));
         return this;
     }
 
@@ -68,7 +75,10 @@ public class DataCallLinkBuilder {
             return d2cBuild( );
         }
 
-        return null;
+        throw new UnsupportedOperationException(
+                Tags.PRODUCT_LABEL + "DataCallLinkBuilder: unsupported source/destination types: "
+                        + source.getClass().getName() + " -> " + destination.getClass().getName()
+        );
     }
 
     /** */
@@ -120,7 +130,7 @@ public class DataCallLinkBuilder {
 
                 try {
 
-                    if( requeryIf.get() )
+                    if( Boolean.TRUE.equals(requeryIf.get()) )
                         dataCall.execute();
                 }
                 catch( Throwable th ) {
@@ -140,7 +150,7 @@ public class DataCallLinkBuilder {
             /** */
             @Override
             public void setAutoRequery( Supplier< Boolean > requeryIf ) {
-                this.requeryIf = requeryIf;
+                this.requeryIf = Objects.requireNonNull(requeryIf, "'requeryIf' is null");
             }
         };
     }

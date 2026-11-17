@@ -62,6 +62,9 @@ public class CallDescriptor {
                     i++ )
             ;
 
+        if( i >= tokenList.size() )
+            throw new IllegalArgumentException( Tags.PRODUCT_LABEL + "SQL text contains no executable tokens" );
+
         Token<?> token = tokenList.get(i);
 
         if( token.getType() == Token.TypeEnum.LEFT_BRACE )

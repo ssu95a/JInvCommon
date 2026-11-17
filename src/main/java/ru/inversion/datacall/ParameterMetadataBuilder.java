@@ -193,7 +193,8 @@ public class ParameterMetadataBuilder {
                 {
                     try {
                         // Проверим что ИД типа нормальный передали
-                        JDBCType.valueOf(sqlType);
+                        if( sqlType != -1024 && sqlType != -1025 && sqlType != -1026 )
+                            JDBCType.valueOf(sqlType);
                         pst = sqlType;
                     } catch(Exception ex) {
                         throw new CallException( Tags.PRODUCT_LABEL + "'" + sqlType + "' illegal number for SQL type", ex );
@@ -283,6 +284,7 @@ public class ParameterMetadataBuilder {
             name          = null;
             positionAsStr = null;
             sqlTypeAsStr  = null;
+            sqlType       = -1;
             modeAsStr     = null;
             defaultValue  = null;        
             javaTypeAsStr = null;

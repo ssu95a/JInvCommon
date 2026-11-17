@@ -33,6 +33,9 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** */
     private CallWork storedProcWork;
 
+    /** Подготовленный PL/SQL блок */
+    final private String plSql;
+
     /** Подстановка имен параметров */
     final private Map<String,String> mapParamSubst = new HashMap<>();
 
@@ -52,15 +55,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     RETURN INTEGER
      * */
     static private CallWork initStoredProc( TaskContext tc ) throws CallException {
-
-        CallWork dbms_sql_work = (CallWork)tc.getProperty("dbms_sql_work");
-
-        if( dbms_sql_work != null )
-            return dbms_sql_work;
-
-        dbms_sql_work =
-
-        CallBuilder.NEW()
+        return CallBuilder.NEW()
            .sql("begin :ret := JF_PKG_UTIL.execute_Dbms_Sql_Work( :plSql, :vars, :vals, :typs, :outs, :rsltInf); end;")
            .putParameter( new ParameterMetadataBuilder().mode(OUT).name("ret").sqlType(Types.INTEGER).javaType(Integer.class).isReturnValue(true).build() )
            .putParameter( new ParameterMetadataBuilder().mode(IN ).name("plSql").build() )
@@ -71,10 +66,6 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
            .putParameter( new ParameterMetadataBuilder().mode(OUT).name("rsltInf").sqlType(Types.VARCHAR).javaType(String.class).build() )
         .build()
            .createCallWork( tc, null );
-
-        tc.setProperty("dbms_sql_work", dbms_sql_work );
-
-        return dbms_sql_work;
     }
 
     /** */
@@ -83,10 +74,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         this.callBackParameters = callBackParameters;
 
         // подготовка выражения
-        final List<String> vals = new ArrayList<>();
-
-        final String plSql =
-        callStatement.prepareSql(
+        this.plSql = callStatement.prepareSql(
                 new BiConsumer< Token, CallPrepareContext >() {
                     int index = 0;
                     @Override
@@ -104,13 +92,6 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
                                     mapParamSubst.put( ":" + newParamName, oldParamName );
 
                                     vars.add( newParamName );
-
-                                    if( callBackParameters != null && callBackParameters.hasParameter( oldParamName ) ) {
-                                        Object v = callBackParameters.getParameter( oldParamName );
-                                        vals.add( v == null ? null : TypeConverter.convert( v, String.class) );
-                                    }
-                                    else
-                                        vals.add( null );
                                 }
 
                                 c.append(" :").append(newParamName).sp();
@@ -131,11 +112,6 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         );
 
         this.storedProcWork = initStoredProc(tc);
-
-        storedProcWork.set( "plSql", plSql )
-                      .set( "vars",  vars  )
-                      .set( "vals",  vals  )
-                      .set( "typs", Collections.emptyList() );
     }
 
     /** Выполнение запроса */
@@ -143,9 +119,34 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
         try {
 
+            final List<String> vals = new ArrayList<>(vars.size());
+
+            for( String variable : vars ) {
+                final String parameterName = mapParamSubst.get(":" + variable);
+
+                if( callBackParameters != null && callBackParameters.hasParameter(parameterName) ) {
+                    final Object value = callBackParameters.getParameter(parameterName);
+                    vals.add(value == null ? null : TypeConverter.convert(value, String.class));
+                }
+                else
+                    vals.add(null);
+            }
+
+            storedProcWork.set( "plSql", plSql )
+                          .set( "vars",  vars  )
+                          .set( "vals",  vals  )
+                          .set( "typs", Collections.emptyList() );
+
             storedProcWork.execute();
 
             List<String> outs = storedProcWork.get("outs");
+
+            if( !vars.isEmpty() && (outs == null || outs.size() < vars.size()) )
+                throw new IllegalStateException(
+                        Tags.PRODUCT_LABEL + "DBMS_SQL returned "
+                                + (outs == null ? 0 : outs.size())
+                                + " values for " + vars.size() + " variables"
+                );
 
             int i = 0;
 
@@ -171,5 +172,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** */
     @Override
     public void close()  {
+        if( storedProcWork != null )
+            storedProcWork.close();
     }
 }

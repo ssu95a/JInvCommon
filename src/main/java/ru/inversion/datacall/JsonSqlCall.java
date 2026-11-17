@@ -62,6 +62,7 @@ public class JsonSqlCall implements IDataCall {
                 return "date";
             case -1024:
             case -1025:
+            case -1026:
                 return "varchar";
         }
         return JDBCType.valueOf(jdbcType).getName();
@@ -88,7 +89,8 @@ public class JsonSqlCall implements IDataCall {
 
             switch( t.getType() ) {
                 case INDEXED_PARAMETER:
-                    //parameters.add( c.callBackParameters().getParameter(nIndex++) );
+                    nIndex++;
+                    nCounter++;
                     c.sp().append("? ");
                     if( c.isCommentParameters() )
                         c.append("/* ").append(nCounter).append(", :").append( t.getValue() ).append(" */ ");
@@ -118,28 +120,33 @@ public class JsonSqlCall implements IDataCall {
     /** */
     final private ParametersValues parametersValues;
     /** */
-    final private String name;
+    private String name;
     final private CallStatement callStatement;
 
+    /** Дополнительные пользовательские свойства DataCall */
+    private Map<String,Object> properties;
+
+    /** Значения IN/INOUT параметров, вычисляемые перед каждым execute */
+    final private Map<Comparable,Supplier<?>> valueCallbacks =
+            new TreeMap<>(ParametersValues.ParamIdComparator);
+
+    /** Слушатели отдельных OUT/INOUT параметров */
+    final private Map<Comparable,BiConsumer<Object,Object>> valueListeners =
+            new TreeMap<>(ParametersValues.ParamIdComparator);
+
+    /** Общий слушатель OUT/INOUT параметров */
+    private BiConsumer<Object,Object> valueListener;
+
+    /** IDataCall close is terminal; statement cleanup after execute is internal. */
+    private boolean closed;
+
     static private CallWork initStoredProc( TaskContext tc ) throws CallException {
-
-        CallWork dbms_sql_work = (CallWork)tc.getProperty("dbms_sql_work");
-
-        if( dbms_sql_work != null )
-            return dbms_sql_work;
-
-        dbms_sql_work =
-
-        CallBuilder.NEW()
+        return CallBuilder.NEW()
                    .sql("{call jf_exec.execute( :plSql, :rsltInf)}").lang(LangEnum.JDBC)
                    .putParameter( new ParameterMetadataBuilder().mode(IN ).sqlType(Types.VARCHAR).name("plSql").build() )
                    .putParameter( new ParameterMetadataBuilder().mode(OUT).name("rsltInf").sqlType(Types.VARCHAR).javaType(String.class).build() )
                 .build()
                    .createCallWork( tc, null );
-
-        tc.setProperty("dbms_sql_work", dbms_sql_work );
-
-        return dbms_sql_work;
     }
 
     /** */
@@ -165,7 +172,6 @@ public class JsonSqlCall implements IDataCall {
     private String prepareJson( Map<String,String> substMap )
     {
         final StringWriter sw = new StringWriter( );
-        final JsonWriter   jw = Json.createWriterFactory( U.toMap( JsonGenerator.PRETTY_PRINTING, true ) ).createWriter(sw);
 
         final JsonArrayBuilder ab = Json.createArrayBuilder( );
 
@@ -183,7 +189,10 @@ public class JsonSqlCall implements IDataCall {
             StreamSupport.stream(callStatement.getParameterIter().spliterator(),false).sorted(new Comparator< ParameterMetadata<?> >() {
                 @Override
                 public int compare( ParameterMetadata p1, ParameterMetadata p2 ) {
-                    return Integer.compare(p2.getName().length(), p1.getName().length());
+                    return Integer.compare(
+                            p2.getIdentifier().toString().length(),
+                            p1.getIdentifier().toString().length()
+                    );
                 }
             }).map(new Function<ParameterMetadata<?>, ParameterMetadata<?>>() {
                 @Override
@@ -217,9 +226,7 @@ public class JsonSqlCall implements IDataCall {
 
             if( p.getMode() != OUT )
             {
-                value = p.isIndexed()
-                        ? parametersValues.get( p.getPosition() )
-                        : parametersValues.get( p.getName());
+                value = getInputValue(p);
 
                 if( value == null ) {
                     ob.addNull( "value" );
@@ -234,7 +241,9 @@ public class JsonSqlCall implements IDataCall {
                             try {
 
                                 final StructMetaData structMetaData = StructMetaData.get( tc, elementType );
-                                final Struct struct= structMetaData.getMapper( (Class< Object >)value.getClass()).toStruct( tc, value );
+                                final Struct struct = value instanceof Struct
+                                        ? (Struct)value
+                                        : structMetaData.getMapper((Class<Object>)value.getClass()).toStruct(tc, value);
 
                                 ob.add( "sqlType",  "STRUCT" );
                                 ob.add( "typeName", elementType );
@@ -252,29 +261,40 @@ public class JsonSqlCall implements IDataCall {
                                     final ArrayMetaData arrayMetaData =
                                           ArrayMetaData.get( tc, p.getElementType() );
 
-                                    final Collection<?> col = (Collection< ? extends Object >)value;
-                                    final Object obj = U.firstNotNull(col);
-
                                     final Array array;
+                                    final boolean arrayOwned;
 
-                                    if( arrayMetaData.getBaseType() == Types.STRUCT )
+                                    if( value instanceof Array )
                                     {
-                                        if( obj == null )
-                                            array = arrayMetaData.makeArray( Collections.nCopies(col.size(), null) );
-                                        else
-                                        {
-                                            final IStructMapper sm = StructMetaData.get( tc, arrayMetaData.getBaseTypeName() ).getMapper(obj.getClass() );
-
-                                            final Struct sa[] = new Struct[col.size()];
-                                            int i = 0;
-                                            for(Object o : col)
-                                                 sa[i++] = o == null ? null : sm.toStruct( tc, o );
-
-                                            array = arrayMetaData.makeArray( Arrays.asList(sa) );
-                                        }
+                                        array = (Array)value;
+                                        arrayOwned = false;
                                     }
                                     else
-                                        array = arrayMetaData.makeArray( col );
+                                    {
+                                        final Collection<?> col = (Collection<?>)value;
+                                        final Object obj = U.firstNotNull(col);
+
+                                        if( arrayMetaData.getBaseType() == Types.STRUCT )
+                                        {
+                                            if( obj == null )
+                                                array = arrayMetaData.makeArray(Collections.nCopies(col.size(), null));
+                                            else
+                                            {
+                                                final IStructMapper sm = StructMetaData.get(tc, arrayMetaData.getBaseTypeName()).getMapper(obj.getClass());
+
+                                                final Struct sa[] = new Struct[col.size()];
+                                                int i = 0;
+                                                for( Object o : col )
+                                                    sa[i++] = o == null ? null : sm.toStruct(tc, o);
+
+                                                array = arrayMetaData.makeArray(Arrays.asList(sa));
+                                            }
+                                        }
+                                        else
+                                            array = arrayMetaData.makeArray(col);
+
+                                        arrayOwned = true;
+                                    }
 
                                     try {
                                         ob.add( "sqlType",    "ARRAY" );
@@ -283,7 +303,8 @@ public class JsonSqlCall implements IDataCall {
                                         ob.add( "value",      arrayMetaData.toJson(array) );
                                     }
                                     finally {
-                                        array.free();
+                                        if( arrayOwned )
+                                            array.free();
                                     }
                                 }
                                 catch( Throwable th ) {
@@ -348,7 +369,11 @@ public class JsonSqlCall implements IDataCall {
                 .add( "parameters", ab )
         );
 
-        jw.writeObject( obExpr.build() );
+        try( JsonWriter jw = Json.createWriterFactory(
+                U.toMap( JsonGenerator.PRETTY_PRINTING, true )
+        ).createWriter(sw) ) {
+            jw.writeObject( obExpr.build() );
+        }
 
         final String jsonStr = sw.toString();
 
@@ -356,6 +381,60 @@ public class JsonSqlCall implements IDataCall {
 //        logger.debug( jsonStr       );
 
         return jsonStr;
+    }
+
+    /** */
+    private static Comparable normalizeParameterId( Object id ) {
+        if( id == null )
+            throw new IllegalArgumentException("'id' param is null");
+        return id instanceof Number ? ((Number)id).intValue() : id.toString();
+    }
+
+    /** */
+    private Object getInputValue( ParameterMetadata<?> parameter ) {
+        final Comparable id = parameter.getIdentifier();
+
+        if( valueCallbacks.containsKey(id) ) {
+            final Supplier<?> supplier = valueCallbacks.get(id);
+            return supplier == null ? null : supplier.get();
+        }
+
+        return parameter.isIndexed()
+                ? parametersValues.get(parameter.getPosition())
+                : parametersValues.get(parameter.getName());
+    }
+
+    /** */
+    private void setOutputValue( Comparable id, Object value ) {
+        if( id instanceof Number )
+            parametersValues.setParameter(((Number)id).intValue(), value);
+        else
+            parametersValues.setParameter(id.toString(), value);
+
+        if( valueListener != null )
+            valueListener.accept(id, value);
+
+        final BiConsumer<Object,Object> listener = valueListeners.get(id);
+        if( listener != null )
+            listener.accept(id, value);
+    }
+
+    /** */
+    private Comparable resolveOutputParameterId( String returnedName, Map<String,String> substMap ) {
+        final String sourceName = substMap.getOrDefault(returnedName, returnedName);
+
+        if( callStatement.getParameter(sourceName) != null )
+            return sourceName;
+
+        try {
+            final Integer index = Integer.valueOf(sourceName);
+            if( callStatement.getParameter(index) != null )
+                return index;
+        }
+        catch( NumberFormatException ignored ) {
+        }
+
+        return sourceName;
     }
 
     /** */
@@ -443,6 +522,9 @@ public class JsonSqlCall implements IDataCall {
     @Override
     public JsonSqlCall execute() throws CallException {
 
+        if( closed )
+            throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
+
         dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true  ) );
 
         String jsonSql = null;
@@ -476,10 +558,12 @@ public class JsonSqlCall implements IDataCall {
 
             if( parametersValues != null && o != null )
             {
-                final JsonReader jr = Json.createReader(new StringReader(o));
-                final JsonObject jo = jr.readObject();
+                final JsonObject jo;
+                try( JsonReader jr = Json.createReader(new StringReader(o)) ) {
+                    jo = jr.readObject();
+                }
 
-                if( !jo.isNull("parameters") )
+                if( jo.containsKey("parameters") && !jo.isNull("parameters") )
                 {
                     final JsonArray parameters = jo.getJsonArray("parameters");
                     for ( JsonValue p : parameters )
@@ -487,17 +571,17 @@ public class JsonSqlCall implements IDataCall {
                         JsonObject j = (JsonObject)p;
                         final Object v = getJsonValue( j, "value" );
 
-                        final String ns;
-                        {
-                            final String n = j.getString("name" );
-                            ns = substMap.getOrDefault(n,n);
-                        }
+                        final Comparable parameterId = resolveOutputParameterId(
+                                j.getString("name"), substMap
+                        );
 
-                        final ParameterMetadata parameter = castParameter( tc, callStatement.getParameter(ns) );
+                        final ParameterMetadata parameter = castParameter(
+                                tc, callStatement.getParameter(parameterId)
+                        );
 
-                        if( parameter == null || parameter.getSQLType() == null )
+                        if( parameter == null || parameter.getSQLType() == null || v == null )
                         {
-                              parametersValues.set( ns, v );
+                            setOutputValue(parameterId, v);
                         }
                         else
                         {
@@ -516,7 +600,7 @@ public class JsonSqlCall implements IDataCall {
                                 else
                                     value = struct;
 
-                                parametersValues.set( ns, value );
+                                setOutputValue(parameterId, value);
                             }
                             else
                                   if( parameter.getSQLType() == Types.ARRAY )
@@ -527,13 +611,22 @@ public class JsonSqlCall implements IDataCall {
                                       if( arrayMetaData.getBaseType() == Types.STRUCT )
                                       {
                                           final StructMetaData metaData = StructMetaData.get( tc, arrayMetaData.getBaseTypeName() );
-                                          final List list = metaData.fromMapsArray( (List)v );
+                                          final List list = S.isString(v)
+                                                  ? metaData.fromJsonArray((String)v)
+                                                  : metaData.fromMapsArray((List)v);
                                           IStructMapper mapper = null;
 
                                           if( parameter.getParameterType() != null )
                                               mapper = metaData.getMapper( parameter.getParameterType() );
 
-                                          storeStructArrayOutValue( parametersValues, ns, list, mapper );
+                                          if( mapper != null )
+                                              for( int i = 0; i < list.size(); i++ )
+                                              {
+                                                  final Object value = list.get(i);
+                                                  list.set( i, value == null ? null : mapper.from(value) );
+                                              }
+
+                                          setOutputValue(parameterId, list);
                                       }
                                       else
                                       {
@@ -542,11 +635,14 @@ public class JsonSqlCall implements IDataCall {
                                           if( parameter.getParameterType() != null )
                                               list.replaceAll(value -> TypeConverter.convert( value, parameter.getParameterType()) );
 
-                                          parametersValues.set( ns, list );
+                                          setOutputValue(parameterId, list);
                                       }
                                   }
                                   else
-                                      parametersValues.set( ns, convertScalarOutValue( v, parameter ) );
+                                      setOutputValue(
+                                              parameterId,
+                                              convertScalarOutValue(v, parameter)
+                                      );
                         }
                     }
                 }
@@ -558,7 +654,6 @@ public class JsonSqlCall implements IDataCall {
         finally {
             try {
                 storedProcWork.set( "plSql", null );
-                close( );
             }
             finally {
                 dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
@@ -573,25 +668,44 @@ public class JsonSqlCall implements IDataCall {
         return name;
     }
     @Override
-    public void setName( String name ) { }
+    public void setName( String name ) {
+        this.name = name;
+    }
     @Override
-    public void setProperty( String propertyName, Object value ) throws CallException { }
+    public void setProperty( String propertyName, Object value ) throws CallException {
+        if( properties == null )
+            properties = new HashMap<>();
+        properties.put(propertyName, value);
+    }
     @Override
-    public Object getProperty( String propertyName ) throws CallException { return null;}
+    public Object getProperty( String propertyName ) throws CallException {
+        return properties == null ? null : properties.get(propertyName);
+    }
 
     @Override
     public < V > void setValueCallback( Object id, Supplier< V > supplier ) throws CallException {
-        throw new UnsupportedOperationException("setValueCallback");
+        final Comparable parameterId = normalizeParameterId(id);
+        if( callStatement.getParameter(parameterId) == null )
+            throw new CallException( Tags.PRODUCT_LABEL + "No parameter with Id " + parameterId );
+        valueCallbacks.put(parameterId, supplier);
     }
 
     @Override
     public < V > void setValueListener( Object id, BiConsumer< Object, V > consumer ) throws CallException {
-        throw new UnsupportedOperationException("setValueListener");
+        final Comparable parameterId = normalizeParameterId(id);
+        final ParameterMetadata<?> parameter = callStatement.getParameter(parameterId);
+
+        if( parameter == null )
+            throw new CallException( Tags.PRODUCT_LABEL + "No parameter with Id " + parameterId );
+        if( !parameter.isOut() )
+            throw new CallException( Tags.PRODUCT_LABEL + "Parameter '" + parameterId + "' is not OUT or INOUT" );
+
+        valueListeners.put(parameterId, (BiConsumer<Object,Object>)(BiConsumer)consumer);
     }
 
     @Override
     public void setValueListener( BiConsumer< Object, Object > listener ) throws CallException {
-        parametersValues.setValueListener(listener);
+        valueListener = listener;
     }
     /** */
     @Override
@@ -605,7 +719,7 @@ public class JsonSqlCall implements IDataCall {
     /** */
     @Override
     public ParameterMetadata getParameterMetadata( Object id ) throws CallException {
-        return callStatement.getParameter((Comparable)id);
+        return id == null ? null : callStatement.getParameter(normalizeParameterId(id));
     }
 
     @Override
@@ -633,9 +747,40 @@ public class JsonSqlCall implements IDataCall {
     public Object getParameter( int parameterIndex ) {
         return parametersValues.getParameter(parameterIndex);
     }
+
+    @Override
+    public boolean hasParameter( String parameterName ) {
+        return callStatement.getParameter(parameterName) != null;
+    }
+
+    @Override
+    public boolean hasParameter( int parameterIndex ) {
+        return callStatement.getParameter(parameterIndex) != null;
+    }
+
+    @Override
+    public <T> T getReturnValue() {
+        for( ParameterMetadata<?> parameter : callStatement.getParameterIter() )
+            if( parameter.isReturnValue() )
+                return parameter.isIndexed()
+                        ? (T)parametersValues.get(parameter.getPosition())
+                        : (T)parametersValues.get(parameter.getName());
+        return null;
+    }
     /** */
     @Override
     public void close()  {
+        if( closed )
+            return;
+
+        dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, true));
+        try {
+            storedProcWork.close();
+            closed = true;
+        }
+        finally {
+            dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, false));
+        }
     }
 
     public static void main( String[] args ) {

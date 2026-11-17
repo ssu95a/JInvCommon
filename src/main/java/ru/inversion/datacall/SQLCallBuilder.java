@@ -5,7 +5,6 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import ru.inversion.datacall.impl.SQLExprXMLLoader;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.db.dialect.SqlDialect;
-import ru.inversion.meta.impl.work.IDBWork;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
@@ -19,6 +18,7 @@ import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -211,7 +211,8 @@ public class SQLCallBuilder {
                 throw new IllegalStateException(Tags.PRODUCT_LABEL + "SQL выражение '" + name + "' не найдено в " + runClass.toString() );
 
             return new SQLDataCall (
-                st.createCallWork( tc, this.callBackParameters, closeAfterExecute )
+                st.createCallWork( tc, this.callBackParameters, closeAfterExecute ),
+                name
             );
 
         } catch( Throwable th ) {
@@ -358,74 +359,231 @@ public class SQLCallBuilder {
             )
                 return new JsonSqlCall( tc, callStatement, callBackParameters, name );
 
-            return new SQLDataCall( callStatement.createCallWork( tc, callBackParameters, closeAfterExecute ) );
+            return new SQLDataCall(
+                callStatement.createCallWork( tc, callBackParameters, closeAfterExecute ),
+                name
+            );
         }
 
-        /** */
-        return new IDataCall() {
-            final IDBWork dsw = new DbmsSqlWork( tc, callStatement, callBackParameters );
-            /** Коллекция слушателей событий самого DataCall */
-            final private IListenerManEvent<IDataCallListener, DataCallEvent> dataCallListeners = ListenerManFactory.createListenerManEvent( IDataCallListener::dataCallChanged );
-            @Override
-            public String getName() throws CallException { return name; }
-            @Override
-            public void setName( String name ) throws CallException { }
-            @Override
-            public void setProperty( String propertyName, Object value ) throws CallException { }
-            @Override
-            public Object getProperty( String propertyName ) throws CallException { return null; }
-            @Override
-            public IDataCall execute() throws CallException {
-                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true  ) );
-                try {
-                    try {
-                        this.dsw.execute( null );
-                    }
-                    catch( Exception e ) {
-                        throw new CallException( Tags.PRODUCT_LABEL + "Error on call " + dsw.getClass().getName(), e );
-                    }
-                    return this;
-                }
-                finally {
-                    dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
-                }
-            }
-            @Override
-            public < V > void setValueCallback( Object id, Supplier< V > supplier ) throws CallException { }
-            @Override
-            public < V > void setValueListener( Object id, BiConsumer< Object, V > consumer ) throws CallException { }
-            @Override
-            public void setValueListener( BiConsumer< Object, Object > consumer ) throws CallException { }
-            @Override
-            public void addDataCallListener( IDataCallListener l ) throws CallException {
-                dataCallListeners.addListener(l);
-            }
-            @Override
-            public void removeDataCallListener( IDataCallListener l ) throws CallException {
-                dataCallListeners.removeListener(l);
-            }
-            @Override
-            public ParameterMetadata getParameterMetadata( Object id ) throws CallException { return null; }
-
-            @Override
-            public Iterable<ParameterMetadata<?>> getParameterIter() {
-                //throw new UnsupportedOperationException("getParameterIter");
-                return callStatement.getParameterIter();
-            }
-
-            @Override
-            public void close() { }
-            @Override
-            public Object getParameter( String parameterName ) { return null; }
-            @Override
-            public Object getParameter( int parameterIndex ) { return null; }
-        };
+        return new DbmsSqlDataCall(tc, callStatement, callBackParameters, name);
     }
 
     /** */
     private Map<String,CallStatement> parseUrl( ) throws CallException {
         SQLExprXMLLoader loader = new SQLExprXMLLoader( url );
         return loader.parse( tc.dialect() );
+    }
+
+    /** IDataCall adapter for Oracle DBMS_SQL execution. */
+    private static class DbmsSqlDataCall implements IDataCall {
+
+        private DbmsSqlWork work;
+        private final CallStatement callStatement;
+        private final ParametersValues values;
+
+        private final Map<Comparable,Supplier<?>> valueCallbacks =
+                new TreeMap<>(ParametersValues.ParamIdComparator);
+        private final Map<Comparable,BiConsumer<Object,Object>> valueListeners =
+                new TreeMap<>(ParametersValues.ParamIdComparator);
+
+        private final IListenerManEvent<IDataCallListener, DataCallEvent> dataCallListeners =
+                ListenerManFactory.createListenerManEvent(IDataCallListener::dataCallChanged);
+
+        private BiConsumer<Object,Object> valueListener;
+        private String name;
+        private Map<String,Object> properties;
+
+        private DbmsSqlDataCall(
+                TaskContext tc,
+                CallStatement callStatement,
+                IParameters callBackParameters,
+                String name
+        ) throws CallException {
+            this.callStatement = callStatement;
+            this.values = new ParametersValues(callBackParameters);
+            this.name = name;
+            this.work = new DbmsSqlWork(tc, callStatement, values);
+        }
+
+        private static Comparable normalizeParameterId( Object id ) {
+            if( id == null )
+                throw new IllegalArgumentException("'id' param is null");
+            return id instanceof Number ? ((Number)id).intValue() : id.toString();
+        }
+
+        private Object value( ParameterMetadata<?> parameter ) {
+            return parameter.isIndexed()
+                    ? values.get(parameter.getPosition())
+                    : values.get(parameter.getName());
+        }
+
+        private void setValue( Comparable id, Object value ) {
+            if( id instanceof Number )
+                values.setParameter(((Number)id).intValue(), value);
+            else
+                values.setParameter(id.toString(), value);
+        }
+
+        @Override
+        public IDataCall execute() throws CallException {
+            if( work == null )
+                throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
+
+            dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, true));
+
+            try {
+                for( Map.Entry<Comparable,Supplier<?>> entry : valueCallbacks.entrySet() ) {
+                    final Supplier<?> supplier = entry.getValue();
+                    setValue(entry.getKey(), supplier == null ? null : supplier.get());
+                }
+
+                work.execute(null);
+
+                for( ParameterMetadata<?> parameter : callStatement.getParameterIter(true) ) {
+                    final Comparable id = parameter.getIdentifier();
+                    final Object outValue = value(parameter);
+
+                    if( valueListener != null )
+                        valueListener.accept(id, outValue);
+
+                    final BiConsumer<Object,Object> listener = valueListeners.get(id);
+                    if( listener != null )
+                        listener.accept(id, outValue);
+                }
+
+                return this;
+            }
+            catch( CallException e ) {
+                throw e;
+            }
+            catch( Throwable th ) {
+                throw new CallException(Tags.PRODUCT_LABEL + "Error on call " + DbmsSqlWork.class.getName(), th);
+            }
+            finally {
+                dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false));
+            }
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public void setName( String name ) {
+            this.name = name;
+        }
+
+        @Override
+        public void setProperty( String propertyName, Object value ) {
+            if( properties == null )
+                properties = new HashMap<>();
+            properties.put(propertyName, value);
+        }
+
+        @Override
+        public Object getProperty( String propertyName ) {
+            return properties == null ? null : properties.get(propertyName);
+        }
+
+        @Override
+        public <V> void setValueCallback( Object id, Supplier<V> supplier ) throws CallException {
+            final Comparable parameterId = normalizeParameterId(id);
+            if( callStatement.getParameter(parameterId) == null )
+                throw new CallException(Tags.PRODUCT_LABEL + "No parameter with Id " + parameterId);
+            valueCallbacks.put(parameterId, supplier);
+        }
+
+        @Override
+        public <V> void setValueListener( Object id, BiConsumer<Object,V> listener ) throws CallException {
+            final Comparable parameterId = normalizeParameterId(id);
+            final ParameterMetadata<?> parameter = callStatement.getParameter(parameterId);
+
+            if( parameter == null )
+                throw new CallException(Tags.PRODUCT_LABEL + "No parameter with Id " + parameterId);
+            if( !parameter.isOut() )
+                throw new CallException(Tags.PRODUCT_LABEL + "Parameter '" + parameterId + "' is not OUT or INOUT");
+
+            valueListeners.put(parameterId, (BiConsumer<Object,Object>)(BiConsumer)listener);
+        }
+
+        @Override
+        public void setValueListener( BiConsumer<Object,Object> listener ) {
+            valueListener = listener;
+        }
+
+        @Override
+        public void addDataCallListener( IDataCallListener listener ) {
+            dataCallListeners.addListener(listener);
+        }
+
+        @Override
+        public void removeDataCallListener( IDataCallListener listener ) {
+            dataCallListeners.removeListener(listener);
+        }
+
+        @Override
+        public ParameterMetadata<?> getParameterMetadata( Object id ) {
+            return id == null ? null : callStatement.getParameter(normalizeParameterId(id));
+        }
+
+        @Override
+        public Iterable<ParameterMetadata<?>> getParameterIter() {
+            return callStatement.getParameterIter();
+        }
+
+        @Override
+        public Object getParameter( String parameterName ) {
+            return values.get(parameterName);
+        }
+
+        @Override
+        public Object getParameter( int parameterIndex ) {
+            return values.get(parameterIndex);
+        }
+
+        @Override
+        public void setParameter( String parameterName, Object value ) {
+            values.setParameter(parameterName, value);
+        }
+
+        @Override
+        public void setParameter( int parameterIndex, Object value ) {
+            values.setParameter(parameterIndex, value);
+        }
+
+        @Override
+        public boolean hasParameter( String parameterName ) {
+            return callStatement.getParameter(parameterName) != null;
+        }
+
+        @Override
+        public boolean hasParameter( int parameterIndex ) {
+            return callStatement.getParameter(parameterIndex) != null;
+        }
+
+        @Override
+        public <T> T getReturnValue() {
+            for( ParameterMetadata<?> parameter : callStatement.getParameterIter() )
+                if( parameter.isReturnValue() )
+                    return (T)value(parameter);
+            return null;
+        }
+
+        @Override
+        public void close() {
+            if( work == null )
+                return;
+
+            dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, true));
+            try {
+                work.close();
+                work = null;
+            }
+            finally {
+                dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, false));
+            }
+        }
     }
 
     /** */
@@ -438,8 +596,9 @@ public class SQLCallBuilder {
         final private IListenerManEvent<IDataCallListener, DataCallEvent> dataCallListeners = ListenerManFactory.createListenerManEvent( IDataCallListener::dataCallChanged );
 
         /** */
-        private SQLDataCall( CallWork work ) {
+        private SQLDataCall( CallWork work, String name ) {
             this.work = Objects.requireNonNull( work, "'work' is null" );
+            this.name = name;
         }
 
         /** Наименование */
@@ -474,6 +633,9 @@ public class SQLCallBuilder {
 
         @Override
         public IDataCall execute( ) throws CallException {
+
+            if( work == null )
+                throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
 
             dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true ) );
 
@@ -512,7 +674,11 @@ public class SQLCallBuilder {
                 if( id == null )
                     throw new IllegalArgumentException("'id' param is null");
 
-                this.work.outCallback( (Comparable)id, listener);
+                final Comparable parameter = id instanceof Number
+                        ? ((Number)id).intValue()
+                        : id.toString();
+
+                this.work.outCallback( parameter, listener);
             }
             catch( Throwable th ) {
                 throw new CallException( Tags.PRODUCT_LABEL + "Error on 'setValueListener' to dataCall", th );
