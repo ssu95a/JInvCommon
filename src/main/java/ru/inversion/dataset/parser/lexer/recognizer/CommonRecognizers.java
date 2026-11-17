@@ -107,6 +107,16 @@ final class CommonRecognizers {
             if (ch != ':' || at + 1 == sql.length()
                     || !ScanChars.identifierStart(sql.charAt(at + 1))) return null;
             int end = ScanChars.identifierEnd(sql, at + 1, oracle);
+
+            // Forms-style application parameters use qualified names such as
+            // :BLOCK.ITEM. The complete name belongs to one bind parameter;
+            // this is an established JInvCommon contract, not SQL navigation.
+            while (end + 1 < sql.length()
+                    && sql.charAt(end) == '.'
+                    && ScanChars.identifierStart(sql.charAt(end + 1))) {
+                end = ScanChars.identifierEnd(sql, end + 1, oracle);
+            }
+
             return new SqlScanner.Token(NAMED_PARAMETER, at, end);
         }
     }

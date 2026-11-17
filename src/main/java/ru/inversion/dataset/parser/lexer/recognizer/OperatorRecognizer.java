@@ -19,7 +19,8 @@ import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.OPERATOR;
 final class OperatorRecognizer implements TokenRecognizer {
 
     private static final String PG_CHARS = "+-*/<>=~!@#%^&|`?";
-    private static final String ORACLE_SINGLE = "+-*/<>=";
+    // '%' is used by PL/SQL attributes such as cursor%ROWCOUNT and var%TYPE.
+    private static final String ORACLE_SINGLE = "+-*/<>=%";
     private static final String[] ORACLE_DOUBLE = {
             "<=", ">=", "<>", "!=", "^=", "~=", "||", "**", "=>"
     };

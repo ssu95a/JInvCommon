@@ -123,6 +123,26 @@ public class SqlScannerTest {
         assertEquals(sql, recreate(sql, tokens));
     }
 
+    @Test
+    public void qualifiedApplicationParameterIsOneToken() {
+        String sql = "begin :BLOCK.ITEM := rec.value; end;";
+        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
+
+        assertEquals(1, count(tokens, NAMED_PARAMETER));
+        assertTrue(containsText(
+                sql, tokens, NAMED_PARAMETER, ":BLOCK.ITEM"));
+        assertEquals(sql, recreate(sql, tokens));
+    }
+
+    @Test
+    public void oraclePlSqlPercentAttributesAreSupported() {
+        String sql = "declare v t.c%type; begin if c%isopen then null; end if; end;";
+        List<SqlScanner.Token> tokens = ORACLE.scan(sql);
+
+        assertTrue(containsText(sql, tokens, OPERATOR, "%"));
+        assertEquals(sql, recreate(sql, tokens));
+    }
+
 
     @Test
     public void ordinaryQuotedTextSupportsDoubledQuotes() {

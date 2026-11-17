@@ -1,6 +1,6 @@
 package ru.inversion.dataset;
 
-import ru.inversion.dataset.parser.old.SQLParser;
+import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.utils.Jt2St;
 import ru.inversion.utils.S;

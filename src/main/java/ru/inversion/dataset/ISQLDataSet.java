@@ -1,7 +1,7 @@
 package ru.inversion.dataset;
 
 import ru.inversion.dataset.aggr.IAggregatorBuilder;
-import ru.inversion.dataset.parser.old.SQLParser;
+import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;

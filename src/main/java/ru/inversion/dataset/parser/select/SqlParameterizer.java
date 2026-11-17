@@ -18,7 +18,7 @@ import static ru.inversion.dataset.parser.lexer.SqlKeyword.*;
  * Единая параметризация уже собранной SQL-строки.
  * Не получает значения пользовательских параметров: это обязанность DataSet.
  */
-final class SqlParameterizer {
+public final class SqlParameterizer {
 
     private final String source;
     private final List<SqlScanner.Token> tokens;
@@ -32,6 +32,20 @@ final class SqlParameterizer {
         this.source = Objects.requireNonNull(source, "source");
         this.tokens = Objects.requireNonNull(tokens, "tokens");
         this.oracle = oracle;
+    }
+
+    /**
+     * Parameterizes supported SQL/JDBC text using the supplied dialect scanner.
+     * Unlike {@link SqlSelect}, this entry point does not require a SELECT and
+     * performs no structural changes.
+     */
+    public static PreparedSql prepare(String source, SqlScanner scanner) {
+        Objects.requireNonNull(scanner, "scanner");
+        return prepare(
+                source,
+                scanner.scan(source),
+                scanner instanceof ru.inversion.dataset.parser.lexer.OracleSqlScanner
+        );
     }
 
     static PreparedSql prepare(

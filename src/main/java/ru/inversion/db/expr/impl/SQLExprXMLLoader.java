@@ -1,7 +1,7 @@
 package ru.inversion.db.expr.impl;
 
 import ru.inversion.dataset.parser.old.SQLItem;
-import ru.inversion.dataset.parser.old.SQLParser;
+import ru.inversion.dataset.parser.SQLParser;
 import ru.inversion.db.expr.SQLExpressionException;
 import ru.inversion.utils.Pair;
 import ru.inversion.utils.S;
@@ -21,10 +21,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static ru.inversion.dataset.parser.SqlValueFormatter.format;
-
-//import ru.inversion.dataset.parser.old.SQLItem;
-//import ru.inversion.dataset.parser.old.SQLParser;
-//import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 /**
  *
