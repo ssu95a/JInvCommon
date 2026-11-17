@@ -34,21 +34,22 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** Исходные имена в том же порядке, что и vars. */
     private final List<String> parameterNames = new ArrayList<>();
 
-    /** Диагностика launcher-а без интерпретации неизвестного серверного кода. */
+    /** Результат последнего вызова серверной функции. */
     private Integer resultCode;
     private String resultInfo;
 
     /**
-    Выполнение SQL выражения через пакет DBSMS_SQL
+    Выполнение SQL выражения через пакет DBMS_SQL.
     FUNCTION execute_Dbms_Sql_Work (
             p_plSql      IN   VARCHAR2,
-            p_vars       IN   T_TAB_VARCHAR2_2000,
-            p_vals       IN   T_TAB_VARCHAR2_2000,
-            p_typs       IN   T_TAB_VARCHAR2_2000,
-            p_outs       OUT  T_TAB_VARCHAR2_2000,
+            p_vars       IN   SYS.ODCIVARCHAR2LIST,
+            p_vals       IN   SYS.ODCIVARCHAR2LIST,
+            p_typs       IN   SYS.ODCIVARCHAR2LIST,
+            p_outs       OUT  SYS.ODCIVARCHAR2LIST,
             p_resultInfo OUT  VARCHAR2
     )
-    RETURN INTEGER
+    RETURN INTEGER: 0 — успех, -1 — p_vals короче p_vars;
+    остальные ошибки сервер пробрасывает исключением.
      * */
     static private CallWork initStoredProc( TaskContext tc ) throws CallException {
         return CallBuilder.NEW()
@@ -119,9 +120,9 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         return vals;
     }
 
-    /** Проверяет весь ответ до первой обратной записи. Лишние значения сохраняют прежнее поведение. */
+    /** Проверяет весь ответ до первой обратной записи. */
     void applyOutputs(List<String> outs) {
-        if( !vars.isEmpty() && (outs == null || outs.size() < vars.size()) )
+        if( outs == null || outs.size() != vars.size() )
             throw new IllegalStateException(
                     Tags.PRODUCT_LABEL + "DBMS_SQL returned "
                             + (outs == null ? 0 : outs.size())
@@ -151,7 +152,17 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
             resultCode = storedProcWork.get("ret");
             resultInfo = storedProcWork.get("rsltInf");
+            if( !Integer.valueOf(0).equals(resultCode) )
+                throw new CallException(
+                        Tags.PRODUCT_LABEL + "DBMS_SQL launcher returned "
+                                + resultCode
+                                + (resultInfo == null ? "" : ": " + resultInfo)
+                );
             applyOutputs(storedProcWork.get("outs"));
+        }
+        catch( CallException ex ) {
+            failure = ex;
+            throw ex;
         }
         catch( RuntimeException ex ) {
             failure = new CallException(Tags.PRODUCT_LABEL + "Error on execute work", ex);

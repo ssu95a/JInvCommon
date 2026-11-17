@@ -60,9 +60,10 @@ class DbmsSqlWorkTest {
         DbmsSqlWork work = work("begin :A := :B; end;", values);
         assertThrows(IllegalStateException.class, () -> work.applyOutputs(null));
         assertThrows(IllegalStateException.class, () -> work.applyOutputs(Collections.singletonList("new-a")));
+        assertThrows(IllegalStateException.class, () -> work.applyOutputs(Arrays.asList("new-a", "new-b", "extra")));
         assertEquals("old-a", values.get("A"));
         assertEquals("old-b", values.get("B"));
-        work.applyOutputs(Arrays.asList("new-a", null, "extra"));
+        work.applyOutputs(Arrays.asList("new-a", null));
         assertEquals("new-a", values.get("A"));
         assertNull(values.get("B"));
         work.close();
@@ -87,8 +88,8 @@ class DbmsSqlWorkTest {
         values.setParameter("A", "first");
         FakeLauncher launcher = new FakeLauncher();
         launcher.outs = Collections.singletonList("out-one");
-        launcher.resultCode = 7;
-        launcher.resultInfo = "server info";
+        launcher.resultCode = 0;
+        launcher.resultInfo = null;
         DbmsSqlWork work = new DbmsSqlWork(
                 CallBuilder.NEW().sql("begin :A := :a; end;").build(), values, launcher);
 
@@ -99,8 +100,8 @@ class DbmsSqlWorkTest {
         assertEquals(Collections.singletonList("b1"), launcher.bound.get("vars"));
         assertEquals(Collections.singletonList("first"), launcher.bound.get("vals"));
         assertEquals(Collections.emptyList(), launcher.bound.get("typs"));
-        assertEquals(Integer.valueOf(7), work.resultCode());
-        assertEquals("server info", work.resultInfo());
+        assertEquals(Integer.valueOf(0), work.resultCode());
+        assertNull(work.resultInfo());
         assertEquals("out-one", values.get("A"));
 
         values.setParameter("a", "second");
@@ -113,6 +114,32 @@ class DbmsSqlWorkTest {
     }
 
     @Test
+    void serverReturnCodeIsCheckedBeforeReadingOutputs() {
+        ParametersValues values = new ParametersValues();
+        values.setParameter("A", "old");
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.resultCode = -1;
+        launcher.resultInfo = "Dbms_Sql_Work: the size of a collection with values is smaller than a collection with parameters.";
+        launcher.outs = null;
+        DbmsSqlWork work = new DbmsSqlWork(
+                CallBuilder.NEW().sql("begin :A := 1; end;").build(), values, launcher);
+
+        CallException error = assertThrows(CallException.class, () -> work.execute(null));
+        assertTrue(error.getMessage().contains("returned -1"));
+        assertTrue(error.getMessage().contains(launcher.resultInfo));
+        assertEquals("old", values.get("A"));
+        assertEquals(Integer.valueOf(-1), work.resultCode());
+        assertEquals(launcher.resultInfo, work.resultInfo());
+        assertEquals(1, launcher.closes);
+
+        launcher.resultCode = null;
+        launcher.resultInfo = null;
+        error = assertThrows(CallException.class, () -> work.execute(null));
+        assertTrue(error.getMessage().contains("returned null"));
+        assertEquals("old", values.get("A"));
+    }
+
+    @Test
     void launcherFailureRetainsCleanupFailure() {
         FakeLauncher launcher = new FakeLauncher();
         launcher.executeFailure = new CallException("execution failure");
@@ -122,7 +149,7 @@ class DbmsSqlWorkTest {
                 new ParametersValues(), launcher);
 
         CallException error = assertThrows(CallException.class, () -> work.execute(null));
-        assertSame(launcher.executeFailure, error.getCause());
+        assertSame(launcher.executeFailure, error);
         assertEquals("cleanup failure", error.getSuppressed()[0].getMessage());
         assertEquals(1, launcher.closes);
     }
