@@ -1,5 +1,7 @@
 package ru.inversion.datacall;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.IStructMapper;
 import ru.inversion.db.JInvDbException;
@@ -38,26 +40,7 @@ import static ru.inversion.parser.statement.PrepareModeEnum.QUERY;
  */
 public class CallWork implements AutoCloseable {
 
-    /**
-     * Все параметры - именованные, индексированные - храним в одной мапе
-     * поэтому Comparator учитывает тип при сравнении
-     * именованные - регистронезависимые
-     */
-    static final private Comparator<Comparable> ParamIdComparator = ( o1, o2 ) -> {
-
-        if( o1.getClass() == o2.getClass() ) {
-
-            if( o1.getClass() == String.class )
-                return ( (String)o1).compareToIgnoreCase( (String)o2 );
-
-            return o1.compareTo(o2);
-        }
-
-        if( o1.getClass() == String.class )
-            return 1;
-
-        return -1;
-    };
+    private static final Logger logger = LoggerFactory.getLogger("ru.inversion.sql");
 
     /** Значения и характеристики одного параметра */
     private class PV<T,V> {
@@ -67,6 +50,9 @@ public class CallWork implements AutoCloseable {
 
         /** Текущее значение параметра, если задано */
         private V value = (V)IParameters.NO_PARAMETER_VALUE;
+
+        /** Состояние, через которое уведомляются слушатели OUT-значения. */
+        private Property<V> outProperty;
 
         /** Позиции в выражении */
         final private List<Integer> posList = new ArrayList<>();
@@ -104,10 +90,15 @@ public class CallWork implements AutoCloseable {
 
         /** */
         public void value( V v ) {
-            if( this.value instanceof Consumer)
-                ((Consumer)value).accept( v );
+            final Object previous = this.value;
+
+            if( previous instanceof Consumer)
+                ((Consumer)previous).accept( v );
             else
                 this.value = v;
+
+            if( outProperty != null && outProperty != previous )
+                outProperty.setValue(v);
         }
         /** */
         public T id( ) {
@@ -125,22 +116,25 @@ public class CallWork implements AutoCloseable {
         public List<Integer> posList() {
             return posList;
         }
+        /** Параметр реально присутствует в подготовленном JDBC-выражении. */
+        private boolean isBound() {
+            return !posList.isEmpty();
+        }
         /** */
         public void callback( BiConsumer<Object,V> c ) {
 
             if( !U.in( pm.getMode(), OUT, INOUT ) )
                 throw new IllegalStateException( Tags.PRODUCT_LABEL + "Parameter '" + id() + "' is not OUT or INOUT" );
 
-            Property<V> p;
+            if( outProperty == null )
+                outProperty = value instanceof Property
+                        ? (Property<V>)value
+                        : new Property<>(value);
 
-            if( value instanceof Property )
-                p = (Property)value;
-            else {
-                p = new Property<>(value);
-                value = (V)p;
-            }
-
-            p.addListener( ( property, oldValue, newValue ) -> c.accept( id(), newValue ) );
+            outProperty.addListener(
+                    (property, oldValue, newValue) ->
+                            c.accept(id(), newValue)
+            );
         }
         /** */
         public boolean isIn ( ) { return pm.getMode() == IN  || pm.getMode() == INOUT; }
@@ -149,7 +143,8 @@ public class CallWork implements AutoCloseable {
     }
 
     /** Значения параметров */
-    final Map<Comparable<?>,PV> pvMap = new TreeMap<>(ParamIdComparator);
+    final Map<Comparable<?>,PV> pvMap =
+            new TreeMap<>((Comparator)ParametersValues.ParamIdComparator);
 
     /** Константы SQL, заменённые на bind-параметры */
     private final List<Pair<Integer,Object>> constantList = new ArrayList<>();
@@ -159,9 +154,8 @@ public class CallWork implements AutoCloseable {
      * */
     private PV returnPv = null;
 
-    /** Признак, что statement был уже создан
-     *  и не нужно второй раз настраивать параметры */
-    private boolean wasCreated = false;
+    /** Подготовленный JDBC SQL и карта позиций; вычисляются один раз. */
+    private String jdbcSql;
 
     /** Метаданные */
     final private CallStatement callStatement;
@@ -241,47 +235,29 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
-    private Optional<PV> getOrCreateParameter( Comparable<?> parameter, Object value )
+    private Optional<PV> getOrCreateParameter( Comparable<?> parameter )
     {
         PV pv = pvMap.get( parameter );
 
         if( pv != null )
-        {
-            pv.value(value);
             return Optional.of(pv);
-        }
-        else {
 
-            final ParameterMetadata<?> pm = getStatementParameter(parameter);
-
-            if( pm != null )
-            {
-                pv = new PV(pm, value );
-                pvMap.put( parameter, pv );
-                return Optional.of(pv);
-            }
+        final ParameterMetadata<?> pm = getStatementParameter(parameter);
+        if( pm != null ) {
+            pv = new PV(pm);
+            pvMap.put(parameter, pv);
+            return Optional.of(pv);
         }
         return Optional.empty();
     }
 
     /** Установка значения параметра */
     private CallWork put( Comparable<?> parameter, Object value ) throws CallException {
-
-//        PV pv = pvMap.get( parameter );
-//
-//        if( pv != null )
-//            pv.value( value );
-//        else {
-//
-//            final ParameterMetadata pm = getStatementParameter(parameter);
-//
-//            if( pm != null )
-//                pvMap.put( parameter, new PV( pm, value ) );
-//            else
-//                throw new CallException( Tags.PRODUCT_LABEL + "No parameter with Id " + parameter );
-//        }
-        if( getOrCreateParameter( parameter, value ).isPresent() )
+        final Optional<PV> result = getOrCreateParameter(parameter);
+        if( result.isPresent() ) {
+            result.get().value(value);
             return this;
+        }
 
         throw new CallException( Tags.PRODUCT_LABEL + "No parameter with Id " + parameter );
     }
@@ -335,7 +311,7 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
-    private Object getArrayValue( ParameterMetadata pm, Collection col ) throws CallException {
+    private Array getArrayValue( ParameterMetadata pm, Collection col ) throws CallException {
         return ArrayMetaData.createArray( getTaskContext(), pm.getElementType(), col );
     }
 
@@ -492,12 +468,7 @@ public class CallWork implements AutoCloseable {
                     array = ArrayMetaData.createArray( getTaskContext(), pm.getElementType(), col );
                 }
 
-                try {
-                    return arrayMetaData.toJson(array);
-                }
-                finally {
-                    array.free();
-                }
+                return arrayToJsonAndFree(arrayMetaData, array);
             }
             else
             {
@@ -521,159 +492,166 @@ public class CallWork implements AutoCloseable {
         }
     }
 
-    /** Устанавливает значение параметра в CallableStatement */
-    private void setParameterValue( PreparedStatement cs, PV pv, AutoCloseableList resources ) throws CallException {
-
-        Object originalValue = pv.value();
-
-        Object handleValue   = originalValue;
+    /** Сериализует временный ARRAY и не маскирует ошибку сериализации. */
+    private String arrayToJsonAndFree(
+            ArrayMetaData metaData,
+            Array array
+    ) throws SQLException {
+        Throwable failure = null;
 
         try {
-            if( originalValue != null )
-            {
-                if( pv.pm().getSQLType() != null )
-                {
-                    if( pv.pm().getSQLType() == Types.ARRAY || pv.pm().getSQLType() == -1026 )
-                    {
-                        if( originalValue instanceof Array ) {
-                            ;
-                        }
-                        else
-                        {
-                            try {
-                                Collection col = (Collection)originalValue;
-                                handleValue = getArrayValue( pv.pm(), col );
-                                final Array array = (Array)handleValue;
-                                resources.add( array::free );
-                            }
-                            catch( ClassCastException e ) {
-                                throw new IllegalStateException( Tags.PRODUCT_LABEL + "Для параметра типа ARRAY значение должно быть Collection<T>", e );
-                            }
-                        }
-                    }
-                    else if( pv.pm().getSQLType() == Types.STRUCT )
-                    {
-                        if( originalValue instanceof Struct ) {
-                            ;
-                        }
-                        else
-                        {
-                            handleValue = getStructValue( pv.pm, originalValue );
-                        }
-                    }
-                    else if( pv.pm().getSQLType() == -1024 ) // JSON_STRUCT
-                    {
-                        handleValue = getJsonStructValue( pv.pm, originalValue );
-                    }
-                    else if( pv.pm().getSQLType() == -1025 ) // JSON_ARRAY
-                    {
-                        handleValue = getJsonArrayValue( pv.pm, originalValue );
-                    }
-                    else if( pv.pm().getSQLType() == Types.SQLXML )
-                    {
-                        if( !(originalValue instanceof SQLXML) )
-                        {
-                            handleValue = getSqlXmlValue( pv.pm, originalValue );
-                            final SQLXML sqlXml = (SQLXML)handleValue;
-                            resources.add( sqlXml::free );
-                        }
-                    }
-                }
+            return metaData.toJson(getTaskContext(), array);
+        }
+        catch( RuntimeException | Error th ) {
+            failure = th;
+            throw th;
+        }
+        finally {
+            try {
+                array.free();
             }
+            catch( SQLException freeFailure ) {
+                if( failure == null )
+                    throw freeFailure;
+                failure.addSuppressed(freeFailure);
+            }
+        }
+    }
 
-            final List<Integer> list = pv.posList();
+    /** Устанавливает значение IN/INOUT-параметра в JDBC statement. */
+    private void setParameterValue(
+            PreparedStatement statement,
+            PV pv,
+            AutoCloseableList resources
+    ) throws CallException {
+        final Object originalValue = pv.value();
 
-            for( int idx : list )
-            {
-                Object positionValue = handleValue;
+        try {
+            final Object jdbcValue = prepareInputValue(
+                    pv, originalValue, resources
+            );
 
-                if( originalValue instanceof File && handleValue == originalValue )
-                {
-                    final FileInputStream is = new FileInputStream( (File)originalValue );
-                    resources.add(is);
-                    positionValue = is;
+            final List<Integer> positions = pv.posList();
+            for( int position : positions ) {
+                Object positionValue = jdbcValue;
+
+                if( originalValue instanceof File && jdbcValue == originalValue ) {
+                    final FileInputStream stream =
+                            new FileInputStream((File)originalValue);
+                    resources.add(stream);
+                    positionValue = stream;
                 }
-                else if( Integer.valueOf(Types.CLOB).equals(pv.pm().getSQLType()) && originalValue instanceof String )
-                {
-                    positionValue = new StringReader( (String)originalValue );
+                else if( Integer.valueOf(Types.CLOB).equals(
+                        pv.pm().getSQLType()) && originalValue instanceof String ) {
+                    positionValue = new StringReader((String)originalValue);
                 }
 
-                final Object v = Jt2St.convert(positionValue);
-
-                /*
-                if( v == null && pv.pm().getSQLType() != null )
-                {
-                    if( S.isNullOrEmpty( pv.pm().getElementType() ) )
-                        cs.setNull( idx, pv.pm().getSQLType() );
-                    else
-                        cs.setNull( idx, pv.pm().getSQLType(), pv.pm().getElementType() );
-                }
-                else
-                */
-                if( v instanceof InputStream )
-                {
-                    InputStream is = (InputStream)v;
-                    cs.setBinaryStream( idx, is );
-                }
-                else if( v instanceof Blob )
-                {
-                    Blob b = (Blob)v;
-                    cs.setBlob( idx, b );
-                }
-                else if( v instanceof Reader )
-                {
-                    Reader r = (Reader)v;
-                    cs.setCharacterStream( idx, r );
-                }
-                else if( v instanceof Array)
-                {
-                    Array r = (Array)v;
-                    cs.setArray( idx, r );
-                }
-                else if( v instanceof byte[])
-                {
-                    byte[] r = (byte[])v;
-                    cs.setBytes( idx, r );
-                }
-                else if( v instanceof SQLXML)
-                {
-                    SQLXML r = (SQLXML)v;
-                    cs.setSQLXML( idx, r );
-                }
-                else
-                {
-                    if( pv.pm().getSQLType() == null )
-                        cs.setObject( idx, v );
-                    else
-                    {
-                        // Для JSON_STRUCT и JSON_ARRAY
-                        if( pv.pm().getSQLType() == -1024 || pv.pm().getSQLType() == -1025 )
-                        {
-                            if( v == null )
-                                cs.setNull  ( idx, Types.VARCHAR );
-                            else
-                                cs.setString( idx, (String)v );
-                        }
-                        else
-                        {
-                            if( v == null )
-                            {
-                                final int sqlType = type2code( pv.pm().getSQLType() );
-                                if( S.isNullOrEmpty(pv.pm().getElementType()) )
-                                    cs.setNull( idx, sqlType );
-                                else
-                                    cs.setNull( idx, sqlType, pv.pm().getElementType() );
-                            }
-                            else
-                                cs.setObject( idx, v, type2code( pv.pm().getSQLType() ) );
-                        }
-                    }
-                }
-            }//end for
+                bindParameterValue(
+                        statement,
+                        position,
+                        Jt2St.convert(positionValue),
+                        pv.pm()
+                );
+            }
         }
         catch( Throwable th ) {
-            throw new CallException( Tags.PRODUCT_LABEL + "Error on set parameter '" + pv.id() + "' value into JDBC CallableStatement", th );
+            throw new CallException(
+                    Tags.PRODUCT_LABEL + "Error on set parameter '"
+                            + pv.id() + "' value into JDBC CallableStatement",
+                    th
+            );
         }
+    }
+
+    /** Преобразует пользовательское значение в значение, понятное JDBC. */
+    private Object prepareInputValue(
+            PV pv,
+            Object value,
+            AutoCloseableList resources
+    ) {
+        if( value == null || pv.pm().getSQLType() == null )
+            return value;
+
+        final int sqlType = pv.pm().getSQLType();
+
+        if( sqlType == Types.ARRAY || sqlType == -1026 ) {
+            if( value instanceof Array )
+                return value;
+
+            if( !(value instanceof Collection) )
+                throw new IllegalStateException(
+                        Tags.PRODUCT_LABEL
+                                + "Для параметра типа ARRAY значение должно быть Collection<T>"
+                );
+
+            final Array array = getArrayValue(
+                    pv.pm(), (Collection)value
+            );
+            resources.add(array::free);
+            return array;
+        }
+
+        if( sqlType == Types.STRUCT )
+            return value instanceof Struct
+                    ? value
+                    : getStructValue(pv.pm(), value);
+
+        if( sqlType == -1024 )
+            return getJsonStructValue(pv.pm(), value);
+
+        if( sqlType == -1025 )
+            return getJsonArrayValue(pv.pm(), value);
+
+        if( sqlType == Types.SQLXML && !(value instanceof SQLXML) ) {
+            final SQLXML sqlXml = getSqlXmlValue(pv.pm(), value);
+            resources.add(sqlXml::free);
+            return sqlXml;
+        }
+
+        return value;
+    }
+
+    /** Выполняет один JDBC bind с учётом типа значения и метаданных. */
+    private void bindParameterValue(
+            PreparedStatement statement,
+            int position,
+            Object value,
+            ParameterMetadata<?> parameter
+    ) throws SQLException {
+        if( value instanceof InputStream )
+            statement.setBinaryStream(position, (InputStream)value);
+        else if( value instanceof Blob )
+            statement.setBlob(position, (Blob)value);
+        else if( value instanceof Reader )
+            statement.setCharacterStream(position, (Reader)value);
+        else if( value instanceof Array )
+            statement.setArray(position, (Array)value);
+        else if( value instanceof byte[] )
+            statement.setBytes(position, (byte[])value);
+        else if( value instanceof SQLXML )
+            statement.setSQLXML(position, (SQLXML)value);
+        else if( parameter.getSQLType() == null )
+            statement.setObject(position, value);
+        else if( parameter.getSQLType() == -1024
+                || parameter.getSQLType() == -1025 ) {
+            if( value == null )
+                statement.setNull(position, Types.VARCHAR);
+            else
+                statement.setString(position, (String)value);
+        }
+        else if( value == null ) {
+            final int sqlType = type2code(parameter.getSQLType());
+            if( S.isNullOrEmpty(parameter.getElementType()) )
+                statement.setNull(position, sqlType);
+            else
+                statement.setNull(
+                        position, sqlType, parameter.getElementType()
+                );
+        }
+        else
+            statement.setObject(
+                    position, value, type2code(parameter.getSQLType())
+            );
     }
 
     /** */
@@ -704,129 +682,157 @@ public class CallWork implements AutoCloseable {
     private Object getOutParameterValue( Object value, PV pv ) throws CallException {
 
         try {
-
-            if( value != null )
-            {
-                // Чтение массива
-                if( value instanceof Array )
-                {
-                    final Array a = (Array)value;
-
-                    try {
-                        List<Object> list = Arrays.asList( (Object[])a.getArray() );
-
-                        // конвертируем содержимое в JavaType, если задан
-                        if( list != null && pv.pm().getParameterType() != null ) {
-
-                            final Class toType = pv.pm().getParameterType();
-
-                            final List newList = new ArrayList<>(list.size());
-
-                            boolean doIt = true;
-
-                            for( Object o : list ) {
-
-                                if( doIt && o != null )
-                                {
-                                    if( o instanceof Struct )
-                                    {
-                                        getEntityMetaData( pv.pm().getParameterType() )
-                                                .getStructMapper( getTaskContext(), ((Struct)o).getSQLTypeName() );
-                                    }
-
-                                    doIt = false;
-                                }
-
-                                newList.add( TypeConverter.convert( o, toType ) );
-                            }
-
-                            list = newList;
-                        }
-
-                        value = list;
-                    }
-                    finally {
-                        a.free();
-                    }
-                }
-                else if( value instanceof Struct && pv.pm().getParameterType() != null )
-                {
-                    final Struct struct = (Struct)value;
-
-                    final IStructMapper structMapper
-                            = getEntityMetaData( pv.pm().getParameterType() )
-                            .getStructMapper( getTaskContext(), struct.getSQLTypeName() );
-
-                    value =  structMapper.from( value );
-                }
-                else if( value instanceof ResultSet )
-                {
-                    if( pv.pm().getParameterType() != null && pv.pm().getParameterType() != ResultSet.class )
-                    {
-                        final ResultSet rs = (ResultSet)value;
-                        value = RSUtils.createIterator( rs, pv.pm().getParameterType() );
-                    }
-                }
-                else if( pv.pm.getSQLType() == -1024 ) // JSON_STRUCT
-                {
-                    final String s = (String)value;
-                    final Class<?> javaType = pv.pm().getParameterType();
-
-                    if( pv.pm.getElementType() == null )
-                    {
-                        if( javaType != null )
-                            value = getEntityMetaData( javaType ).getJSonMapper().fromJson(s);
-                    }
-                    else //через Struct
-                    {
-                        final StructMetaData smd = StructMetaData.get( getTaskContext(), pv.pm.getElementType() );
-                        final Struct struct = smd.fromJson(s);
-                        value = javaType == null ? struct : smd.getMapper(javaType).from(struct);
-                    }
-                }
-                else if( pv.pm.getSQLType() == -1025 ) // JSON_ARRAY
-                {
-                    final String s = (String)value;
-                    final Class<?> javaType = pv.pm().getParameterType();
-
-                    if( pv.pm.getElementType() == null )
-                    {
-                        if( javaType != null )
-                            value = getEntityMetaData( javaType ).getJSonMapper().fromJsonArray(s);
-                    }
-                    else //через Struct
-                    {
-                        final ArrayMetaData  amd = ArrayMetaData.get( getTaskContext(), pv.pm.getElementType() );
-                        final StructMetaData smd = StructMetaData.get( getTaskContext(), amd.getBaseTypeName() );
-
-                        final List<Struct> ls = smd.fromJsonArray(s);
-                        if( javaType == null )
-                            value = ls;
-                        else
-                        {
-                            final IStructMapper m = smd.getMapper(javaType);
-                            final List lo = new ArrayList( ls.size() );
-                            ls.forEach( v->lo.add(v == null ? null : m.from(v)) );
-                            value = lo;
-                        }
-                    }
-                }
-                else
-                {
-                    if( pv.pm().getParameterType() != null )
-                        value = TypeConverter.convert( value, pv.pm().getParameterType() );
-                    else
-                        value = Jt2St.r_convert( value );
-                }
-            }
-
-            pv.value( value );
-
-            return value;
-
+            final Object converted = convertOutParameterValue(value, pv);
+            pv.value(converted);
+            return converted;
         } catch( Throwable th ) {
             throw new CallException( Tags.PRODUCT_LABEL + "Error on get OUT '" + pv.id() + "' parameter value", th );
         }
+    }
+
+    /** Преобразует JDBC-значение OUT-параметра в прикладное значение. */
+    private Object convertOutParameterValue( Object value, PV pv )
+            throws SQLException {
+        if( value == null )
+            return null;
+
+        if( value instanceof Array )
+            return convertOutArray((Array)value, pv);
+
+        if( value instanceof Struct
+                && pv.pm().getParameterType() != null ) {
+            final Struct struct = (Struct)value;
+            final IStructMapper mapper = getEntityMetaData(
+                    pv.pm().getParameterType()
+            ).getStructMapper(
+                    getTaskContext(), struct.getSQLTypeName()
+            );
+            return mapper.from(struct);
+        }
+
+        if( value instanceof ResultSet ) {
+            if( pv.pm().getParameterType() != null
+                    && pv.pm().getParameterType() != ResultSet.class )
+                return RSUtils.createIterator(
+                        (ResultSet)value, pv.pm().getParameterType()
+                );
+            return value;
+        }
+
+        if( Integer.valueOf(-1024).equals(pv.pm().getSQLType()) )
+            return convertOutJsonStruct((String)value, pv.pm());
+
+        if( Integer.valueOf(-1025).equals(pv.pm().getSQLType()) )
+            return convertOutJsonArray((String)value, pv.pm());
+
+        return pv.pm().getParameterType() == null
+                ? Jt2St.r_convert(value)
+                : TypeConverter.convert(
+                        value, pv.pm().getParameterType()
+                );
+    }
+
+    /** Читает SQL ARRAY и гарантированно освобождает объект драйвера. */
+    private Object convertOutArray( Array array, PV pv ) throws SQLException {
+        Throwable failure = null;
+
+        try {
+            List<Object> values = Arrays.asList(
+                    (Object[])array.getArray()
+            );
+
+            if( pv.pm().getParameterType() != null ) {
+                final Class<?> targetType = pv.pm().getParameterType();
+                final List<Object> converted =
+                        new ArrayList<>(values.size());
+                boolean converterPrepared = false;
+
+                for( Object item : values ) {
+                    if( !converterPrepared && item != null ) {
+                        if( item instanceof Struct )
+                            getEntityMetaData(targetType).getStructMapper(
+                                    getTaskContext(),
+                                    ((Struct)item).getSQLTypeName()
+                            );
+                        converterPrepared = true;
+                    }
+                    converted.add(TypeConverter.convert(item, targetType));
+                }
+                values = converted;
+            }
+            return values;
+        }
+        catch( SQLException | RuntimeException | Error th ) {
+            failure = th;
+            throw th;
+        }
+        finally {
+            try {
+                array.free();
+            }
+            catch( SQLException freeFailure ) {
+                if( failure == null )
+                    throw freeFailure;
+                failure.addSuppressed(freeFailure);
+            }
+        }
+    }
+
+    /** Преобразует JSON_STRUCT с учётом текущего TaskContext. */
+    private Object convertOutJsonStruct(
+            String json,
+            ParameterMetadata<?> parameter
+    ) {
+        final Class<?> javaType = parameter.getParameterType();
+
+        if( parameter.getElementType() == null )
+            return javaType == null
+                    ? json
+                    : getEntityMetaData(javaType)
+                            .getJSonMapper().fromJson(json);
+
+        final StructMetaData metaData = StructMetaData.get(
+                getTaskContext(), parameter.getElementType()
+        );
+        final Struct struct = metaData.fromJson(
+                getTaskContext(), json
+        );
+        return javaType == null
+                ? struct
+                : metaData.getMapper(javaType).from(struct);
+    }
+
+    /** Преобразует JSON_ARRAY с учётом текущего TaskContext. */
+    private Object convertOutJsonArray(
+            String json,
+            ParameterMetadata<?> parameter
+    ) {
+        final Class<?> javaType = parameter.getParameterType();
+
+        if( parameter.getElementType() == null )
+            return javaType == null
+                    ? json
+                    : getEntityMetaData(javaType)
+                            .getJSonMapper().fromJsonArray(json);
+
+        final ArrayMetaData arrayMetaData = ArrayMetaData.get(
+                getTaskContext(), parameter.getElementType()
+        );
+        final StructMetaData structMetaData = StructMetaData.get(
+                getTaskContext(), arrayMetaData.getBaseTypeName()
+        );
+        final List<Struct> structs = structMetaData.fromJsonArray(
+                getTaskContext(), json
+        );
+
+        if( javaType == null )
+            return structs;
+
+        final IStructMapper mapper = structMetaData.getMapper(javaType);
+        final List<Object> result = new ArrayList<>(structs.size());
+        for( Struct struct : structs )
+            result.add(struct == null ? null : mapper.from(struct));
+        return result;
     }
 
     /** */
@@ -859,166 +865,175 @@ public class CallWork implements AutoCloseable {
         }
     }
 
-    /** */
-    private void initJdbcStatement( AutoCloseableList resources ) throws CallException {
+    /** Один раз готовит SQL, позиции параметров и констант. */
+    private void prepareExecutionPlan() {
+        if( jdbcSql != null )
+            return;
 
-        String sql = null;
+        constantList.clear();
+        returnPv = null;
+        pvMap.values().forEach(pv -> pv.posList.clear());
+
+        String sql = callStatement.prepareSql(
+                AbstractCallMakerBase.createPLSqlMaker(QUERY),
+                this::registerParameterPosition
+        );
+
+        final List<Integer> hiddenPositions = U.toList(
+                pvMap.values().stream()
+                        .filter(PV::isBound)
+                        .filter(pv -> !pv.pm.isLogValue())
+                        .flatMap(pv -> pv.posList.stream())
+                        .iterator()
+        );
+
+        if( !hiddenPositions.isEmpty() ) {
+            final StringBuilder builder = new StringBuilder(sql);
+            if( S.lastChar(sql) != '\n' )
+                builder.append('\n');
+            builder.append("--lhv:").append(
+                    hiddenPositions.stream()
+                            .map(String::valueOf)
+                            .collect(Collectors.joining(","))
+            );
+            sql = builder.toString();
+        }
+
+        returnPv = pvMap.values().stream()
+                .filter(PV::isBound)
+                .filter(pv -> pv.isOut() && pv.pm().isReturnValue())
+                .findFirst()
+                .orElseGet(() -> {
+                    final PV byReturn = pvMap.get("return#");
+                    if( byReturn != null && byReturn.isBound() )
+                        return byReturn;
+                    final PV byUnderscore = pvMap.get("_return");
+                    return byUnderscore != null && byUnderscore.isBound()
+                            ? byUnderscore
+                            : null;
+                });
+
+        jdbcSql = sql;
+    }
+
+    /** Регистрирует позицию bind-параметра или SQL-константы. */
+    private void registerParameterPosition(
+            Integer position,
+            Comparable identifier,
+            Object value
+    ) {
+        if( identifier instanceof Token.TypeEnum ) {
+            constantList.add(Pair.makePair(position, value));
+            return;
+        }
+
+        PV parameter = pvMap.get(identifier);
+        if( parameter == null ) {
+            final ParameterMetadata<?> metadata =
+                    getStatementParameter(identifier);
+            if( metadata == null )
+                throw new CallException(
+                        Tags.PRODUCT_LABEL + "No parameter with Id "
+                                + identifier
+                );
+            parameter = new PV(metadata);
+            pvMap.put((Comparable<?>)parameter.id(), parameter);
+        }
+        parameter.add(position);
+    }
+
+    /** Открывает statement и выполняет его первоначальную настройку. */
+    private void initJdbcStatement( AutoCloseableList resources )
+            throws CallException {
+        prepareExecutionPlan();
+        hasResultSet = false;
 
         try {
-
-            constantList.clear();
-            hasResultSet = false;
-
-            if( !wasCreated )
-                pvMap.values().forEach( pv -> pv.posList.clear() );
-
-            final TriConsumer<Integer,Comparable,Object> handler;
-
-            if( wasCreated )
-                handler = ( pos, id, value ) -> {
-                    if( id instanceof Token.TypeEnum )
-                        constantList.add( Pair.makePair( pos, value ) );
-                };
-            else
-                handler = ( pos, id, value ) -> {
-
-                    if( id instanceof Integer ) {
-
-                        PV<Integer,?> pv = pvMap.get(id);
-
-                        if( pv == null ) {
-                            final ParameterMetadata pm = getStatementParameter(id); //callStatement.getParameter((Integer)id);
-                            pv = new PV( pm );
-                            pvMap.put( pv.id(), pv );
-                        }
-                        pv.add( pos );
-                    }
-
-                    else if( id instanceof String ) {
-
-                        PV<String,?> pv = pvMap.get(id);
-
-                        if( pv == null ) {
-                            final ParameterMetadata pm = getStatementParameter(id); //callStatement.getParameter( (String)id );
-                            pv = new PV( pm );
-                            pvMap.put( pv.id(), pv );
-                        }
-
-                        pv.add( pos );
-                    }
-                    else if( id instanceof Token.TypeEnum ) {
-                        constantList.add( Pair.makePair(pos,value) );
-                    }
-                };
-
-            sql = this.callStatement.prepareSql( AbstractCallMakerBase.createPLSqlMaker(QUERY), handler );
-
-            // Добавляем список скрытых значений параметров
-            {
-                final List<Integer> hList = U.toList(pvMap.values().stream().filter(( pv ) -> !pv.pm.isLogValue()).<Integer>flatMap(( pv ) -> pv.posList.stream()).iterator());
-
-                if( !hList.isEmpty() )
-                {
-                    // StringBuilder sb = new StringBuilder("\n--lhv:");
-                    final StringBuilder sb = new StringBuilder(sql);
-
-                    if( S.lastChar(sql) != '\n' )
-                        sb.append('\n');
-
-                    sb.append( "--lhv:" ).append (
-                            hList.stream().map((i)->Integer.toString(i)).collect( Collectors.joining(",") )
-                    );
-
-                    sql = sb.toString();
-                }
-            }
-
-            try {
-
-                if( callStatement.isPrepared() )
-                {
-                    if( callStatement.hasOutParameters() )
-                        jdbcStatement = tc.getConnection().prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-                    else
-                        jdbcStatement = tc.getConnection().prepareStatement(sql);
-                }
-                else
-                    jdbcStatement = tc.getConnection().prepareCall(sql);
-
-            } catch( SQLException ex ) {
-                throw new CallException( Tags.PRODUCT_LABEL + "Error on jdbc call 'callableStatement.prepareXXX'", ex );
-            }
-
-            // Устанавливаем значение констант, если они есть
-            setConstantValues();
-
-            // Устанавливаем IN параметры //
-            for( PV pv : U.iterable( pvMap.values().stream().filter(PV::isIn).sorted( new Comparator<PV>() {
-                @Override
-                public int compare( PV o1, PV o2 ) {
-                    return Integer.compare( (Integer)o1.posList.get(0), (Integer)o2.posList.get(0) );
-                }
-            }).iterator() )
-            )
-            {
-                setParameterValue( jdbcStatement, pv, resources );
-            }
-
-            final boolean doFixTypes = getTaskContext().isPostgreSql();
-
-            // Настраиваем OUT параметры
-            if( jdbcStatement instanceof CallableStatement )
-            {
-                for( PV pv : pvMap.values() )
-                {
-                    if (!pv.isOut())
-                        continue;
-
-                    try {
-
-                        final List<Integer> posList = pv.posList();
-
-                        for( int pos : posList )
-                        {
-                            if ( /*tc.isOracle()*/ !doFixTypes && pv.pm().getElementType() != null)
-                                ((CallableStatement) jdbcStatement).registerOutParameter( pos, type2code(pv.pm().getSQLType()), pv.pm().getElementType() );
-                            else
-                                ((CallableStatement) jdbcStatement).registerOutParameter( pos, type2code(pv.pm().getSQLType()) );
-                        }//end if
-                    } catch (Throwable th) {
-                        throw new CallException(Tags.PRODUCT_LABEL + "Error on registerOutParameter", th);
-                    }
-                }//end for
+            if( callStatement.isPrepared() ) {
+                jdbcStatement = callStatement.hasOutParameters()
+                        ? tc.getConnection().prepareStatement(
+                                jdbcSql, Statement.RETURN_GENERATED_KEYS)
+                        : tc.getConnection().prepareStatement(jdbcSql);
             }
             else
-            {
-//                // если через PreparedStatement то
-//                int pos = 0;
-//                for( ParameterMetadata<?> pm : callStatement.getParameterIter(true) )
-//                {
-//                    if(!pvMap.containsKey( pm.getIdentifier()) )
-//                    {
-//                        PV pv = new PV(getStatementParameter(pm.getIdentifier()));
-//                        pv.add( ++pos );
-//                        pvMap.put(pm.getIdentifier(), pv );
-//                    }
-//                    else
-//                        pos++;
-//                }//end for
-            }
+                jdbcStatement = tc.getConnection().prepareCall(jdbcSql);
 
-            // Ищем return параметр, если есть
-            final Optional<PV> optRet = pvMap.values().stream().filter(pv -> pv.isOut() && pv.pm().isReturnValue()).findFirst();
-
-            // если не нашли, то ищем спец параметр с именем return#
-            returnPv = optRet.orElseGet(() -> U.nvl(pvMap.get("return#"), pvMap.get("_return")));
-
-            wasCreated = true;
-
-        } catch( Throwable th ) {
-            close();
-            CallException.throwOnPrepareJDBCCallable( sql, th );
+            bindInputParameters(resources);
+            registerOutParameters();
         }
+        catch( Throwable th ) {
+            final PreparedStatement statement = jdbcStatement;
+            jdbcStatement = null;
+            if( statement != null ) {
+                try {
+                    statement.close();
+                }
+                catch( Throwable closeFailure ) {
+                    th.addSuppressed(closeFailure);
+                }
+            }
+            CallException.throwOnPrepareJDBCCallable(jdbcSql, th);
+        }
+    }
+
+    /** Устанавливает константы и IN/INOUT-параметры в порядке SQL-позиций. */
+    private void bindInputParameters( AutoCloseableList resources ) {
+        setConstantValues();
+
+        pvMap.values().stream()
+                .filter(PV::isBound)
+                .filter(PV::isIn)
+                .sorted(Comparator.comparingInt(
+                        pv -> (Integer)pv.posList().get(0)))
+                .forEach(pv -> setParameterValue(
+                        jdbcStatement, pv, resources));
+    }
+
+    /** Регистрирует OUT/INOUT-параметры CallableStatement. */
+    private void registerOutParameters() {
+        if( !(jdbcStatement instanceof CallableStatement) )
+            return;
+
+        final CallableStatement statement =
+                (CallableStatement)jdbcStatement;
+        final boolean postgreSql = getTaskContext().isPostgreSql();
+
+        try {
+            for( PV pv : pvMap.values() ) {
+                if( !pv.isBound() || !pv.isOut() )
+                    continue;
+
+                final List<Integer> positions = pv.posList();
+                for( int position : positions ) {
+                    if( !postgreSql
+                            && !S.isNullOrEmpty(pv.pm().getElementType()) )
+                        statement.registerOutParameter(
+                                position,
+                                type2code(pv.pm().getSQLType()),
+                                pv.pm().getElementType()
+                        );
+                    else
+                        statement.registerOutParameter(
+                                position,
+                                type2code(pv.pm().getSQLType())
+                        );
+                }
+            }
+        }
+        catch( Throwable th ) {
+            throw new CallException(
+                    Tags.PRODUCT_LABEL + "Error on registerOutParameter",
+                    th
+            );
+        }
+    }
+
+    /** Готовит statement к очередному выполнению. */
+    private void prepareExecution( AutoCloseableList resources ) {
+        if( jdbcStatement == null )
+            initJdbcStatement(resources);
+        else
+            bindInputParameters(resources);
     }
 
     /** */
@@ -1038,19 +1053,15 @@ public class CallWork implements AutoCloseable {
             {
                 final String outPrmName  = tc.dialect().outName( U.nvl( md.getColumnLabel(i), md.getColumnName(i) ) );
                 final Object outColValue = rs.getObject(i);
-                getOrCreateParameter( outPrmName, null ).ifPresent (
+                getOrCreateParameter( outPrmName ).ifPresent (
                     (pv)->{
 
                         Object value = getOutParameterValue( outColValue, pv );
-                        pv.value(value);
 
                         if( commonOutListener != null )
                             commonOutListener.accept( pv.id(), value );
 
-                        if( !hasResultSet && closeAfterExecute && value != null ) {
-                            if( value instanceof ResultSet || value instanceof Iterator)
-                                hasResultSet = true;
-                        }
+                        registerDeferredResult(value);
                     }
                 );
 
@@ -1058,109 +1069,150 @@ public class CallWork implements AutoCloseable {
         }//end try
     }
 
+    /** Выполняет JDBC statement и гарантированно восстанавливает autoCommit. */
+    private void executeJdbcStatement( boolean prepared ) {
+        final boolean switchAutoCommit = callStatement.isAutoCommit()
+                && !tc.isAutoCommit();
+        Throwable failure = null;
 
-    /** Выполнение запроса */
-    public CallWork execute( ) throws CallException {
+        try {
+            if( switchAutoCommit )
+                tc.setAutoCommit(true);
 
-        try( AutoCloseableList resources = new AutoCloseableList() ) {
-
-            if( jdbcStatement == null )
-                initJdbcStatement( resources );
+            if( prepared && callStatement.hasOutParameters() )
+                executeRSReturning();
+            else if( executeLarge )
+                jdbcStatement.executeLargeUpdate();
             else
-            {
-                setConstantValues();
-
-                for( PV pv : pvMap.values() ) {
-
-                    if( !pv.isIn() )
-                        continue;
-
-                    setParameterValue( jdbcStatement, pv, resources );
-                }
-            }
-
-            boolean isPrepared = !(jdbcStatement instanceof CallableStatement);
-            final boolean switchAutoCommit = callStatement.isAutoCommit() && !tc.isAutoCommit();
-
-            // Выполнение
-            try {
-
-                if( switchAutoCommit )
-                    tc.setAutoCommit(true);
-
-                if( isPrepared )
-                {
-                    if( callStatement.hasOutParameters() ) {
-                        executeRSReturning( );
-                    }
-                    else
-                    {
-                        long affected = executeLarge ? jdbcStatement.executeLargeUpdate() : jdbcStatement.executeUpdate();
-                    }
-                }
-                else
-                {
-                    long affected = executeLarge ? jdbcStatement.executeLargeUpdate() : jdbcStatement.executeUpdate();
-                }
-
-            } catch( SQLException ex ) {
-                throw new JInvDbException( ex, this.callStatement.prepareSql( AbstractCallMakerBase.createPLSqlMaker(QUERY), ( integer, o, o2 ) -> {} ) );
-            }
-            finally {
-                if( switchAutoCommit )
-                    tc.setAutoCommit(false);
-            }
-
-            if( !isPrepared )
-            {
-                // Получение значений OUT параметров
-                for( PV pv : U.<PV>iterable( U.mapIter( pvMap.values().iterator(), null, PV::isOut ) ) )
-                {
-                    Object v = getOutCallableParameterValue( (CallableStatement)jdbcStatement, pv );
-
-                    // если есть глобальный слушатель на все OUT параметры
-                    if( commonOutListener != null )
-                        commonOutListener.accept( pv.id(), v );
-
-                    // Если в OUT параметрах был ResultSet то не закрываем statement
-                    if( !hasResultSet && closeAfterExecute && v != null ) {
-                        if( v instanceof ResultSet || v instanceof Iterator )
-                            hasResultSet = true;
-                    }
-                }//end for
-            }
-
-            jdbcStatement.clearParameters();
-
+                jdbcStatement.executeUpdate();
         }
-        catch( Throwable th ) {
-            throw new CallException( Tags.PRODUCT_LABEL + "Error on execute stored work", th );
+        catch( SQLException ex ) {
+            failure = new JInvDbException(ex, jdbcSql);
+            throw (JInvDbException)failure;
+        }
+        catch( RuntimeException | Error th ) {
+            failure = th;
+            throw th;
         }
         finally {
-            if( closeAfterExecute )
-                close( );
+            if( switchAutoCommit ) {
+                try {
+                    tc.setAutoCommit(false);
+                }
+                catch( RuntimeException | Error restoreFailure ) {
+                    if( failure == null )
+                        throw restoreFailure;
+                    failure.addSuppressed(restoreFailure);
+                }
+            }
         }
+    }
 
-        return this;
+    /** Читает значения OUT/INOUT-параметров CallableStatement. */
+    private void readCallableOutParameters() {
+        final CallableStatement statement =
+                (CallableStatement)jdbcStatement;
+
+        for( PV pv : pvMap.values() ) {
+            if( !pv.isBound() || !pv.isOut() )
+                continue;
+
+            final Object value = getOutCallableParameterValue(statement, pv);
+
+            if( commonOutListener != null )
+                commonOutListener.accept(pv.id(), value);
+
+            registerDeferredResult(value);
+        }
+    }
+
+    /** Отмечает результат, из-за которого statement должен закрыться позднее. */
+    private void registerDeferredResult( Object value ) {
+        if( !hasResultSet && closeAfterExecute && value != null
+                && (value instanceof ResultSet || value instanceof Iterator) )
+            hasResultSet = true;
+    }
+
+    /** Выполнение запроса. */
+    public CallWork execute( ) throws CallException {
+        CallException failure = null;
+
+        try( AutoCloseableList resources = new AutoCloseableList(false) ) {
+            prepareExecution(resources);
+
+            final boolean prepared =
+                    !(jdbcStatement instanceof CallableStatement);
+            executeJdbcStatement(prepared);
+
+            if( !prepared )
+                readCallableOutParameters();
+
+            return this;
+        }
+        catch( Throwable th ) {
+            failure = new CallException(
+                    Tags.PRODUCT_LABEL + "Error on execute stored work",
+                    th
+            );
+            throw failure;
+        }
+        finally {
+            Throwable cleanupFailure = null;
+
+            if( jdbcStatement != null ) {
+                try {
+                    jdbcStatement.clearParameters();
+                }
+                catch( Throwable th ) {
+                    cleanupFailure = th;
+                }
+            }
+
+            if( closeAfterExecute ) {
+                try {
+                    closeJdbcStatement();
+                }
+                catch( Throwable th ) {
+                    if( cleanupFailure == null )
+                        cleanupFailure = th;
+                    else
+                        cleanupFailure.addSuppressed(th);
+                }
+            }
+
+            if( cleanupFailure != null ) {
+                if( failure == null )
+                    throw new CallException(
+                            Tags.PRODUCT_LABEL
+                                    + "Error on cleanup stored work",
+                            cleanupFailure
+                    );
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
+    }
+
+    /** Закрывает statement или передаёт его под управление ResultSet. */
+    private void closeJdbcStatement() throws SQLException {
+        final PreparedStatement statement = jdbcStatement;
+        jdbcStatement = null;
+
+        if( statement == null )
+            return;
+
+        if( hasResultSet )
+            statement.closeOnCompletion();
+        else
+            statement.close();
     }
 
     /** */
     public void close() {
-
-        if( jdbcStatement != null )
-        {
-            try {
-                if( !hasResultSet ) {
-                    if( !jdbcStatement.isClosed() )
-                        jdbcStatement.close();
-                }
-                else
-                    jdbcStatement.closeOnCompletion();
-
-            } catch(SQLException e) {
-                e.printStackTrace();
-            }
-            jdbcStatement = null;
+        try {
+            closeJdbcStatement();
+        }
+        catch( SQLException ex ) {
+            logger.warn("Ошибка закрытия JDBC statement в CallWork", ex);
         }
     }
 
