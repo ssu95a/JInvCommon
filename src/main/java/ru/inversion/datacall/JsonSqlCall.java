@@ -455,24 +455,18 @@ public class JsonSqlCall implements IDataCall {
 
             storedProcWork.set( "plSql", jsonSql );
 
-            try {
+            final TaskContext tc = storedProcWork.getTaskContext();
+            final boolean switchAutoCommit = callStatement.isAutoCommit() && !tc.isAutoCommit();
 
-                if( callStatement.isAutoCommit() )
-                    storedProcWork.getTaskContext().getConnection().setAutoCommit(true);
+            try {
+                if( switchAutoCommit )
+                    tc.setAutoCommit(true);
 
                 storedProcWork.execute();
             }
-            catch( Throwable th ) {
-
-                if( callStatement.isAutoCommit() )
-                    storedProcWork.getTaskContext().getConnection().setAutoCommit(false);
-
-                throw th;
-            }
             finally {
-
-                if( callStatement.isAutoCommit() )
-                    storedProcWork.getTaskContext().getConnection().setAutoCommit(false);
+                if( switchAutoCommit )
+                    tc.setAutoCommit(false);
             }
 
             String o = storedProcWork.get("rsltInf");
@@ -482,8 +476,6 @@ public class JsonSqlCall implements IDataCall {
 
             if( parametersValues != null && o != null )
             {
-                final TaskContext tc = storedProcWork.getTaskContext( );
-
                 final JsonReader jr = Json.createReader(new StringReader(o));
                 final JsonObject jo = jr.readObject();
 
