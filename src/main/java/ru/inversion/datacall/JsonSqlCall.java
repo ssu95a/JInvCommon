@@ -199,7 +199,7 @@ public class JsonSqlCall implements IDataCall {
     }
 
     /** */
-    private String prepareJson( Map<String,String> substMap )
+    String prepareJson( Map<String,String> substMap )
     {
         final StringWriter sw = new StringWriter( );
 
