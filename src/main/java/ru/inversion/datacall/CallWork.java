@@ -353,9 +353,11 @@ public class CallWork implements AutoCloseable {
     /** */
     private SQLXML getSqlXmlValue( ParameterMetadata pm, Object value ) throws CallException {
 
+        SQLXML sqlXml = null;
+
         try {
 
-            final SQLXML sqlXml = getTaskContext().getConnection().createSQLXML();
+            sqlXml = getTaskContext().getConnection().createSQLXML();
 
             if( value instanceof String )
                 sqlXml.setString( (String)value );
@@ -384,6 +386,15 @@ public class CallWork implements AutoCloseable {
             return sqlXml;
         }
         catch( Throwable th ) {
+            if( sqlXml != null )
+            {
+                try {
+                    sqlXml.free();
+                }
+                catch( Throwable closeError ) {
+                    th.addSuppressed(closeError);
+                }
+            }
             throw new CallException( Tags.PRODUCT_LABEL + "Error creating a parameter of type SQLXML '" + pm.getElementType() + "'", th );
         }
     }
@@ -460,7 +471,12 @@ public class CallWork implements AutoCloseable {
                     array = ArrayMetaData.createArray( getTaskContext(), pm.getElementType(), col );
                 }
 
-                return arrayMetaData.toJson(array);
+                try {
+                    return arrayMetaData.toJson(array);
+                }
+                finally {
+                    array.free();
+                }
             }
             else
             {
@@ -473,14 +489,13 @@ public class CallWork implements AutoCloseable {
     }
 
     /** Устанавливает значение параметра в CallableStatement */
-    private void setParameterValue( PreparedStatement cs, PV pv ) throws CallException {
+    private void setParameterValue( PreparedStatement cs, PV pv, AutoCloseableList resources ) throws CallException {
 
         Object originalValue = pv.value();
 
         Object handleValue   = originalValue;
 
-        try( AutoCloseableList acList = new AutoCloseableList() )
-        {
+        try {
             if( originalValue != null )
             {
                 if( pv.pm().getSQLType() != null )
@@ -495,6 +510,8 @@ public class CallWork implements AutoCloseable {
                             try {
                                 Collection col = (Collection)originalValue;
                                 handleValue = getArrayValue( pv.pm(), col );
+                                final Array array = (Array)handleValue;
+                                resources.add( array::free );
                             }
                             catch( ClassCastException e ) {
                                 throw new IllegalStateException( Tags.PRODUCT_LABEL + "Для параметра типа ARRAY значение должно быть Collection<T>", e );
@@ -519,31 +536,37 @@ public class CallWork implements AutoCloseable {
                     {
                         handleValue = getJsonArrayValue( pv.pm, originalValue );
                     }
-                    else if( pv.pm().getSQLType() == Types.CLOB )
-                    {
-                        if( originalValue instanceof String )
-                            handleValue = new StringReader( (String)originalValue );
-                    }
                     else if( pv.pm().getSQLType() == Types.SQLXML )
                     {
-                        handleValue = getSqlXmlValue( pv.pm, originalValue );
+                        if( !(originalValue instanceof SQLXML) && !(originalValue instanceof File) )
+                        {
+                            handleValue = getSqlXmlValue( pv.pm, originalValue );
+                            final SQLXML sqlXml = (SQLXML)handleValue;
+                            resources.add( sqlXml::free );
+                        }
                     }
                 }
-
-                if( originalValue instanceof File )
-                {
-                    FileInputStream is = new FileInputStream( (File)originalValue );
-                    acList.add(is);
-                    handleValue = is;
-                }
             }
-
-            final Object v = Jt2St.convert(handleValue);
 
             final List<Integer> list = pv.posList();
 
             for( int idx : list )
             {
+                Object positionValue = handleValue;
+
+                if( originalValue instanceof File )
+                {
+                    final FileInputStream is = new FileInputStream( (File)originalValue );
+                    resources.add(is);
+                    positionValue = is;
+                }
+                else if( Integer.valueOf(Types.CLOB).equals(pv.pm().getSQLType()) && originalValue instanceof String )
+                {
+                    positionValue = new StringReader( (String)originalValue );
+                }
+
+                final Object v = Jt2St.convert(positionValue);
+
                 /*
                 if( v == null && pv.pm().getSQLType() != null )
                 {
@@ -776,7 +799,7 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
-    private void initJdbcStatement( ) throws CallException {
+    private void initJdbcStatement( AutoCloseableList resources ) throws CallException {
 
         String sql = null;
 
@@ -881,7 +904,7 @@ public class CallWork implements AutoCloseable {
             }).iterator() )
             )
             {
-                setParameterValue( jdbcStatement, pv );
+                setParameterValue( jdbcStatement, pv, resources );
             }
 
             final boolean doFixTypes = getTaskContext().isPostgreSql();
@@ -981,10 +1004,10 @@ public class CallWork implements AutoCloseable {
     /** Выполнение запроса */
     public CallWork execute( ) throws CallException {
 
-        try {
+        try( AutoCloseableList resources = new AutoCloseableList() ) {
 
             if( jdbcStatement == null )
-                initJdbcStatement( );
+                initJdbcStatement( resources );
             else
             {
                 for( PV pv : pvMap.values() ) {
@@ -992,7 +1015,7 @@ public class CallWork implements AutoCloseable {
                     if( !pv.isIn() )
                         continue;
 
-                    setParameterValue( jdbcStatement, pv );
+                    setParameterValue( jdbcStatement, pv, resources );
                 }
             }
 
