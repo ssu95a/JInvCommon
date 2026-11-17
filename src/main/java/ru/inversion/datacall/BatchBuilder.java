@@ -122,13 +122,17 @@ BatchBuilder<T> {
         return this;
     }
 
-    /** */
+    /** При true commit/rollback применяется ко всей транзакции соединения TaskContext. */
     public BatchBuilder<T> commitBatch( boolean v )
     {
         commitBatch = v;
         return this;
     }
-    /** */
+    /**
+     * Продолжает работу после ошибки преобразования строки. После ошибки JDBC batch
+     * продолжение возможно лишь при autoCommit либо после успешного rollback
+     * при commitBatch(true). Внешнюю транзакцию загрузчик не откатывает.
+     */
     public BatchBuilder<T> continueOnError(boolean v)
     {
         continueOnError = v;
@@ -142,9 +146,11 @@ BatchBuilder<T> {
     }
 
     /** */
-    private PreparedStatement createPreparedStatement( ) throws CallException {
+    private IBatchLoader<T> createBatchLoader( ) throws CallException {
 
         try {
+
+            BiConsumer<T, PreparedStatement> rowMapper = mapper;
 
             if( batchMode == BatchModeEnum.MERGE || batchMode == BatchModeEnum.UPDATE )
                 throw new UnsupportedOperationException( Tags.PRODUCT_LABEL + "'" + batchMode + "' mode is not supported yet" );
@@ -209,8 +215,8 @@ BatchBuilder<T> {
                         );
                 }
 
-                if( mapper == null )
-                    mapper = new BiConsumer< T, PreparedStatement >() {
+                if( rowMapper == null )
+                    rowMapper = new BiConsumer< T, PreparedStatement >() {
                         @Override
                         public void accept( T t, PreparedStatement ps ) {
 
@@ -262,8 +268,8 @@ BatchBuilder<T> {
                             }
                     );
 
-                    if( mapper == null )
-                        mapper = new BiConsumer< T, PreparedStatement >() {
+                    if( rowMapper == null )
+                        rowMapper = new BiConsumer< T, PreparedStatement >() {
                             @Override
                             public void accept( T t, PreparedStatement ps ) {
 
@@ -301,7 +307,13 @@ BatchBuilder<T> {
             if( statementText == null )
                 throw new IllegalStateException( Tags.PRODUCT_LABEL + "Error on make SQL statementText for JDBC PreparedStatement: Неопределяемые параметры настройки." );
 
-            return tc.getConnection().prepareStatement( statementText );
+            return new BatchLoaderImp<T>(
+                    tc.getConnection().prepareStatement(statementText),
+                    rowMapper,
+                    batchSize,
+                    commitBatch,
+                    continueOnError
+            );
         }
         catch( Throwable th ) {
             throw new CallException( Tags.PRODUCT_LABEL + "Error on prepare 'prepareStatement'", th );
@@ -332,13 +344,7 @@ BatchBuilder<T> {
         if( batchMode == BatchModeEnum.CUSTOM && ( this.url == null || S.isNullOrEmpty(name) ) )
             throw new UnsupportedOperationException( Tags.PRODUCT_LABEL + "Для режима 'CUSTOM' необходимо установить атрибут 'url' и 'name'");
 
-        return new BatchLoaderImp<T>(
-            createPreparedStatement(),
-            mapper,
-            batchSize,
-            commitBatch,
-            continueOnError
-        );
+        return createBatchLoader();
     }
 
     static private class BatchLoaderImp<T> implements IBatchLoader<T> {
@@ -381,6 +387,7 @@ BatchBuilder<T> {
         public BatchLoaderImp execute() throws CallException {
 
             boolean executeStarted = false;
+            CallException failure = null;
 
             try {
 
@@ -401,22 +408,19 @@ BatchBuilder<T> {
                     fireBatchEvent( BatchEvent.Type.PREPARE_ITEM, true, itemCount, t );
 
                     try {
-
                         ps.clearParameters();
-                        mapper.accept( t, ps );
-
+                        try {
+                            mapper.accept( t, ps );
+                        }
+                        catch( Throwable th ) {
+                            if( !continueOnError )
+                                throw th;
+                            fireThrowableEvent( BatchEvent.Type.PREPARE_ITEM, itemCount, t, th );
+                            continue;
+                        }
                         ps.addBatch();
                         pendingCount++;
-
                         fireBatchEvent( BatchEvent.Type.PREPARE_ITEM, false, itemCount, t );
-                    }
-                    catch( Throwable th ) {
-                        if( continueOnError )
-                        {
-                            fireThrowableEvent( BatchEvent.Type.PREPARE_ITEM, itemCount, t, th );
-                        }
-                        else
-                            throw th;
                     }
                     finally {
                         itemCount++;
@@ -442,12 +446,25 @@ BatchBuilder<T> {
                 catch( Throwable cleanupFailure ) {
                     th.addSuppressed(cleanupFailure);
                 }
-                throw new CallException( Tags.PRODUCT_LABEL + "Error on execute batch loader", th );
+                failure = new CallException( Tags.PRODUCT_LABEL + "Error on execute batch loader", th );
             }
             finally {
                 if( executeStarted )
-                    fireBatchEvent( BatchEvent.Type.EXECUTE, false, 0, null );
+                    try {
+                        fireBatchEvent( BatchEvent.Type.EXECUTE, false, 0, null );
+                    }
+                    catch( Throwable afterFailure ) {
+                        if( failure == null )
+                            failure = new CallException(
+                                    Tags.PRODUCT_LABEL + "Error on execute batch loader",
+                                    afterFailure );
+                        else
+                            failure.addSuppressed(afterFailure);
+                    }
             }
+
+            if( failure != null )
+                throw failure;
             return this;
         }
 
@@ -456,14 +473,23 @@ BatchBuilder<T> {
 
             Throwable failure = null;
             boolean clearFailed = false;
+            boolean rollbackFailed = false;
+            boolean commitFailed = false;
 
             fireBatchEvent( BatchEvent.Type.PROCESS_BATCH, true, batchIndex, null );
 
             try {
                 ps.executeBatch();
 
-                if( commitBatch )
-                    ps.getConnection().commit();
+                if( commitBatch ) {
+                    try {
+                        ps.getConnection().commit();
+                    }
+                    catch( Throwable th ) {
+                        commitFailed = true;
+                        throw th;
+                    }
+                }
             }
             catch( Throwable th ) {
                 failure = th;
@@ -473,6 +499,7 @@ BatchBuilder<T> {
                         ps.getConnection().rollback();
                     }
                     catch( Throwable rollbackFailure ) {
+                        rollbackFailed = true;
                         th.addSuppressed(rollbackFailure);
                     }
             }
@@ -494,7 +521,21 @@ BatchBuilder<T> {
                 return;
             }
 
-            if( continueOnError && !clearFailed )
+            // При внешней транзакции JDBC batch мог выполнить часть строк.
+            // Без rollback продолжать работу в этой транзакции нельзя.
+            boolean canContinue = continueOnError
+                    && !clearFailed && !rollbackFailed && !commitFailed;
+            if( canContinue && !commitBatch ) {
+                try {
+                    canContinue = ps.getConnection().getAutoCommit();
+                }
+                catch( Throwable stateFailure ) {
+                    failure.addSuppressed(stateFailure);
+                    canContinue = false;
+                }
+            }
+
+            if( canContinue )
                 fireThrowableEvent( BatchEvent.Type.PROCESS_BATCH, batchIndex, null, failure );
             else
                 throw failure;
@@ -527,19 +568,44 @@ BatchBuilder<T> {
 
             if( ps != null )
             {
-                fireBatchEvent( BatchEvent.Type.CLOSE, true, 0, null );
+                Throwable failure = null;
 
                 try {
+                    fireBatchEvent( BatchEvent.Type.CLOSE, true, 0, null );
+                }
+                catch( Throwable th ) {
+                    failure = th;
+                }
 
-                    if( !ps.isClosed() )
-                         ps.close();
-
+                try {
+                    ps.close();
                     ps = null;
                 }
-                catch( SQLException ignored ) {
+                catch( Throwable closeFailure ) {
+                    if( failure == null )
+                        failure = closeFailure;
+                    else
+                        failure.addSuppressed(closeFailure);
                 }
 
-                fireBatchEvent( BatchEvent.Type.CLOSE, false, 0, null );
+                try {
+                    fireBatchEvent( BatchEvent.Type.CLOSE, false, 0, null );
+                }
+                catch( Throwable afterFailure ) {
+                    if( failure == null )
+                        failure = afterFailure;
+                    else
+                        failure.addSuppressed(afterFailure);
+                }
+
+                if( failure instanceof RuntimeException )
+                    throw (RuntimeException) failure;
+                if( failure instanceof Error )
+                    throw (Error) failure;
+                if( failure != null )
+                    throw new CallException(
+                            Tags.PRODUCT_LABEL + "Error on close batch loader",
+                            failure );
             }
         }
     }
