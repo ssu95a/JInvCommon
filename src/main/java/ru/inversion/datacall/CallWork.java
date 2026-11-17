@@ -674,41 +674,44 @@ public class CallWork implements AutoCloseable {
                 // Чтение массива
                 if( value instanceof Array )
                 {
-                    Array a = (Array)value;
+                    final Array a = (Array)value;
 
-                    List<Object> list = Arrays.asList( (Object[])a.getArray() );
+                    try {
+                        List<Object> list = Arrays.asList( (Object[])a.getArray() );
 
-                    // конвертируем содержимое в JavaType, если задан
-                    if( list != null && pv.pm().getParameterType() != null ) {
+                        // конвертируем содержимое в JavaType, если задан
+                        if( list != null && pv.pm().getParameterType() != null ) {
 
-                        final Class toType = pv.pm().getParameterType();
+                            final Class toType = pv.pm().getParameterType();
 
-                        final List newList = new ArrayList<>(list.size());
+                            final List newList = new ArrayList<>(list.size());
 
-                        boolean doIt = true;
+                            boolean doIt = true;
 
-                        for( Object o : list ) {
+                            for( Object o : list ) {
 
-                            if( doIt && o != null )
-                            {
-                                if( o instanceof Struct )
+                                if( doIt && o != null )
                                 {
-                                    getEntityMetaData( pv.pm().getParameterType() )
-                                            .getStructMapper( getTaskContext(), ((Struct)o).getSQLTypeName() );
+                                    if( o instanceof Struct )
+                                    {
+                                        getEntityMetaData( pv.pm().getParameterType() )
+                                                .getStructMapper( getTaskContext(), ((Struct)o).getSQLTypeName() );
+                                    }
+
+                                    doIt = false;
                                 }
 
-                                doIt = false;
+                                newList.add( TypeConverter.convert( o, toType ) );
                             }
 
-                            newList.add( TypeConverter.convert( o, toType ) );
+                            list = newList;
                         }
 
-                        list = newList;
+                        value = list;
                     }
-
-                    a.free();
-
-                    value = list;
+                    finally {
+                        a.free();
+                    }
                 }
                 else if( value instanceof Struct && pv.pm().getParameterType() != null )
                 {
