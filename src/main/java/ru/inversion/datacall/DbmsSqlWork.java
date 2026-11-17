@@ -185,6 +185,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         return this;
     }
 
+    String preparedSql() { return plSql; }
     Integer resultCode() { return resultCode; }
     String resultInfo() { return resultInfo; }
 

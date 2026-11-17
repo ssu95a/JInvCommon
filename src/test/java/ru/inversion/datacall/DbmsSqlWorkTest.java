@@ -22,7 +22,7 @@ class DbmsSqlWorkTest {
     void exactAndMixedCaseRepeatsShareOneSlot() {
         DbmsSqlWork work = work("begin :A := nvl(:A, 0) + :a; end;", new ParametersValues());
         assertEquals(Collections.singletonList("b1"), work.vars);
-        assertEquals(3, occurrences(work.plSql, ":b1"));
+        assertEquals(3, occurrences(work.preparedSql(), ":b1"));
         work.close();
     }
 
@@ -34,8 +34,8 @@ class DbmsSqlWorkTest {
         DbmsSqlWork work = work("begin :BLOCK.ITEM := :b; :block.item := :B; end;", values);
         assertEquals(Arrays.asList("b1", "b2"), work.vars);
         assertEquals(Arrays.asList("first", "second"), work.inputValues());
-        assertEquals(2, occurrences(work.plSql, ":b1"));
-        assertEquals(2, occurrences(work.plSql, ":b2"));
+        assertEquals(2, occurrences(work.preparedSql(), ":b1"));
+        assertEquals(2, occurrences(work.preparedSql(), ":b2"));
         work.close();
     }
 
@@ -96,7 +96,7 @@ class DbmsSqlWorkTest {
         work.execute(null);
         assertEquals(1, launcher.executions);
         assertEquals(1, launcher.closes);
-        assertEquals(work.plSql, launcher.bound.get("plSql"));
+        assertEquals(work.preparedSql(), launcher.bound.get("plSql"));
         assertEquals(Collections.singletonList("b1"), launcher.bound.get("vars"));
         assertEquals(Collections.singletonList("first"), launcher.bound.get("vals"));
         assertEquals(Collections.emptyList(), launcher.bound.get("typs"));
