@@ -2,14 +2,12 @@ package ru.inversion.datacall;
 
 import ru.inversion.dataset.IParameters;
 import ru.inversion.meta.impl.work.IDBWork;
-import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.converter.TypeConverter;
 
 import java.sql.Types;
 import java.util.*;
-import java.util.function.BiConsumer;
 
 import static javax.persistence.ParameterMode.IN;
 import static javax.persistence.ParameterMode.OUT;
@@ -21,26 +19,24 @@ import static javax.persistence.ParameterMode.OUT;
  */
 public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
-    /** Метаданные */
-    //final private CallStatement callStatement;
-
-    /** БД */
-    final private TaskContext tc;
-
     /** Значения параметров из вне */
-    private IParameters callBackParameters;
+    private final IParameters callBackParameters;
 
     /** */
-    private CallWork storedProcWork;
+    private final CallWork storedProcWork;
 
     /** Подготовленный PL/SQL блок */
     final private String plSql;
 
-    /** Подстановка имен параметров */
-    final private Map<String,String> mapParamSubst = new HashMap<>();
-
     /** */
     final List<String> vars = new ArrayList<>();
+
+    /** Исходные имена в том же порядке, что и vars. */
+    private final List<String> parameterNames = new ArrayList<>();
+
+    /** Диагностика launcher-а без интерпретации неизвестного серверного кода. */
+    private Integer resultCode;
+    private String resultInfo;
 
     /**
     Выполнение SQL выражения через пакет DBSMS_SQL
@@ -70,67 +66,81 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
     /** */
     DbmsSqlWork( TaskContext tc, CallStatement callStatement, IParameters callBackParameters ) throws CallException {
-        this.tc                 = tc;
-        this.callBackParameters = callBackParameters;
+        this(callStatement, callBackParameters, initStoredProc(tc));
+    }
 
-        // подготовка выражения
+    /** Подмена только внутреннего вызова для теста контракта без Oracle. */
+    DbmsSqlWork(CallStatement callStatement, IParameters callBackParameters, CallWork storedProcWork) {
+        this.callBackParameters = callBackParameters;
+        this.storedProcWork = Objects.requireNonNull(storedProcWork, "storedProcWork");
+
+        // Идентичность имен совпадает с CallStatement и ParametersValues.
+        final Map<String,Integer> positions = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         this.plSql = callStatement.prepareSql(
-                new BiConsumer< Token, CallPrepareContext >() {
-                    int index = 0;
-                    @Override
-                    public void accept( Token t, CallPrepareContext c ) {
+                (t, c) -> {
                         switch(t.getType()) {
                             case NAMED_PARAMETER: {
-                                String oldParamName = t.getValue().toString();
-                                String newParamName = mapParamSubst.get(t.getValue().toString());
-
-                                if( newParamName == null )
-                                {
-                                    index++;
-                                    newParamName = "b" + index;
-                                    mapParamSubst.put( oldParamName, newParamName );
-                                    mapParamSubst.put( ":" + newParamName, oldParamName );
-
-                                    vars.add( newParamName );
+                                final String sourceName = t.getValue().toString();
+                                Integer index = positions.get(sourceName);
+                                if( index == null ) {
+                                    index = vars.size() + 1;
+                                    positions.put(sourceName, index);
+                                    vars.add("b" + index);
+                                    parameterNames.add(sourceName);
                                 }
+                                final String newParamName = vars.get(index - 1);
 
                                 c.append(" :").append(newParamName).sp();
 
                                 if( c.isCommentParameters() )
-                                    c.append("/* ").append( newParamName.substring(1) ).append(", :").append(t.getValue()).append(" */ ");
+                                    c.append("/* ").append(newParamName.substring(1)).append(", :").append(t.getValue()).append(" */ ");
                             }
                             break;
                             default:
                                 c.append(t);
                         }
-
-                    }
                 },
-                ( type, id, value ) -> {
-
-                }
+                (type, id, value) -> { }
         );
 
-        this.storedProcWork = initStoredProc(tc);
+    }
+
+    /** Читает значения непосредственно перед очередным запуском. */
+    List<String> inputValues() {
+        final List<String> vals = new ArrayList<>(vars.size());
+        for( String parameterName : parameterNames ) {
+            if( callBackParameters != null && callBackParameters.hasParameter(parameterName) ) {
+                final Object value = callBackParameters.getParameter(parameterName);
+                vals.add(value == null ? null : TypeConverter.convert(value, String.class));
+            }
+            else
+                vals.add(null);
+        }
+        return vals;
+    }
+
+    /** Проверяет весь ответ до первой обратной записи. Лишние значения сохраняют прежнее поведение. */
+    void applyOutputs(List<String> outs) {
+        if( !vars.isEmpty() && (outs == null || outs.size() < vars.size()) )
+            throw new IllegalStateException(
+                    Tags.PRODUCT_LABEL + "DBMS_SQL returned "
+                            + (outs == null ? 0 : outs.size())
+                            + " values for " + vars.size() + " variables"
+            );
+
+        if( callBackParameters != null )
+            for( int i = 0; i < parameterNames.size(); i++ )
+                callBackParameters.setParameter(parameterNames.get(i), outs.get(i));
     }
 
     /** Выполнение запроса */
     public DbmsSqlWork execute( Void unused ) throws CallException {
+        Throwable failure = null;
 
         try {
-
-            final List<String> vals = new ArrayList<>(vars.size());
-
-            for( String variable : vars ) {
-                final String parameterName = mapParamSubst.get(":" + variable);
-
-                if( callBackParameters != null && callBackParameters.hasParameter(parameterName) ) {
-                    final Object value = callBackParameters.getParameter(parameterName);
-                    vals.add(value == null ? null : TypeConverter.convert(value, String.class));
-                }
-                else
-                    vals.add(null);
-            }
+            resultCode = null;
+            resultInfo = null;
+            final List<String> vals = inputValues();
 
             storedProcWork.set( "plSql", plSql )
                           .set( "vars",  vars  )
@@ -139,35 +149,33 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
             storedProcWork.execute();
 
-            List<String> outs = storedProcWork.get("outs");
-
-            if( !vars.isEmpty() && (outs == null || outs.size() < vars.size()) )
-                throw new IllegalStateException(
-                        Tags.PRODUCT_LABEL + "DBMS_SQL returned "
-                                + (outs == null ? 0 : outs.size())
-                                + " values for " + vars.size() + " variables"
-                );
-
-            int i = 0;
-
-            if( callBackParameters != null )
-            {
-                for( String v : vars )
-                {
-                    String p = this.mapParamSubst.get( ":" + v );
-                    callBackParameters.setParameter( p, outs.get(i) );
-                    i++;
-                }
-            }
+            resultCode = storedProcWork.get("ret");
+            resultInfo = storedProcWork.get("rsltInf");
+            applyOutputs(storedProcWork.get("outs"));
         }
-        catch( Throwable th ) {
-            throw new CallException( Tags.PRODUCT_LABEL + "Error on execute work", th );
+        catch( RuntimeException ex ) {
+            failure = new CallException(Tags.PRODUCT_LABEL + "Error on execute work", ex);
+            throw (CallException)failure;
+        }
+        catch( Error error ) {
+            failure = error;
+            throw error;
         }
         finally {
-            close( );
+            try {
+                close();
+            }
+            catch( RuntimeException | Error closeFailure ) {
+                if( failure == null )
+                    throw closeFailure;
+                failure.addSuppressed(closeFailure);
+            }
         }
         return this;
     }
+
+    Integer resultCode() { return resultCode; }
+    String resultInfo() { return resultInfo; }
 
     /** */
     @Override

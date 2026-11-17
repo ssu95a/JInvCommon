@@ -374,8 +374,8 @@ public class SQLCallBuilder {
         return loader.parse( tc.dialect() );
     }
 
-    /** IDataCall adapter for Oracle DBMS_SQL execution. */
-    private static class DbmsSqlDataCall implements IDataCall {
+    /** Адаптер IDataCall для выполнения через Oracle DBMS_SQL. */
+    static class DbmsSqlDataCall implements IDataCall {
 
         private DbmsSqlWork work;
         private final CallStatement callStatement;
@@ -405,6 +405,19 @@ public class SQLCallBuilder {
             this.work = new DbmsSqlWork(tc, callStatement, values);
         }
 
+        /** Позволяет проверять контракт адаптера без подключения к Oracle. */
+        DbmsSqlDataCall(
+                DbmsSqlWork work,
+                CallStatement callStatement,
+                ParametersValues values,
+                String name
+        ) {
+            this.work = Objects.requireNonNull(work, "work");
+            this.callStatement = callStatement;
+            this.values = values;
+            this.name = name;
+        }
+
         private static Comparable normalizeParameterId( Object id ) {
             if( id == null )
                 throw new IllegalArgumentException("'id' param is null");
@@ -431,6 +444,7 @@ public class SQLCallBuilder {
 
             dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, true));
 
+            Throwable failure = null;
             try {
                 for( Map.Entry<Comparable,Supplier<?>> entry : valueCallbacks.entrySet() ) {
                     final Supplier<?> supplier = entry.getValue();
@@ -453,14 +467,24 @@ public class SQLCallBuilder {
 
                 return this;
             }
-            catch( CallException e ) {
-                throw e;
+            catch( RuntimeException ex ) {
+                failure = ex instanceof CallException ? ex
+                        : new CallException(Tags.PRODUCT_LABEL + "Error on call " + DbmsSqlWork.class.getName(), ex);
+                throw (RuntimeException)failure;
             }
-            catch( Throwable th ) {
-                throw new CallException(Tags.PRODUCT_LABEL + "Error on call " + DbmsSqlWork.class.getName(), th);
+            catch( Error error ) {
+                failure = error;
+                throw error;
             }
             finally {
-                dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false));
+                try {
+                    dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false));
+                }
+                catch( RuntimeException | Error afterFailure ) {
+                    if( failure == null )
+                        throw afterFailure;
+                    failure.addSuppressed(afterFailure);
+                }
             }
         }
 
@@ -575,14 +599,36 @@ public class SQLCallBuilder {
             if( work == null )
                 return;
 
-            dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, true));
+            Throwable failure = null;
+            try {
+                dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, true));
+            }
+            catch( RuntimeException | Error beforeFailure ) {
+                failure = beforeFailure;
+            }
             try {
                 work.close();
-                work = null;
             }
-            finally {
+            catch( RuntimeException | Error cleanupFailure ) {
+                if( failure == null )
+                    failure = cleanupFailure;
+                else
+                    failure.addSuppressed(cleanupFailure);
+            }
+            work = null;
+            try {
                 dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, false));
             }
+            catch( RuntimeException | Error afterFailure ) {
+                if( failure == null )
+                    failure = afterFailure;
+                else
+                    failure.addSuppressed(afterFailure);
+            }
+            if( failure instanceof Error )
+                throw (Error)failure;
+            if( failure != null )
+                throw (RuntimeException)failure;
         }
     }
 
