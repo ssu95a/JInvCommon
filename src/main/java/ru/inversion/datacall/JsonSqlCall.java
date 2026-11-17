@@ -556,11 +556,14 @@ public class JsonSqlCall implements IDataCall {
             throw new CallException( Tags.PRODUCT_LABEL + "Error on execute JSON work", null, jsonSql, th );
         }
         finally {
-            storedProcWork.set( "plSql", null );
-            close( );
+            try {
+                storedProcWork.set( "plSql", null );
+                close( );
+            }
+            finally {
+                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
+            }
         }
-
-        dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
 
         return this;
     }
