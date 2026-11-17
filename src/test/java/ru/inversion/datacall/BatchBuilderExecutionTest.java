@@ -1,6 +1,6 @@
 package ru.inversion.datacall;
 
-import org.junit.jupiter.api.Test;
+import org.junit.Test;
 import ru.inversion.tc.TaskContext;
 
 import javax.persistence.Column;
@@ -16,9 +16,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.Assert.*;
 
-class BatchBuilderExecutionTest {
+public class BatchBuilderExecutionTest {
 
     @Table(name = "BATCH_ITEMS")
     public static final class Row {
@@ -70,7 +70,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void builderRebuildsDefaultMapperWhenModeChanges() throws Exception {
+    public void builderRebuildsDefaultMapperWhenModeChanges() throws Exception {
         Jdbc jdbc = new Jdbc();
         BatchBuilder<WideRow> builder = new BatchBuilder<WideRow>(context(jdbc))
                 .valueClass(WideRow.class);
@@ -92,7 +92,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void mapperErrorSkipsOneItemWithoutLosingPendingRows() throws Exception {
+    public void mapperErrorSkipsOneItemWithoutLosingPendingRows() throws Exception {
         Jdbc jdbc = new Jdbc();
         IBatchLoader<Row> loader = builder(jdbc)
                 .batchSize(2)
@@ -120,7 +120,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void afterPrepareListenerFailureDoesNotExecuteQueuedItem() throws Exception {
+    public void afterPrepareListenerFailureDoesNotExecuteQueuedItem() throws Exception {
         Jdbc jdbc = new Jdbc();
         IBatchLoader<Row> loader = builder(jdbc)
                 .continueOnError(true)
@@ -141,7 +141,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void jdbcAddBatchFailureIsFatalEvenWhenMapperErrorsMayContinue() throws Exception {
+    public void jdbcAddBatchFailureIsFatalEvenWhenMapperErrorsMayContinue() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.addFailure = new SQLException("add failed");
         IBatchLoader<Row> loader = builder(jdbc)
@@ -158,7 +158,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void executeAfterListenerCannotHideJdbcFailure() throws Exception {
+    public void executeAfterListenerCannotHideJdbcFailure() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.executeFailure = new SQLException("batch failed");
         IBatchLoader<Row> loader = builder(jdbc).batchSize(1).build();
@@ -177,7 +177,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void callerTransactionCannotSilentlyContinueAfterBatchFailure() throws Exception {
+    public void callerTransactionCannotSilentlyContinueAfterBatchFailure() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.executeFailure = new SQLException("partial batch");
         IBatchLoader<Row> loader = builder(jdbc)
@@ -196,7 +196,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void autoCommitCanContinueAfterReportedBatchFailure() throws Exception {
+    public void autoCommitCanContinueAfterReportedBatchFailure() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.autoCommit = true;
         jdbc.executeFailure = new SQLException("first batch failed");
@@ -223,7 +223,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void committedModeContinuesAfterSuccessfulRollback() throws Exception {
+    public void committedModeContinuesAfterSuccessfulRollback() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.executeFailure = new SQLException("first batch failed");
         IBatchLoader<Row> loader = builder(jdbc)
@@ -247,7 +247,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void failedCommitStopsContinuationEvenIfRollbackSucceeds() throws Exception {
+    public void failedCommitStopsContinuationEvenIfRollbackSucceeds() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.commitFailure = new SQLException("commit failed");
         IBatchLoader<Row> loader = builder(jdbc)
@@ -266,7 +266,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void failedRollbackStopsContinuationAndPreservesBothErrors() throws Exception {
+    public void failedRollbackStopsContinuationAndPreservesBothErrors() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.executeFailure = new SQLException("batch failed");
         jdbc.rollbackFailure = new SQLException("rollback failed");
@@ -286,7 +286,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void closeAttemptsJdbcCleanupEvenWhenListenersFail() throws Exception {
+    public void closeAttemptsJdbcCleanupEvenWhenListenersFail() throws Exception {
         Jdbc jdbc = new Jdbc();
         IBatchLoader<Row> loader = builder(jdbc).build();
         loader.addBatchListener(event -> {
@@ -306,7 +306,7 @@ class BatchBuilderExecutionTest {
     }
 
     @Test
-    void closeFailureIsReportedAndCanBeRetried() throws Exception {
+    public void closeFailureIsReportedAndCanBeRetried() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.closeFailure = new SQLException("close failed");
         IBatchLoader<Row> loader = builder(jdbc).build();
