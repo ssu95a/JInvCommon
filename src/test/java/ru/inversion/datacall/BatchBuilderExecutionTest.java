@@ -344,6 +344,25 @@ public class BatchBuilderExecutionTest {
     }
 
     @Test
+    public void autoCommitCannotContinueAsIfRollbackUndidPartialBatch() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        jdbc.autoCommit = true;
+        jdbc.executeFailure = new SQLException("partial batch");
+        IBatchLoader<Row> loader = builder(jdbc)
+                .batchSize(1)
+                .commitBatch(true)
+                .continueOnError(true)
+                .build();
+        loader.iterator(Arrays.asList(new Row(1), new Row(2)).iterator());
+
+        CallException error = assertThrows(CallException.class, loader::execute);
+
+        assertSame(jdbc.executeFailure, error.getCause());
+        assertEquals(1, jdbc.batchExecutions);
+        loader.close();
+    }
+
+    @Test
     public void failedCommitStopsContinuationEvenIfRollbackSucceeds() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.commitFailure = new SQLException("commit failed");
