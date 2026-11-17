@@ -1020,11 +1020,12 @@ public class CallWork implements AutoCloseable {
             }
 
             boolean isPrepared = !(jdbcStatement instanceof CallableStatement);
+            final boolean switchAutoCommit = callStatement.isAutoCommit() && !tc.isAutoCommit();
 
             // Выполнение
             try {
 
-                if( callStatement.isAutoCommit() )
+                if( switchAutoCommit )
                     tc.setAutoCommit(true);
 
                 if( isPrepared )
@@ -1043,14 +1044,10 @@ public class CallWork implements AutoCloseable {
                 }
 
             } catch( SQLException ex ) {
-
-                if( callStatement.isAutoCommit() )
-                    tc.setAutoCommit(false);
-
                 throw new JInvDbException( ex, this.callStatement.prepareSql( AbstractCallMakerBase.createPLSqlMaker(QUERY), ( integer, o, o2 ) -> {} ) );
             }
             finally {
-                if( callStatement.isAutoCommit() )
+                if( switchAutoCommit )
                     tc.setAutoCommit(false);
             }
 
