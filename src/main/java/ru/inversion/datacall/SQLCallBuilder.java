@@ -378,12 +378,17 @@ public class SQLCallBuilder {
             public IDataCall execute() throws CallException {
                 dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true  ) );
                 try {
-                    this.dsw.execute( null );
-                } catch(Exception e) {
-                    throw new CallException( Tags.PRODUCT_LABEL + "Error on call " + dsw.getClass().getName(), e );
+                    try {
+                        this.dsw.execute( null );
+                    }
+                    catch( Exception e ) {
+                        throw new CallException( Tags.PRODUCT_LABEL + "Error on call " + dsw.getClass().getName(), e );
+                    }
+                    return this;
                 }
-                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
-                return this;
+                finally {
+                    dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
+                }
             }
             @Override
             public < V > void setValueCallback( Object id, Supplier< V > supplier ) throws CallException { }
@@ -392,9 +397,13 @@ public class SQLCallBuilder {
             @Override
             public void setValueListener( BiConsumer< Object, Object > consumer ) throws CallException { }
             @Override
-            public void addDataCallListener( IDataCallListener l ) throws CallException { }
+            public void addDataCallListener( IDataCallListener l ) throws CallException {
+                dataCallListeners.addListener(l);
+            }
             @Override
-            public void removeDataCallListener( IDataCallListener l ) throws CallException { }
+            public void removeDataCallListener( IDataCallListener l ) throws CallException {
+                dataCallListeners.removeListener(l);
+            }
             @Override
             public ParameterMetadata getParameterMetadata( Object id ) throws CallException { return null; }
 
@@ -468,11 +477,13 @@ public class SQLCallBuilder {
 
             dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true ) );
 
-            this.work.execute( );
-
-            dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
-
-            return this;
+            try {
+                this.work.execute( );
+                return this;
+            }
+            finally {
+                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
+            }
         }
 
         @Override
