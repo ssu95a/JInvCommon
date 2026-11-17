@@ -374,6 +374,8 @@ BatchBuilder<T> {
         private boolean executing;
         /** */
         private boolean closing;
+        /** После неудачной очистки JDBC-очереди повторное выполнение небезопасно. */
+        private boolean broken;
         /** */
         final private BiConsumer<T,PreparedStatement> mapper;
         /** */
@@ -429,6 +431,8 @@ BatchBuilder<T> {
                     throw new IllegalStateException( Tags.PRODUCT_LABEL + "Iterator 'iter' is null" );
                 if( ps == null )
                     throw new IllegalStateException( Tags.PRODUCT_LABEL + "Batch loader is closed" );
+                if( broken )
+                    throw new IllegalStateException( Tags.PRODUCT_LABEL + "Batch loader cannot be reused after JDBC cleanup failure" );
 
                 fireBatchEvent( BatchEvent.Type.EXECUTE, true, 0, null );
                 executeStarted = true;
@@ -480,7 +484,9 @@ BatchBuilder<T> {
                         ps.clearBatch();
                     }
                     catch( Throwable cleanupFailure ) {
-                        th.addSuppressed(cleanupFailure);
+                        if( cleanupFailure != th )
+                            th.addSuppressed(cleanupFailure);
+                        broken = true;
                     }
                     try {
                         ps.clearParameters();
@@ -536,27 +542,9 @@ BatchBuilder<T> {
                                 "JDBC batch returned EXECUTE_FAILED", counts);
                 }
 
-                if( commitBatch ) {
-                    try {
-                        ps.getConnection().commit();
-                    }
-                    catch( Throwable th ) {
-                        commitFailed = true;
-                        throw th;
-                    }
-                }
             }
             catch( Throwable th ) {
                 failure = th;
-
-                if( commitBatch )
-                    try {
-                        ps.getConnection().rollback();
-                    }
-                    catch( Throwable rollbackFailure ) {
-                        rollbackFailed = true;
-                        th.addSuppressed(rollbackFailure);
-                    }
             }
             finally {
                 try {
@@ -564,10 +552,32 @@ BatchBuilder<T> {
                 }
                 catch( Throwable clearFailure ) {
                     clearFailed = true;
+                    broken = true;
                     if( failure == null )
                         failure = clearFailure;
                     else
                         failure.addSuppressed(clearFailure);
+                }
+            }
+
+            // Очистка должна завершиться до commit: иначе ошибку очистки уже нельзя откатить.
+            if( failure == null && commitBatch ) {
+                try {
+                    ps.getConnection().commit();
+                }
+                catch( Throwable th ) {
+                    commitFailed = true;
+                    failure = th;
+                }
+            }
+
+            if( failure != null && commitBatch ) {
+                try {
+                    ps.getConnection().rollback();
+                }
+                catch( Throwable rollbackFailure ) {
+                    rollbackFailed = true;
+                    failure.addSuppressed(rollbackFailure);
                 }
             }
 
@@ -580,9 +590,11 @@ BatchBuilder<T> {
             // Без rollback продолжать работу в этой транзакции нельзя.
             boolean canContinue = continueOnError
                     && !clearFailed && !rollbackFailed && !commitFailed;
-            if( canContinue && !commitBatch ) {
+            if( canContinue ) {
                 try {
-                    canContinue = ps.getConnection().getAutoCommit();
+                    boolean autoCommit = ps.getConnection().getAutoCommit();
+                    // rollback при autoCommit=true не возвращает частично выполненные строки.
+                    canContinue = commitBatch ? !autoCommit : autoCommit;
                 }
                 catch( Throwable stateFailure ) {
                     failure.addSuppressed(stateFailure);

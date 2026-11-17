@@ -479,6 +479,48 @@ public class BatchBuilderExecutionTest {
     }
 
     @Test
+    public void clearBatchFailureRollsBackBeforeCommitAndPreventsRetry() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        jdbc.clearBatchFailure = new SQLException("clear failed");
+        IBatchLoader<Row> loader = builder(jdbc)
+                .batchSize(1)
+                .commitBatch(true)
+                .continueOnError(true)
+                .build();
+        loader.iterator(Arrays.asList(new Row(1), new Row(2)).iterator());
+
+        CallException error = assertThrows(CallException.class, loader::execute);
+
+        assertSame(jdbc.clearBatchFailure, error.getCause());
+        assertEquals(0, jdbc.commits);
+        assertEquals(1, jdbc.rollbacks);
+        assertEquals(1, jdbc.batchExecutions);
+
+        jdbc.clearBatchFailure = null;
+        loader.iterator(Arrays.asList(new Row(3)).iterator());
+        CallException retry = assertThrows(CallException.class, loader::execute);
+        assertTrue(retry.getCause().getMessage().contains("cannot be reused"));
+        assertEquals(1, jdbc.batchExecutions);
+        loader.close();
+    }
+
+    @Test
+    public void successfulBatchClearsQueueBeforeCommit() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        IBatchLoader<Row> loader = builder(jdbc)
+                .batchSize(1)
+                .commitBatch(true)
+                .build();
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+
+        loader.execute();
+
+        assertTrue(jdbc.actions.indexOf("executeBatch") < jdbc.actions.indexOf("clearBatch"));
+        assertTrue(jdbc.actions.indexOf("clearBatch") < jdbc.actions.indexOf("commit"));
+        loader.close();
+    }
+
+    @Test
     public void closedLoaderRejectsFurtherExecution() throws Exception {
         Jdbc jdbc = new Jdbc();
         IBatchLoader<Row> loader = builder(jdbc).build();
@@ -580,6 +622,7 @@ public class BatchBuilderExecutionTest {
         final List<Integer> pending = new ArrayList<>();
         final List<Integer> executed = new ArrayList<>();
         final List<Integer> boundIndexes = new ArrayList<>();
+        final List<String> actions = new ArrayList<>();
         final Map<Integer, Integer> boundValues = new HashMap<>();
         SQLException executeFailure;
         SQLException addFailure;
@@ -618,10 +661,12 @@ public class BatchBuilderExecutionTest {
                                     statementCall(method.getName(), args));
                 case "getAutoCommit": return autoCommit;
                 case "commit":
+                    actions.add("commit");
                     commits++;
                     if (commitFailure != null) throw commitFailure;
                     return null;
                 case "rollback":
+                    actions.add("rollback");
                     rollbacks++;
                     if (rollbackFailure != null) throw rollbackFailure;
                     return null;
@@ -646,6 +691,7 @@ public class BatchBuilderExecutionTest {
                     pending.add(currentValue);
                     return null;
                 case "executeBatch":
+                    actions.add("executeBatch");
                     batchExecutions++;
                     if (executeFailure != null) throw executeFailure;
                     executed.addAll(pending);
@@ -654,6 +700,7 @@ public class BatchBuilderExecutionTest {
                     Arrays.fill(counts, 1);
                     return counts;
                 case "clearBatch":
+                    actions.add("clearBatch");
                     clearBatchCalls++;
                     if (clearBatchFailure != null) throw clearBatchFailure;
                     pending.clear();
