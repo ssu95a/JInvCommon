@@ -633,16 +633,20 @@ public class SQLCallBuilder {
     }
 
     /** */
-    private static class SQLDataCall implements IDataCall {
+    static class SQLDataCall implements IDataCall {
 
         /** Исполнение */
         private CallWork work;
+
+        /** Защита от повторного вызова из слушателей событий. */
+        private boolean executing;
+        private boolean closing;
 
         /** Коллекция слушателей событий самого DataCall */
         final private IListenerManEvent<IDataCallListener, DataCallEvent> dataCallListeners = ListenerManFactory.createListenerManEvent( IDataCallListener::dataCallChanged );
 
         /** */
-        private SQLDataCall( CallWork work, String name ) {
+        SQLDataCall( CallWork work, String name ) {
             this.work = Objects.requireNonNull( work, "'work' is null" );
             this.name = name;
         }
@@ -678,24 +682,52 @@ public class SQLCallBuilder {
         }
 
         @Override
-        public IDataCall execute( ) throws CallException {
+        public synchronized IDataCall execute( ) throws CallException {
 
-            if( work == null )
-                throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
+            final CallWork current = requireWork();
+            if( executing || closing )
+                throw new CallException(Tags.PRODUCT_LABEL + "DataCall is already executing or closing");
 
-            dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true ) );
-
+            executing = true;
             try {
-                this.work.execute( );
+                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true ) );
+
+                Throwable failure = null;
+                try {
+                    current.execute();
+                }
+                catch( RuntimeException | Error th ) {
+                    failure = th;
+                    throw th;
+                }
+                finally {
+                    try {
+                        dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
+                    }
+                    catch( RuntimeException | Error afterFailure ) {
+                        if( failure == null )
+                            throw afterFailure;
+                        if( failure != afterFailure )
+                            failure.addSuppressed(afterFailure);
+                    }
+                }
                 return this;
             }
             finally {
-                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
+                executing = false;
             }
         }
 
+        private CallWork requireWork() {
+            if( work == null )
+                throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
+            return work;
+        }
+
         @Override
-        public <V> void setValueCallback( Object id, Supplier<V> supplier ) throws CallException {
+        public synchronized <V> void setValueCallback( Object id, Supplier<V> supplier ) throws CallException {
+
+            final CallWork current = requireWork();
 
             try {
 
@@ -703,17 +735,19 @@ public class SQLCallBuilder {
                     throw new IllegalArgumentException("'id' param is null");
 
                 if( id instanceof Number )
-                    this.work.set( ((Number)id).intValue(), supplier );
+                    current.set( ((Number)id).intValue(), supplier );
                 else
-                    this.work.set( id.toString(), supplier );
+                    current.set( id.toString(), supplier );
             }
-            catch( Throwable th ) {
+            catch( RuntimeException th ) {
                 throw new CallException( Tags.PRODUCT_LABEL + "Error on 'setValueCallback' to dataCall", th );
             }
         }
 
         @Override
-        public <V> void setValueListener( Object id, BiConsumer< Object, V > listener ) throws CallException {
+        public synchronized <V> void setValueListener( Object id, BiConsumer< Object, V > listener ) throws CallException {
+
+            final CallWork current = requireWork();
 
             try {
 
@@ -724,19 +758,20 @@ public class SQLCallBuilder {
                         ? ((Number)id).intValue()
                         : id.toString();
 
-                this.work.outCallback( parameter, listener);
+                current.outCallback( parameter, listener);
             }
-            catch( Throwable th ) {
+            catch( RuntimeException th ) {
                 throw new CallException( Tags.PRODUCT_LABEL + "Error on 'setValueListener' to dataCall", th );
             }
         }
 
         @Override
-        public void setValueListener( BiConsumer< Object, Object > listener ) throws CallException {
+        public synchronized void setValueListener( BiConsumer< Object, Object > listener ) throws CallException {
+            final CallWork current = requireWork();
             try {
-                this.work.outCallback( listener );
+                current.outCallback( listener );
             }
-            catch( Throwable th ) {
+            catch( RuntimeException th ) {
                 throw new CallException( Tags.PRODUCT_LABEL + "Error on 'setValueListener' to dataCall", th );
             }
         }
@@ -752,89 +787,128 @@ public class SQLCallBuilder {
         }
 
         @Override
-        public ParameterMetadata getParameterMetadata( Object id ) throws CallException {
+        public synchronized ParameterMetadata getParameterMetadata( Object id ) throws CallException {
 
             if( id == null )
                 return null;
 
+            final CallWork current = requireWork();
+
             if( id instanceof Number )
-                return this.work.getParameterMetadata( ((Number)id).intValue() );
+                return current.getParameterMetadata( ((Number)id).intValue() );
             else
-                return this.work.getParameterMetadata( id.toString() );
+                return current.getParameterMetadata( id.toString() );
         }
 
         @Override
-        public Iterable<ParameterMetadata<?>> getParameterIter() {
-            return work.getParameterIter();
+        public synchronized Iterable<ParameterMetadata<?>> getParameterIter() {
+            return requireWork().getParameterIter();
         }
 
         @Override
-        public <T> T getReturnValue() {
-            return work.getReturnValue();
+        public synchronized <T> T getReturnValue() {
+            return requireWork().getReturnValue();
         }
 
         @Override
-        public Object getParameter( String parameterName ) {
+        public synchronized Object getParameter( String parameterName ) {
+            final CallWork current = requireWork();
             try {
-                return work.get(parameterName);
+                return current.get(parameterName);
             }
-            catch( Throwable th ) {
+            catch( RuntimeException th ) {
                 throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on get '" + parameterName + "' parameter value", th );
             }
         }
         /** */
         @Override
-        public Object getParameter( int parameterIndex ) {
+        public synchronized Object getParameter( int parameterIndex ) {
+            final CallWork current = requireWork();
             try {
-                return work.get(parameterIndex);
+                return current.get(parameterIndex);
             }
-            catch( Throwable th ) {
+            catch( RuntimeException th ) {
                 throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on get '" + parameterIndex + "' parameter value", th );
             }
         }
         @Override
-        public void setParameter( String parameterName, Object value ) {
+        public synchronized void setParameter( String parameterName, Object value ) {
+            final CallWork current = requireWork();
             try {
-                work.set( parameterName, value );
+                current.set( parameterName, value );
             }
-            catch( Throwable th ) {
+            catch( RuntimeException th ) {
                 throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on set '" + parameterName + "' parameter value", th );
             }
         }
         /** */
         @Override
-        public void setParameter( int parameterIndex, Object value ) {
+        public synchronized void setParameter( int parameterIndex, Object value ) {
+            final CallWork current = requireWork();
             try {
-                work.set(parameterIndex, value);
+                current.set(parameterIndex, value);
             }
-            catch( Throwable th ) {
+            catch( RuntimeException th ) {
                 throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on set '" + parameterIndex + "' parameter value", th );
             }
         }
 
         @Override
-        public boolean hasParameter( int parameterIndex ) {
-            return work.getParameterMetadata(parameterIndex) != null;
+        public synchronized boolean hasParameter( int parameterIndex ) {
+            return requireWork().getParameterMetadata(parameterIndex) != null;
         }
 
         @Override
-        public boolean hasParameter( String parameterName ) {
-            return work.getParameterMetadata(parameterName) != null;
+        public synchronized boolean hasParameter( String parameterName ) {
+            return requireWork().getParameterMetadata(parameterName) != null;
         }
 
         /** */
         @Override
-        public void close() {
+        public synchronized void close() {
+            if( executing )
+                throw new IllegalStateException("Cannot close DataCall during execution");
+            if( closing || work == null )
+                return;
 
-            if( work != null ) {
+            closing = true;
+            try {
+                Throwable failure = null;
+                try {
+                    dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.CLOSE, true ) );
+                }
+                catch( RuntimeException | Error th ) {
+                    failure = th;
+                }
 
-                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.CLOSE, true  ) );
+                try {
+                    work.close();
+                    work = null;
+                }
+                catch( RuntimeException | Error cleanupFailure ) {
+                    if( failure == null )
+                        failure = cleanupFailure;
+                    else if( failure != cleanupFailure )
+                        failure.addSuppressed(cleanupFailure);
+                }
 
-                work.close();
+                try {
+                    dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.CLOSE, false ) );
+                }
+                catch( RuntimeException | Error afterFailure ) {
+                    if( failure == null )
+                        failure = afterFailure;
+                    else if( failure != afterFailure )
+                        failure.addSuppressed(afterFailure);
+                }
 
-                work = null;
-
-                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.CLOSE, false ) );
+                if( failure instanceof Error )
+                    throw (Error)failure;
+                if( failure != null )
+                    throw (RuntimeException)failure;
+            }
+            finally {
+                closing = false;
             }
         }
     }
