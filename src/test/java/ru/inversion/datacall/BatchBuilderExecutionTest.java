@@ -255,6 +255,22 @@ public class BatchBuilderExecutionTest {
     }
 
     @Test
+    public void mapperErrorIsNotTreatedAsSkippableRowFailure() throws Exception {
+        Jdbc jdbc = new Jdbc();
+        IBatchLoader<Row> loader = builder(jdbc)
+                .continueOnError(true)
+                .mapper((row, ps) -> { throw new AssertionError("mapper failed"); })
+                .build();
+        loader.iterator(Arrays.asList(new Row(1)).iterator());
+
+        CallException failure = assertThrows(CallException.class, loader::execute);
+
+        assertTrue(failure.getCause() instanceof AssertionError);
+        assertEquals(0, jdbc.batchExecutions);
+        loader.close();
+    }
+
+    @Test
     public void executeAfterListenerCannotHideJdbcFailure() throws Exception {
         Jdbc jdbc = new Jdbc();
         jdbc.executeFailure = new SQLException("batch failed");
