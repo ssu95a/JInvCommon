@@ -821,6 +821,10 @@ public class CallWork implements AutoCloseable {
         try {
 
             constantList.clear();
+            hasResultSet = false;
+
+            if( !wasCreated )
+                pvMap.values().forEach( pv -> pv.posList.clear() );
 
             final TriConsumer<Integer,Comparable,Object> handler;
 
@@ -966,6 +970,7 @@ public class CallWork implements AutoCloseable {
             wasCreated = true;
 
         } catch( Throwable th ) {
+            close();
             CallException.throwOnPrepareJDBCCallable( sql, th );
         }
     }
