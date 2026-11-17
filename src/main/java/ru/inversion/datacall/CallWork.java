@@ -149,6 +149,9 @@ public class CallWork implements AutoCloseable {
     /** Значения параметров */
     final Map<Comparable<?>,PV> pvMap = new TreeMap<>(ParamIdComparator);
 
+    /** Константы SQL, заменённые на bind-параметры */
+    private final List<Pair<Integer,Object>> constantList = new ArrayList<>();
+
     /** Параметр помеченный как return
      *  инициализируется в initCallable
      * */
@@ -799,13 +802,25 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
+    private void setConstantValues() throws CallException {
+
+        try {
+            for( Pair<Integer,Object> p : constantList )
+                jdbcStatement.setObject( p.first, p.second );
+        }
+        catch( SQLException ex ) {
+            throw new CallException( Tags.PRODUCT_LABEL + "Error on set constants value", ex );
+        }
+    }
+
+    /** */
     private void initJdbcStatement( AutoCloseableList resources ) throws CallException {
 
         String sql = null;
 
         try {
 
-            final List<Pair<Integer,Object>> constantList = new LinkedList<>();
+            constantList.clear();
 
             final TriConsumer<Integer,Comparable,Object> handler;
 
@@ -885,15 +900,7 @@ public class CallWork implements AutoCloseable {
             }
 
             // Устанавливаем значение констант, если они есть
-            // делаем один раз и забываем
-            try {
-
-                for( Pair<Integer,Object> p : constantList )
-                    jdbcStatement.setObject( p.first, p.second );
-
-            } catch(SQLException ex) {
-                throw new CallException( Tags.PRODUCT_LABEL + "Error on set constants value", ex );
-            }
+            setConstantValues();
 
             // Устанавливаем IN параметры //
             for( PV pv : U.iterable( pvMap.values().stream().filter(PV::isIn).sorted( new Comparator<PV>() {
@@ -1010,6 +1017,8 @@ public class CallWork implements AutoCloseable {
                 initJdbcStatement( resources );
             else
             {
+                setConstantValues();
+
                 for( PV pv : pvMap.values() ) {
 
                     if( !pv.isIn() )
