@@ -73,6 +73,9 @@ public class SQLCallBuilder {
     /** */
     private IParameters callBackParameters;
 
+    /** Закрывать JDBC statement после каждого execute */
+    private boolean closeAfterExecute = true;
+
     /** */
     private SQLCallBuilder( TaskContext tc ) {
         this.tc = tc;
@@ -125,6 +128,7 @@ public class SQLCallBuilder {
 
     /** */
     public SQLCallBuilder closeAfterExecute( boolean v ) {
+        this.closeAfterExecute = v;
         return this;
     }
 
@@ -207,7 +211,7 @@ public class SQLCallBuilder {
                 throw new IllegalStateException(Tags.PRODUCT_LABEL + "SQL выражение '" + name + "' не найдено в " + runClass.toString() );
 
             return new SQLDataCall (
-                st.createCallWork( tc, this.callBackParameters, true )
+                st.createCallWork( tc, this.callBackParameters, closeAfterExecute )
             );
 
         } catch( Throwable th ) {
@@ -354,7 +358,7 @@ public class SQLCallBuilder {
             )
                 return new JsonSqlCall( tc, callStatement, callBackParameters, name );
 
-            return new SQLDataCall( callStatement.createCallWork( tc, callBackParameters ) );
+            return new SQLDataCall( callStatement.createCallWork( tc, callBackParameters, closeAfterExecute ) );
         }
 
         /** */
