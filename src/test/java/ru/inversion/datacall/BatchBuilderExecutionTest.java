@@ -692,8 +692,8 @@ public class BatchBuilderExecutionTest {
                     return Proxy.newProxyInstance(
                             getClass().getClassLoader(),
                             new Class<?>[]{PreparedStatement.class},
-                            (proxy, method, args) ->
-                                    statementCall(method.getName(), args));
+                            (proxy, method, statementArgs) ->
+                                    statementCall(method.getName(), statementArgs));
                 case "getAutoCommit": return autoCommit;
                 case "commit":
                     actions.add("commit");
