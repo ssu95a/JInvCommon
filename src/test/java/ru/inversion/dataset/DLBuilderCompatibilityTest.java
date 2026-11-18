@@ -369,6 +369,50 @@ public class DLBuilderCompatibilityTest {
     }
 
     @Test
+    public void closingTreeSourceReleasesOnlyItsDataSetLinkFilter() throws Exception {
+        TreeDestination source = new TreeDestination();
+        DataDestination destination = new DataDestination();
+        int ownFilter = destination.setFilter("ACTIVE=1", true, true);
+        IDataLink<ITreeDataSet<Row>, ISQLDataSet<Row>> link =
+                new DLBuilder<ITreeDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                        .source(source).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        assertEquals(2, destination.filters.size());
+
+        source.close();
+
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertEquals(1, destination.filters.size());
+        assertEquals("ACTIVE=1", destination.filters.get(ownFilter));
+        assertEquals(0, destination.queries);
+        assertEquals(0, destination.clears);
+        ((AutoCloseable)link).close();
+    }
+
+    @Test
+    public void closingTreeSourceReleasesOnlyItsTreeLinkFilter() throws Exception {
+        TreeDestination source = new TreeDestination();
+        TreeDestination destination = new TreeDestination();
+        int ownFilter = destination.setFilter("ACTIVE=1", true, true);
+        IDataLink<ITreeDataSet<Row>, SQLTreeDataSet<Row>> link =
+                new DLBuilder<ITreeDataSet<Row>, SQLTreeDataSet<Row>, Row, Integer>()
+                        .source(source).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        assertEquals(2, destination.filters.size());
+
+        source.close();
+
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertEquals(1, destination.filters.size());
+        assertEquals("ACTIVE=1", destination.filters.get(ownFilter));
+        assertEquals(0, destination.queries);
+        assertEquals(0, destination.clears);
+        ((AutoCloseable)link).close();
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     public void treeToDataSetWorksWithAnyISQLDataSetImplementation() throws Exception {
         TreeSource source = new TreeSource(new Row(10));

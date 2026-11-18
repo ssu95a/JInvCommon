@@ -204,6 +204,10 @@ public class DLBuilder<S,D,P,T> {
         @Override
         public void dataSetChanged( TreeDataSetEvent<P> e )
         {
+            if( e.isBefore() && e.getEventType() == DataSetEvent.DataSetEventType.CLOSE ) {
+                close();
+                return;
+            }
             if( e.isAfter()
                 && e.getEventType() == DataSetEvent.DataSetEventType.EXECUTE
                 && e.getTreeDataSet().isEmpty()
