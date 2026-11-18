@@ -1,6 +1,7 @@
 package ru.inversion.dataset;
 
 import org.junit.Test;
+import ru.inversion.datacall.IDataCall;
 import ru.inversion.tds.ITreeDataSet;
 import ru.inversion.tds.ITreeDataSetItem;
 import ru.inversion.tds.ITreeDataSetItemListener;
@@ -16,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 import static org.junit.Assert.*;
 
@@ -85,6 +87,7 @@ public class DLBuilderCompatibilityTest {
         final List<ITreeDataSetItemListener<Row>> items = new ArrayList<>();
         final List<ITreeDataSetListener<Row>> dataSetListeners = new ArrayList<>();
         ITreeDataSetItem<Row> current;
+        Row currentValue;
 
         @SuppressWarnings("unchecked")
         TreeSource(Row initial) {
@@ -114,6 +117,7 @@ public class DLBuilderCompatibilityTest {
                             default: throw new AssertionError("Unexpected ITreeDataSet." + method.getName());
                         }
                     });
+            currentValue = initial;
             current = item(initial);
         }
 
@@ -125,7 +129,7 @@ public class DLBuilderCompatibilityTest {
                     getClass().getClassLoader(), new Class<?>[]{ITreeDataSetItem.class},
                     (proxy, method, invocationArgs) -> {
                         switch (method.getName()) {
-                            case "getValue": return value;
+                            case "getValue": return proxy == current ? currentValue : value;
                             case "getDataSet": return tree;
                             default: throw new AssertionError("Unexpected ITreeDataSetItem." + method.getName());
                         }
@@ -135,6 +139,7 @@ public class DLBuilderCompatibilityTest {
         void navigate(Row next) {
             ITreeDataSetItem<Row> previous = current;
             current = item(next);
+            currentValue = next;
             TreeDataSetNavigationEvent<Row> event =
                     new TreeDataSetNavigationEvent<>(tree, previous, current);
             for (ITreeDataSetNavigationListener<Row> listener : new ArrayList<>(navigation))
@@ -144,6 +149,20 @@ public class DLBuilderCompatibilityTest {
         void changeValue(Row next) {
             TreeDataSetItemEvent<Row> event =
                     new TreeDataSetItemEvent<>(current, false, current.getValue(), next);
+            currentValue = next;
+            for (ITreeDataSetItemListener<Row> listener : new ArrayList<>(items))
+                listener.itemChanged(event);
+        }
+
+        void changeOtherValue() {
+            TreeDataSetItemEvent<Row> event =
+                    new TreeDataSetItemEvent<>(item(new Row(99)), false, new Row(99), new Row(100));
+            for (ITreeDataSetItemListener<Row> listener : new ArrayList<>(items))
+                listener.itemChanged(event);
+        }
+
+        void changeLeaf() {
+            TreeDataSetItemEvent<Row> event = new TreeDataSetItemEvent<>(current, false, true);
             for (ITreeDataSetItemListener<Row> listener : new ArrayList<>(items))
                 listener.itemChanged(event);
         }
@@ -219,6 +238,29 @@ public class DLBuilderCompatibilityTest {
         }
     }
 
+    private static final class CallDestination {
+        final IDataCall call;
+        final Map<String,Supplier<?>> callbacks = new HashMap<>();
+        final List<Object> executions = new ArrayList<>();
+        int closes;
+
+        CallDestination() {
+            call = (IDataCall)Proxy.newProxyInstance(getClass().getClassLoader(),
+                    new Class<?>[]{IDataCall.class}, (proxy, method, args) -> {
+                        switch (method.getName()) {
+                            case "setValueCallback":
+                                callbacks.put((String)args[0], (Supplier<?>)args[1]);
+                                return null;
+                            case "execute":
+                                executions.add(callbacks.get("PARENT_ID").get());
+                                return proxy;
+                            case "close": closes++; return null;
+                            default: throw new AssertionError(method.getName());
+                        }
+                    });
+        }
+    }
+
     @Test
     public void dataSetToTreePreservesNavigationRefreshAndEmptyRow() throws Exception {
         DataSource source = new DataSource(new Row(1));
@@ -281,6 +323,8 @@ public class DLBuilderCompatibilityTest {
 
         source.navigate(new Row(11));
         source.changeValue(new Row(12));
+        source.changeLeaf();
+        source.changeOtherValue();
         assertEquals(Integer.valueOf(12), destination.parameters.get("PARENT_ID"));
         assertEquals(3, destination.queries);
 
@@ -298,6 +342,30 @@ public class DLBuilderCompatibilityTest {
         assertTrue(source.dataSetListeners.isEmpty());
         source.navigate(new Row(14));
         assertEquals(3, destination.queries);
+    }
+
+    @Test
+    public void treeToTreePreservesFilterNavigationAndClose() throws Exception {
+        TreeSource source = new TreeSource(new Row(1));
+        TreeDestination destination = new TreeDestination();
+        IDataLink<ITreeDataSet<Row>,SQLTreeDataSet<Row>> link =
+                new DLBuilder<ITreeDataSet<Row>,SQLTreeDataSet<Row>,Row,Integer>()
+                        .source(source.tree).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+
+        assertEquals(Integer.valueOf(1), destination.parameters.get("PARENT_ID"));
+        assertEquals(1, destination.queries);
+        source.navigate(new Row(2));
+        source.changeLeaf();
+        source.changeOtherValue();
+        assertEquals(2, destination.queries);
+        assertEquals(Integer.valueOf(2), destination.parameters.get("PARENT_ID"));
+
+        ((AutoCloseable)link).close();
+        assertTrue(destination.filters.isEmpty());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.items.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
     }
 
     @Test
@@ -332,6 +400,41 @@ public class DLBuilderCompatibilityTest {
         ((AutoCloseable)link).close();
         assertEquals(Integer.valueOf(73), removedFilters.get(0));
         assertTrue(source.dataSetListeners.isEmpty());
+    }
+
+    @Test
+    public void treeToDataCallUsesLazyValuesAndReleasesListeners() throws Exception {
+        TreeSource source = new TreeSource(new Row(10));
+        CallDestination destination = new CallDestination();
+        AtomicBoolean requery = new AtomicBoolean(true);
+        IDataLink<ITreeDataSet<Row>,IDataCall> link =
+                new DLBuilder<ITreeDataSet<Row>,IDataCall,Row,Integer>()
+                        .source(source.tree).destination(destination.call)
+                        .joinColumn(row -> row.id, "PARENT_ID")
+                        .requeryIf(requery::get).link();
+
+        assertTrue(destination.executions.isEmpty());
+        assertEquals(Integer.valueOf(10), destination.callbacks.get("PARENT_ID").get());
+        source.navigate(new Row(11));
+        source.changeValue(new Row(12));
+        source.changeLeaf();
+        source.changeOtherValue();
+        assertEquals(Integer.valueOf(11), destination.executions.get(0));
+        assertEquals(Integer.valueOf(12), destination.executions.get(1));
+        assertEquals(2, destination.executions.size());
+        requery.set(false);
+        source.navigate(new Row(13));
+        assertEquals(2, destination.executions.size());
+        assertEquals(Integer.valueOf(13), destination.callbacks.get("PARENT_ID").get());
+        source.navigate(null);
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+
+        ((AutoCloseable)link).close();
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.items.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+        assertEquals(0, destination.closes);
     }
 
     @Test

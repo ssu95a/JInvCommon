@@ -247,6 +247,20 @@ public class LegacyLinkBuildersCompatibilityTest {
     }
 
     @Test
+    public void unfilteredDataSetLinkDoesNotRemoveAnUnownedFilter() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+        IDataSetLink<Row> link = new DataLinkBuilder<Row>()
+                .source(source.dataSet).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "EXTRA", false).build();
+
+        assertNull(destination.filter);
+        assertEquals(Integer.valueOf(1), destination.parameters.get("EXTRA"));
+        link.close();
+        assertTrue(destination.removedFilters.isEmpty());
+    }
+
+    @Test
     public void closingOneLinkDoesNotChangeAnotherBuiltFromTheSameBuilder() throws Exception {
         Source source = new Source(new Row(1, "A"));
         DataDestination destination = new DataDestination();
@@ -338,6 +352,7 @@ public class LegacyLinkBuildersCompatibilityTest {
 
         assertTrue(destination.executions.isEmpty());
         assertEquals(0, destination.closes);
+        assertNull(destination.callbacks.get("PARENT_ID").get());
         assertTrue(source.navigation.isEmpty());
         assertTrue(source.rows.isEmpty());
         assertTrue(source.dataSetListeners.isEmpty());

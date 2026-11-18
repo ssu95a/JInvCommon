@@ -182,7 +182,10 @@ public class DLBuilder<S,D,P,T> {
         }
         @Override
         public void itemChanged( TreeDataSetItemEvent<P> e ) {
-            refreshDestination( e.getNewValue() );
+            if (e.isAfter() && e.getEventType() == TreeDataSetItemEvent.ItemEventType.CHANGE_VALUE
+                    && source instanceof ITreeDataSet
+                    && e.getTreeItem() == ((ITreeDataSet<?>)source).getCurrentItem())
+                refreshDestination(e.getNewValue());
         }
 
         @Override
@@ -272,6 +275,16 @@ public class DLBuilder<S,D,P,T> {
         public Tree2DataSetLink( ITreeDataSet<P> source, ISQLDataSet<?> destination,
                                  Supplier< Boolean > requeryIf, List<Triplet<Function<P,T>,String,Boolean>> pairsColumn ) {
             super(source, destination, requeryIf, pairsColumn);
+        }
+    }
+
+    /** Связь дерева с ведомым SQL-деревом. */
+    private static class Tree2TreeLink<P,T>
+            extends AbstractLink<ITreeDataSet<P>,SQLTreeDataSet<?>,P,T> {
+
+        Tree2TreeLink(ITreeDataSet<P> source, SQLTreeDataSet<?> destination,
+                      Supplier<Boolean> requeryIf, List<Triplet<Function<P,T>,String,Boolean>> columns) {
+            super(source, destination, requeryIf, columns);
         }
     }
 
@@ -402,7 +415,10 @@ public class DLBuilder<S,D,P,T> {
             try {
                 for (Triplet<Function<P,T>,String,Boolean> column : columns)
                     destination.setValueCallback(column.second, () -> {
-                        P row = source.getCurrentRow();
+                        IDataSet<P> currentSource = this.source;
+                        if (currentSource == null)
+                            return null;
+                        P row = currentSource.getCurrentRow();
                         return row == null ? null : column.first.apply(row);
                     });
                 source.addNavigationListener(this);
@@ -452,6 +468,83 @@ public class DLBuilder<S,D,P,T> {
                 return;
             source.removeNavigationListener(this);
             source.removeRowListener(this);
+            source.removeDataSetListener(this);
+            source = null;
+            requeryIf = () -> false;
+        }
+    }
+
+    /** Связь дерева с вызовом: параметры берутся из текущего элемента при исполнении. */
+    private static class Tree2CallLink<P,T> implements IDataLink<ITreeDataSet<P>,IDataCall>,
+            ITreeDataSetNavigationListener<P>, ITreeDataSetItemListener<P>,
+            ITreeDataSetListener<P>, AutoCloseable {
+
+        private ITreeDataSet<P> source;
+        private final IDataCall destination;
+        private Supplier<Boolean> requeryIf;
+
+        Tree2CallLink(ITreeDataSet<P> source, IDataCall destination,
+                      Supplier<Boolean> requeryIf, List<Triplet<Function<P,T>,String,Boolean>> columns) {
+            this.source = source;
+            this.destination = destination;
+            this.requeryIf = requeryIf == null ? () -> true : requeryIf;
+            try {
+                for (Triplet<Function<P,T>,String,Boolean> column : columns)
+                    destination.setValueCallback(column.second, () -> {
+                        ITreeDataSet<P> currentSource = this.source;
+                        if (currentSource == null)
+                            return null;
+                        ITreeDataSetItem<P> item = currentSource.getCurrentItem();
+                        P row = item == null ? null : item.getValue();
+                        return row == null ? null : column.first.apply(row);
+                    });
+                source.addNavigationListener(this);
+                source.addItemListener(this);
+                source.addDataSetListener(this);
+            } catch (Throwable th) {
+                close();
+                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on build link between TreeDataSet and DataCall", th);
+            }
+        }
+
+        @Override public ITreeDataSet<P> getSource() { return source; }
+        @Override public IDataCall getDestination() { return destination; }
+
+        @Override public void navigated(TreeDataSetNavigationEvent<P> event) { refresh(); }
+        @Override public void itemChanged(TreeDataSetItemEvent<P> event) {
+            if (event.isAfter() && event.getEventType() == TreeDataSetItemEvent.ItemEventType.CHANGE_VALUE
+                    && source != null && event.getTreeItem() == source.getCurrentItem())
+                refresh();
+        }
+
+        @Override public void dataSetChanged(TreeDataSetEvent<P> event) {
+            if (event.isBefore() && event.getEventType() == DataSetEvent.DataSetEventType.CLOSE) {
+                try {
+                    destination.close();
+                } finally {
+                    close();
+                }
+            }
+        }
+
+        private void refresh() {
+            try {
+                if (Boolean.TRUE.equals(requeryIf.get()))
+                    destination.execute();
+            } catch (Throwable th) {
+                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on execute dataCall", th);
+            }
+        }
+
+        @Override public void setAutoRequery(Supplier<Boolean> value) {
+            requeryIf = Objects.requireNonNull(value, "'requeryIf' is null");
+        }
+
+        @Override public void close() {
+            if (source == null)
+                return;
+            source.removeNavigationListener(this);
+            source.removeItemListener(this);
             source.removeDataSetListener(this);
             source = null;
             requeryIf = () -> false;
@@ -527,6 +620,13 @@ public class DLBuilder<S,D,P,T> {
             return (IDataLink< S, D >)dlb;
         }
 
+        if( source instanceof ITreeDataSet && destination instanceof SQLTreeDataSet )
+        {
+            return (IDataLink<S,D>)new Tree2TreeLink<>(
+                    (ITreeDataSet<P>)source, (SQLTreeDataSet<?>)destination,
+                    requeryIf, new ArrayList<>(pairsColumn));
+        }
+
         if( source instanceof IDataSet && destination instanceof IDataCall )
         {
             for (Triplet<Function<P,T>,String,Boolean> column : pairsColumn) {
@@ -536,6 +636,17 @@ public class DLBuilder<S,D,P,T> {
             }
             return (IDataLink<S,D>)new DataSet2CallLink<>(
                     (IDataSet<P>)source, (IDataCall)destination, requeryIf, new ArrayList<>(pairsColumn));
+        }
+
+        if( source instanceof ITreeDataSet && destination instanceof IDataCall )
+        {
+            for (Triplet<Function<P,T>,String,Boolean> column : pairsColumn) {
+                if (ru.inversion.utils.S.isNullOrEmpty(column.second))
+                    throw new IllegalArgumentException("'destinationParam' is null or empty");
+                Objects.requireNonNull(column.first, "'sourceValue' is null");
+            }
+            return (IDataLink<S,D>)new Tree2CallLink<>(
+                    (ITreeDataSet<P>)source, (IDataCall)destination, requeryIf, new ArrayList<>(pairsColumn));
         }
 
         return null;
