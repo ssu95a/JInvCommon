@@ -29,6 +29,7 @@ import static ru.inversion.parser.statement.PrepareModeEnum.QUERY;
 /** */
 public class
 BatchBuilder<T> {
+
     /** */
     public enum BatchModeEnum {
         INSERT,
@@ -56,7 +57,7 @@ BatchBuilder<T> {
     /** */
     private IParameters callBackParameters;
 
-    /** только для name = TABLE */
+    /** Только для name = TABLE */
     private BatchModeEnum batchMode = INSERT;
 
     /** */
@@ -109,6 +110,7 @@ BatchBuilder<T> {
         batchMode = INSERT;
         return this;
     }
+
     /** */
     @Deprecated
     public BatchBuilder<T> mergeMode()
@@ -130,17 +132,23 @@ BatchBuilder<T> {
         commitBatch = v;
         return this;
     }
+
     /**
-     * Продолжает работу после ошибки преобразования строки. После ошибки JDBC batch
+     * Продолжает работу после ошибки преобразования строки.
+     * <p>
+     * После ошибки JDBC batch
      * продолжение возможно лишь при autoCommit либо после успешного rollback
-     * при commitBatch(true). Внешнюю транзакцию загрузчик не откатывает.
+     * при commitBatch(true).
+     * <p>
+     * Внешнюю транзакцию загрузчик не откатывает.
      * Пропущенные ошибки доступны через IBatchListener.
      */
-    public BatchBuilder<T> continueOnError(boolean v)
+    public BatchBuilder<T> continueOnError( boolean v )
     {
         continueOnError = v;
         return this;
     }
+
     /** */
     public BatchBuilder<T> mapper( BiConsumer<T, PreparedStatement> mapper )
     {
@@ -165,8 +173,7 @@ BatchBuilder<T> {
             if( TABLE.equals(name) )
             {
                 if( S.isNullOrEmpty(metaData.getTableName()) )
-                    throw new IllegalStateException(
-                            Tags.PRODUCT_LABEL + "No table name for '" + valueClass.getName() + "'");
+                    throw new IllegalStateException( Tags.PRODUCT_LABEL + "No table name for '" + valueClass.getName() + "'");
 
                 StringBuilder sb = new StringBuilder();
 
@@ -191,9 +198,7 @@ BatchBuilder<T> {
                     }//end for
 
                     if( columnList.isEmpty() )
-                        throw new IllegalStateException(
-                                Tags.PRODUCT_LABEL + "No insertable columns for '" + valueClass.getName() + "'"
-                        );
+                        throw new IllegalStateException( Tags.PRODUCT_LABEL + "No insertable columns for '" + valueClass.getName() + "'" );
 
                     sb.append(") values( ");
                     columnList.forEach( (c)->sb.append("?,") );
@@ -217,9 +222,7 @@ BatchBuilder<T> {
                     }//end for
 
                     if( columnList.isEmpty() )
-                        throw new IllegalStateException(
-                                Tags.PRODUCT_LABEL + "No ID columns for delete of '" + valueClass.getName() + "'"
-                        );
+                        throw new IllegalStateException( Tags.PRODUCT_LABEL + "No ID columns for delete of '" + valueClass.getName() + "'" );
                 }
 
                 if( rowMapper == null )
@@ -238,12 +241,7 @@ BatchBuilder<T> {
                                      ps.setObject( i++, Jt2St.convert( p.invokeGetter(t) ));
                             }
                             catch( Exception th ) {
-                                throw new RuntimeException(
-                                        Tags.PRODUCT_LABEL + "Error on map entity '"
-                                                + (t == null ? "<null>" : t.getClass())
-                                                + "' to JDBC PreparedStatement",
-                                        th
-                                );
+                                throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on map entity '"+ (t == null ? "<null>" : t.getClass()) + "' to JDBC PreparedStatement", th);
                             }
                         }
                     };
@@ -255,26 +253,26 @@ BatchBuilder<T> {
             {
                 if ( batchMode == BatchModeEnum.CUSTOM )
                 {
-                    final CallStatement cs = SQLCallBuilder.NEW(tc).url(url).name(name).buildStatement();
                     final IParameters parameters = U.nvl(callBackParameters, IParameters.EMPTY);
+                    final Map<Integer, Function<T,Object> > valuesMap = new TreeMap<>();
 
-                    Map<Integer, Function<T,Object> > valuesMap = new TreeMap<>();
+                    final CallStatement cs = SQLCallBuilder.NEW(tc).url(url).name(name).buildStatement();
 
                     final String st = cs.prepareSql(AbstractCallMakerBase.createPLSqlMaker(QUERY),
                             ( pos, id, value ) -> {
                                 if(id instanceof Integer) {
                                     valuesMap.put(pos, ( t ) -> parameters.getParameter((Integer)id));
-                                } else if(id instanceof String) {
-                                    final IEntityProperty< T, ? > p = metaData.getProperty((String)id);
-                                    valuesMap.put(pos,
-                                        p == null ? ( t ) -> parameters.getParameter((String)id) : ( t ) -> p.invokeGetter(t)
-                                    );
-                                } else if(id instanceof Token.TypeEnum) {
-                                    valuesMap.put(pos, ( t ) -> value);
-                                } else {
-                                    throw new IllegalArgumentException(
-                                            "Unsupported batch parameter: " + id);
                                 }
+                                else if(id instanceof String)
+                                {
+                                    final IEntityProperty< T, ? > p = metaData.getProperty((String)id);
+                                    valuesMap.put(pos, p == null ? ( t ) -> parameters.getParameter((String)id) : ( t ) -> p.invokeGetter(t));
+                                }
+                                else if(id instanceof Token.TypeEnum)
+                                    valuesMap.put(pos, ( t ) -> value);
+                                else
+                                    throw new IllegalArgumentException("Unsupported batch parameter: " + id);
+
                             }
                     );
 
@@ -317,13 +315,7 @@ BatchBuilder<T> {
             if( statementText == null )
                 throw new IllegalStateException( Tags.PRODUCT_LABEL + "Error on make SQL statementText for JDBC PreparedStatement: Неопределяемые параметры настройки." );
 
-            return new BatchLoaderImp<T>(
-                    tc.getConnection().prepareStatement(statementText),
-                    rowMapper,
-                    batchSize,
-                    commitBatch,
-                    continueOnError
-            );
+            return new BatchLoaderImp<>( tc.getConnection().prepareStatement(statementText), rowMapper, batchSize, commitBatch, continueOnError );
         }
         catch( Throwable th ) {
             throw new CallException( Tags.PRODUCT_LABEL + "Error on prepare 'prepareStatement'", th );
@@ -331,37 +323,28 @@ BatchBuilder<T> {
     }
 
     /** */
-    public IBatchLoader<T> build( ) throws CallException {
+    public IBatchLoader<T> build( ) throws CallException
+    {
+        Checks.Require.objects ( tc, "tc" );
+        Checks.Require.objects ( valueClass, "valueClass" );
+        Checks.Require.text    ( name, "name" );
+        Checks.Require.objects ( batchMode, "batchMode" );
+        Checks.Numeric.positive( batchSize, "batchSize" );
 
-        if( tc == null )
-            throw new IllegalArgumentException("'tc' is null");
-
-        if( valueClass == null )
-            throw new IllegalArgumentException("'valueClass' is null");
-
-        if( S.isNullOrEmpty(name) )
-            throw new IllegalArgumentException("'name' is null");
-
-        if( batchMode == null )
-            throw new IllegalArgumentException("'batchMode' is null");
-
-        if( batchSize <= 0 )
-            throw new IllegalArgumentException("'batchSize' must be greater than zero");
-
-        if( batchMode == BatchModeEnum.CUSTOM ) {
+        if( batchMode == BatchModeEnum.CUSTOM )
+        {
             if( TABLE.equals(name) || url == null )
-                throw new UnsupportedOperationException(
-                        Tags.PRODUCT_LABEL + "Для режима 'CUSTOM' необходимо установить атрибуты 'url' и 'name'");
+                throw new UnsupportedOperationException( Tags.PRODUCT_LABEL + "Для режима 'CUSTOM' необходимо установить атрибуты 'url' и 'name'");
         }
         else if( U.in( batchMode, INSERT, DELETE ) ) {
-            if( !TABLE.equals(name) )
-                throw new UnsupportedOperationException(
-                        Tags.PRODUCT_LABEL + "Only 'TABLE' mode support now. Если нужны другие режимы обращайтесь по известному адресу.");
+            if(!TABLE.equals(name) )
+                throw new UnsupportedOperationException( Tags.PRODUCT_LABEL + "Only 'TABLE' mode support now. Если нужны другие режимы обращайтесь по известному адресу.");
         }
 
-        return createBatchLoader();
+        return createBatchLoader( );
     }
 
+    /** */
     static private class BatchLoaderImp<T> implements IBatchLoader<T> {
 
         /** Коллекция слушателей событий самого DataCall */
@@ -411,6 +394,7 @@ BatchBuilder<T> {
 
             if( executing || closing )
                 throw new CallException("Batch loader is already executing or closing");
+
             executing = true;
 
             try {
@@ -422,7 +406,9 @@ BatchBuilder<T> {
         }
 
         private BatchLoaderImp<T> executeInternal() {
+
             boolean executeStarted = false;
+
             CallException failure = null;
 
             try {
@@ -435,10 +421,11 @@ BatchBuilder<T> {
                     throw new IllegalStateException( Tags.PRODUCT_LABEL + "Batch loader cannot be reused after JDBC cleanup failure" );
 
                 fireBatchEvent( BatchEvent.Type.EXECUTE, true, 0, null );
+
                 executeStarted = true;
 
-                int itemCount = 0;
-                int batchCount= 0;
+                int itemCount    = 0;
+                int batchCount   = 0;
                 int pendingCount = 0;
 
                 while( iter.hasNext() )
@@ -448,18 +435,24 @@ BatchBuilder<T> {
                     fireBatchEvent( BatchEvent.Type.PREPARE_ITEM, true, itemCount, t );
 
                     try {
+
                         ps.clearParameters();
+
                         try {
                             mapper.accept( t, ps );
                         }
                         catch( RuntimeException th ) {
                             if( !continueOnError || hasSqlCause(th) )
                                 throw th;
+
                             fireThrowableEvent( BatchEvent.Type.PREPARE_ITEM, itemCount, t, th );
+
                             continue;
                         }
                         ps.addBatch();
+
                         pendingCount++;
+
                         fireBatchEvent( BatchEvent.Type.PREPARE_ITEM, false, itemCount, t );
                     }
                     finally {
@@ -468,7 +461,7 @@ BatchBuilder<T> {
 
                     if( pendingCount == batchSize )
                     {
-                        processBatch(batchCount, pendingCount);
+                        processBatch( batchCount, pendingCount );
                         batchCount++;
                         pendingCount = 0;
                     }
@@ -498,15 +491,14 @@ BatchBuilder<T> {
                 failure = new CallException( Tags.PRODUCT_LABEL + "Error on execute batch loader", th );
             }
             finally {
+
                 if( executeStarted )
                     try {
                         fireBatchEvent( BatchEvent.Type.EXECUTE, false, 0, null );
                     }
                     catch( Throwable afterFailure ) {
                         if( failure == null )
-                            failure = new CallException(
-                                    Tags.PRODUCT_LABEL + "Error on execute batch loader",
-                                    afterFailure );
+                            failure = new CallException( Tags.PRODUCT_LABEL + "Error on execute batch loader", afterFailure );
                         else
                             failure.addSuppressed(afterFailure);
                     }
@@ -514,6 +506,7 @@ BatchBuilder<T> {
 
             if( failure != null )
                 throw failure;
+
             return this;
         }
 
@@ -528,25 +521,24 @@ BatchBuilder<T> {
             fireBatchEvent( BatchEvent.Type.PROCESS_BATCH, true, batchIndex, null );
 
             try {
+
                 int[] counts = ps.executeBatch();
+
                 // Не считаем частичный результат успешно выполненным batch.
                 if( counts == null || counts.length != pendingCount )
-                    throw new BatchUpdateException(
-                            "Unexpected JDBC batch result count: "
-                                    + (counts == null ? "null" : counts.length)
-                                    + " != " + pendingCount,
-                            counts == null ? new int[0] : counts);
-                for( int count : counts ) {
-                    if( count == Statement.EXECUTE_FAILED )
-                        throw new BatchUpdateException(
-                                "JDBC batch returned EXECUTE_FAILED", counts);
-                }
+                    throw new BatchUpdateException( "Unexpected JDBC batch result count: " + (counts == null ? "null" : counts.length) + " != " + pendingCount, counts == null ? new int[0] : counts);
 
+                for( int count : counts ) {
+
+                     if( count == Statement.EXECUTE_FAILED )
+                         throw new BatchUpdateException( "JDBC batch returned EXECUTE_FAILED", counts);
+                }
             }
             catch( Throwable th ) {
                 failure = th;
             }
-            finally {
+            finally
+            {
                 try {
                     ps.clearBatch();
                 }
@@ -561,7 +553,8 @@ BatchBuilder<T> {
             }
 
             // Очистка должна завершиться до commit: иначе ошибку очистки уже нельзя откатить.
-            if( failure == null && commitBatch ) {
+            if( failure == null && commitBatch )
+            {
                 try {
                     ps.getConnection().commit();
                 }
@@ -571,7 +564,8 @@ BatchBuilder<T> {
                 }
             }
 
-            if( failure != null && commitBatch ) {
+            if( failure != null && commitBatch )
+            {
                 try {
                     ps.getConnection().rollback();
                 }
@@ -588,9 +582,10 @@ BatchBuilder<T> {
 
             // При внешней транзакции JDBC batch мог выполнить часть строк.
             // Без rollback продолжать работу в этой транзакции нельзя.
-            boolean canContinue = continueOnError
-                    && !clearFailed && !rollbackFailed && !commitFailed;
-            if( canContinue ) {
+            boolean canContinue = continueOnError && !clearFailed && !rollbackFailed && !commitFailed;
+
+            if( canContinue )
+            {
                 try {
                     boolean autoCommit = ps.getConnection().getAutoCommit();
                     // rollback при autoCommit=true не возвращает частично выполненные строки.
@@ -608,22 +603,27 @@ BatchBuilder<T> {
                 throw failure;
         }
 
+        /** */
         private void fireBatchEvent( BatchEvent.Type eventType, boolean before,  int dataIndex, T item ) {
-            if(!listeners.isEmpty() )
-                listeners.fire( new BatchEvent( this, eventType, before, dataIndex, item, null ) );
+            if( !listeners.isEmpty() )
+                 listeners.fire( new BatchEvent( this, eventType, before, dataIndex, item, null ) );
         }
 
-        private static boolean hasSqlCause( Throwable th ) {
+        /** */
+        private static boolean hasSqlCause( Throwable th )
+        {
             for( Throwable cause = th; cause != null; cause = cause.getCause() ) {
                 if( cause instanceof SQLException )
                     return true;
             }
+
             return false;
         }
 
+        /** */
         private void fireThrowableEvent( BatchEvent.Type eventType, int dataIndex, T item, Throwable th ) {
-            if(!listeners.isEmpty() )
-                listeners.fire( new BatchEvent( this, eventType, false, dataIndex, item, th ) );
+            if( !listeners.isEmpty() )
+                 listeners.fire( new BatchEvent( this, eventType, false, dataIndex, item, th ) );
         }
 
         @Override
@@ -656,7 +656,9 @@ BatchBuilder<T> {
             }
         }
 
+        /** */
         private void closeStatement() {
+
             Throwable failure = null;
 
             try {
@@ -692,10 +694,7 @@ BatchBuilder<T> {
             if( failure instanceof Error )
                 throw (Error) failure;
             if( failure != null )
-                throw new CallException(
-                        Tags.PRODUCT_LABEL + "Error on close batch loader",
-                        failure );
+                throw new CallException( Tags.PRODUCT_LABEL + "Error on close batch loader", failure );
         }
     }
-
-    }
+}
