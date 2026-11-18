@@ -96,6 +96,7 @@ public class LegacyLinkBuildersCompatibilityTest {
         String filter;
         int queries;
         int clears;
+        boolean failQuery;
 
         @SuppressWarnings("unchecked")
         DataDestination() {
@@ -115,6 +116,7 @@ public class LegacyLinkBuildersCompatibilityTest {
                                 parameters.put((String) args[0], args[1]);
                                 return null;
                             case "executeQuery":
+                                if (failQuery) throw new IllegalStateException("query failed");
                                 queries++;
                                 return null;
                             case "clear":
@@ -224,6 +226,65 @@ public class LegacyLinkBuildersCompatibilityTest {
     }
 
     @Test
+    public void dlBuilderSupportsUnfilteredParametersAndRequeryControl() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+
+        IDataLink<IDataSet<Row>, ISQLDataSet<Row>> link =
+                new DLBuilder<IDataSet<Row>, ISQLDataSet<Row>, Row, Object>()
+                        .source(source.dataSet).destination(destination.dataSet)
+                        .joinColumn(row -> row.id, "PARENT_ID")
+                        .joinColumn(row -> row.kind, "KIND", false)
+                        .requeryIf(() -> false).link();
+
+        assertTrue(((Object) link) instanceof IDataSetLink);
+        assertTrue(destination.filter.contains("PARENT_ID=:PARENT_ID"));
+        assertFalse(destination.filter.contains("KIND"));
+        assertEquals(Integer.valueOf(1), destination.parameters.get("PARENT_ID"));
+        assertEquals("A", destination.parameters.get("KIND"));
+        assertEquals(0, destination.queries);
+        ((AutoCloseable) link).close();
+    }
+
+    @Test
+    public void closingOneLinkDoesNotChangeAnotherBuiltFromTheSameBuilder() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+        DataLinkBuilder<Row> builder = new DataLinkBuilder<Row>()
+                .source(source.dataSet).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID");
+
+        IDataSetLink<Row> first = builder.build();
+        IDataSetLink<Row> second = builder.build();
+        first.close();
+        source.navigate(new Row(2, "B"));
+
+        assertEquals(Integer.valueOf(2), destination.parameters.get("PARENT_ID"));
+        assertEquals(3, destination.queries);
+        second.close();
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+    }
+
+    @Test
+    public void failedInitialDataSetQueryReleasesLinkResources() {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+        destination.failQuery = true;
+
+        try {
+            new DLBuilder<IDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                    .source(source.dataSet).destination(destination.dataSet)
+                    .joinColumn(row -> row.id, "PARENT_ID").link();
+            fail("Initial query should fail");
+        } catch (RuntimeException expected) {
+            assertEquals(Integer.valueOf(31), destination.removedFilters.get(0));
+            assertTrue(source.navigation.isEmpty());
+            assertTrue(source.rows.isEmpty());
+        }
+    }
+
+    @Test
     public void dataCallLinkPreservesLazyInputsAndNavigationExecution() {
         Source source = new Source(new Row(1, "A"));
         CallDestination destination = new CallDestination();
@@ -257,6 +318,29 @@ public class LegacyLinkBuildersCompatibilityTest {
 
         source.closeBefore();
         assertEquals(1, destination.closes);
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
+    }
+
+    @Test
+    public void dataCallLinkCanBeClosedWithoutClosingDestination() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        CallDestination destination = new CallDestination();
+        IDataLink link = DataCallLinkBuilder.NEW()
+                .source(source.dataSet).destination(destination.dataCall)
+                .join((Row row) -> row.id, "PARENT_ID").build();
+
+        ((AutoCloseable)link).close();
+        ((AutoCloseable)link).close();
+        source.navigate(new Row(2, "B"));
+        source.closeBefore();
+
+        assertTrue(destination.executions.isEmpty());
+        assertEquals(0, destination.closes);
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
     }
 
     @Test

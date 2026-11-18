@@ -5,7 +5,6 @@ import ru.inversion.utils.Triplet;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -31,177 +30,6 @@ import java.util.function.Supplier;
  * @author sulimoff
  */
 public class DataLinkBuilder<T> {
-	
-	/** 
-     * Имплементация, по умолчанию, {@code IDataSetLink} связи между 2-мя DataSet.
-     * <p>
-     * for internal use only
-     */
-	private static class Link<R> implements IDataSetLink<R>, IDataSetNavigationListener<R>, IDataSetRowListener<R>, AutoCloseable {
-
-		private IDataSet<R>	 source;
-		private ISQLDataSet<?> destination;
-		private final List< Triplet<Function<R,Object>,String, Boolean> > pairsColumn;
-        private Supplier<Boolean> requeryIf;
-		private final int filterId;
-
-		/** */
-		public Link( IDataSet<R> source, ISQLDataSet<?> destination, List<Triplet<Function<R,Object>,String, Boolean>> pairsColumn, Supplier<Boolean> requeryIf ) {
-			
-			this.source		 = source;
-			this.destination = destination;
-			this.pairsColumn = pairsColumn;
-            this.requeryIf	 = requeryIf == null ? ()->true : requeryIf;
-
-
-            // Добавляем маркер для того, чтобы можно было выделить из общего предиката,
-			// тот который устанавливается из родительского dataSet
-
-			StringBuilder sb = new StringBuilder("/*P[*/(");
-
-			final int l = sb.length();
-
-			pairsColumn.stream().filter(t->t.third).forEach((p) -> {
-                if( sb.length() > l )
-    				sb.append( " and " );
-				sb.append( p.second).append( "=:" ).append( p.second );
-				destination.setParameter( p.second, null );
-			});
-
-			if( sb.length() > l )
-			{
-				sb.append(")/*P]*/");
-				filterId = destination.setFilter( sb.toString(), true, true );
-			}
-			else
-				filterId = 0;
-
-			source.addNavigationListener(this);
-            source.addRowListener(this);
-            
-            R row = source.getCurrentRow();
-            
-            if( row != null )
-                refreshDestination(row);
-		}
-		
-		@Override
-		public IDataSet<R> getSource( ) {
-			return source;
-		}
-		
-		@Override
-		public IDataSet getDestination( ) {
-			return destination;
-		}
-		
-		@Override
-		public void navigated( DataSetNavigationEvent<R> e ) {
-			refreshDestination( e.getNewRow() );
-		}
-
-        /** 
-         * Обновляет ведомый DataSet.
-         */
-        private void refreshDestination( R row ) {
-            
-            try {
-
-            	check4Closed();
-
-            	if( row != null ) {
-
-					pairsColumn.stream().forEach((p) -> {
-						destination.setParameter( p.second, p.first.apply(row) );
-					});
-
-					if( requeryIf.get() )
-						destination.executeQuery();
-            	}
-            	else {
-					destination.clear();
-					pairsColumn.stream().forEach((p) -> {
-						destination.setParameter( p.second, null );
-					});
-				}
-			}
-			catch( Throwable th ) {
-				throw new RuntimeException( Tags.PRODUCT_LABEL + "DataSetLink: Error on refresh dep dataSet", th);
-			}
-        }
-
-        /** */
-        private void check4Closed() {
-        	if( source == null )
-        		throw new IllegalStateException( Tags.PRODUCT_LABEL + "DataSetLink already closed" );
-		}
-        /** */
-		@Override
-		public void close() {
-
-			if( source == null )
-				return;
-
-			source.removeNavigationListener(this);
-            source.removeRowListener(this);
-
-			if( destination != null )
-				destination.removeFilter( filterId );
-
-            destination = null;
-            source 		= null;
-
-            requeryIf = ()->false;
-            pairsColumn.clear();
-		}
-
-        /** */
-        @Override
-        public boolean isAutoRequery() {
-            return requeryIf.get();
-        }
-
-        /** */
-        @Override
-        public void setAutoRequery(boolean autoRequery) {
-            this.requeryIf = ()->autoRequery;
-        }
-
-		@Override
-		public void setAutoRequery( Supplier< Boolean > r ) {
-			this.requeryIf = r == null ? ()->true : r;
-		}
-
-		/** */
-        @Override
-        public void rowOperation( DataSetRowEvent<R> event ) {
-            if( event.getRowOperation() == DataSetRowEvent.RowOperationEnum.REFRESH ) {
-                refreshDestination( event.getNewRow() );
-            }
-//            else if( event.getRowOperation() == DataSetRowEvent.RowOperationEnum.CLEAR ) {
-//				pairsColumn.stream().forEach((p) -> { destination.setParameter( p.second, null );});
-//				getDestination().clear();
-//			}
-        }
-
-		/** */
-		@Override
-		public void initDestinationRow( BiConsumer<Object,String> initializer ) {
-
-			if( initializer == null )
-				return;
-
-			check4Closed();
-
-			R row = source.getCurrentRow();
-
-			if( row == null )
-			    return;
-
-            pairsColumn.forEach( (p)->initializer.accept( p.first.apply(row), p.second ) );
-		}
-
-	}//end class
 	
     // Данные DataSetLinkBuilder
     
@@ -317,7 +145,11 @@ public class DataLinkBuilder<T> {
 		if( pairsColumn.isEmpty() )
 			throw new IllegalStateException( Tags.PRODUCT_LABEL + "DataLinkBuilder: no join column specified" );
 		
-		return new Link( source, destination, pairsColumn, requeryIf );
+		DLBuilder<IDataSet<? extends T>, ISQLDataSet<?>, T, Object> builder = new DLBuilder<>();
+		builder.source(source).destination(destination).requeryIf(requeryIf);
+		for (Triplet<Function<? extends T,Object>,String,Boolean> column : pairsColumn)
+			builder.joinColumn((Function<T,Object>)column.first, column.second, column.third);
+		return (IDataSetLink<T>)(Object)builder.link();
 	}
     
     /** 

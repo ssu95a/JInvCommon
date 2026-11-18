@@ -190,6 +190,7 @@ public class DLBuilderCompatibilityTest {
         int nextFilterId = 43;
         int queries;
         int clears;
+        boolean failQuery;
 
         @Override public int setFilter(String sql, boolean fixed, boolean append) {
             assertTrue(fixed);
@@ -209,6 +210,7 @@ public class DLBuilderCompatibilityTest {
         }
 
         @Override public void executeQuery() {
+            if (failQuery) throw new IllegalStateException("query failed");
             queries++;
         }
 
@@ -275,6 +277,7 @@ public class DLBuilderCompatibilityTest {
         assertTrue(destination.filter.contains("PARENT_ID= :PARENT_ID"));
         assertEquals(Integer.valueOf(10), destination.parameters.get("PARENT_ID"));
         assertEquals(1, destination.queries);
+        assertEquals(1, source.dataSetListeners.size());
 
         source.navigate(new Row(11));
         source.changeValue(new Row(12));
@@ -292,8 +295,62 @@ public class DLBuilderCompatibilityTest {
         ((AutoCloseable) link).close();
         assertTrue(source.navigation.isEmpty());
         assertTrue(source.items.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
         source.navigate(new Row(14));
         assertEquals(3, destination.queries);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void treeToDataSetWorksWithAnyISQLDataSetImplementation() throws Exception {
+        TreeSource source = new TreeSource(new Row(10));
+        Map<String,Object> parameters = new HashMap<>();
+        List<Integer> removedFilters = new ArrayList<>();
+        int[] queries = {0};
+        ISQLDataSet<Row> destination = (ISQLDataSet<Row>)Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[]{ISQLDataSet.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "setParameter": parameters.put((String)args[0], args[1]); return null;
+                        case "setFilter": return 73;
+                        case "removeFilter": removedFilters.add((Integer)args[0]); return null;
+                        case "executeQuery": queries[0]++; return null;
+                        case "clear": return null;
+                        default: throw new AssertionError(method.getName());
+                    }
+                });
+
+        IDataLink<ITreeDataSet<Row>, ISQLDataSet<Row>> link =
+                new DLBuilder<ITreeDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                        .source(source.tree).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+
+        assertEquals(Integer.valueOf(10), parameters.get("PARENT_ID"));
+        assertEquals(1, queries[0]);
+        source.navigate(new Row(11));
+        assertEquals(2, queries[0]);
+        ((AutoCloseable)link).close();
+        assertEquals(Integer.valueOf(73), removedFilters.get(0));
+        assertTrue(source.dataSetListeners.isEmpty());
+    }
+
+    @Test
+    public void failedInitialTreeLinkQueryReleasesFilterAndListeners() {
+        TreeSource source = new TreeSource(new Row(1));
+        DataDestination destination = new DataDestination();
+        destination.failQuery = true;
+
+        try {
+            new DLBuilder<ITreeDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                    .source(source.tree).destination(destination)
+                    .joinColumn(row -> row.id, "PARENT_ID").link();
+            fail("Initial query should fail");
+        } catch (RuntimeException expected) {
+            assertTrue(destination.filters.isEmpty());
+            assertTrue(source.navigation.isEmpty());
+            assertTrue(source.items.isEmpty());
+            assertTrue(source.dataSetListeners.isEmpty());
+        }
     }
 
     @Test
@@ -321,6 +378,24 @@ public class DLBuilderCompatibilityTest {
         ((AutoCloseable) second).close();
         assertEquals(1, destination.filters.size());
         assertEquals("ACTIVE=1", destination.filters.get(ownFilter));
+    }
+
+    @Test
+    public void dataSetToTreeUsesDefaultRequeryAndSupportsUnfilteredParameter() throws Exception {
+        DataSource source = new DataSource(new Row(1));
+        TreeDestination destination = new TreeDestination();
+        IDataLink<IDataSet<Row>, SQLTreeDataSet<Row>> link =
+                new DLBuilder<IDataSet<Row>, SQLTreeDataSet<Row>, Row, Integer>()
+                        .source(source.dataSet).destination(destination)
+                        .joinColumn(row -> row.id, "EXTRA", false).link();
+
+        assertNull(destination.filter);
+        assertEquals(Integer.valueOf(1), destination.parameters.get("EXTRA"));
+        assertEquals(1, destination.queries);
+        source.navigate(new Row(2));
+        assertEquals(2, destination.queries);
+        ((AutoCloseable)link).close();
+        assertTrue(destination.filters.isEmpty());
     }
 
     @Test
