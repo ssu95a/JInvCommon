@@ -420,15 +420,18 @@ public class DLBuilder<S,D,P,T> {
         @Override public void close() {
             if (source == null)
                 return;
-            source.removeNavigationListener(this);
-            source.removeRowListener(this);
-            if (source instanceof SQLDataSet<?>)
-                source.removeDataSetListener(this);
-            if (filterId != 0)
-                destination.removeFilter(filterId);
-            source = null;
-            destination = null;
-            requeryIf = () -> false;
+            try {
+                source.removeNavigationListener(this);
+                source.removeRowListener(this);
+                if (source instanceof SQLDataSet<?>)
+                    source.removeDataSetListener(this);
+                if (filterId != 0)
+                    destination.removeFilter(filterId);
+            } finally {
+                source = null;
+                destination = null;
+                requeryIf = () -> false;
+            }
         }
 
         @Override public boolean isAutoRequery() { return requeryIf.get(); }

@@ -115,6 +115,7 @@ public class LegacyLinkBuildersCompatibilityTest {
         int queries;
         int clears;
         boolean failQuery;
+        RuntimeException removeFailure;
 
         @SuppressWarnings("unchecked")
         DataDestination() {
@@ -129,6 +130,7 @@ public class LegacyLinkBuildersCompatibilityTest {
                                 return 31;
                             case "removeFilter":
                                 removedFilters.add((Integer) args[0]);
+                                if (removeFailure != null) throw removeFailure;
                                 return filter;
                             case "setParameter":
                                 parameters.put((String) args[0], args[1]);
@@ -609,6 +611,59 @@ public class LegacyLinkBuildersCompatibilityTest {
 
         assertSame(source, link.getSource());
         assertTrue(destination.removedFilters.isEmpty());
+        link.close();
+        assertEquals(1, destination.removedFilters.size());
+    }
+
+    @Test
+    public void failedFilterRemovalStillDetachesDataSetLink() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+        IDataSetLink<Row> link = new DataLinkBuilder<Row>()
+                .source(source.dataSet).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID").build();
+        IllegalStateException failure = new IllegalStateException("filter removal failed");
+        destination.removeFailure = failure;
+
+        try {
+            link.close();
+            fail("Filter removal should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+        assertEquals(1, destination.removedFilters.size());
+        link.close();
+        assertEquals(1, destination.removedFilters.size());
+    }
+
+    @Test
+    public void failedFilterRemovalDuringSqlDataSetCloseStillClosesReader() throws Exception {
+        SqlSource source = new SqlSource();
+        DataDestination destination = new DataDestination();
+        int[] readerCloses = {0};
+        source.useReader(() -> readerCloses[0]++);
+        IDataSetLink<Row> link = new DataLinkBuilder<Row>()
+                .source(source).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID").build();
+        IllegalStateException failure = new IllegalStateException("filter removal failed");
+        destination.removeFailure = failure;
+
+        try {
+            source.close();
+            fail("Filter removal should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+
+        assertEquals(1, readerCloses[0]);
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertEquals(1, destination.removedFilters.size());
         link.close();
         assertEquals(1, destination.removedFilters.size());
     }
