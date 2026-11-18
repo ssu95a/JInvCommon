@@ -255,7 +255,11 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                 return true;
             }
             catch( SQLException ex ) {
-                return false;
+                closeAfterFailure(ex);
+                throw new RuntimeException(
+                        Tags.PRODUCT_LABEL
+                                + "Error on check ResultSet state",
+                        ex);
             }
         }
 

@@ -256,6 +256,29 @@ public class JDBCDataReaderPreparedSqlTest {
     }
 
     @Test
+    public void resultSetStateFailureIsNotReportedAsEndOfPage() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        jdbc.resultSetHasRow = true;
+        jdbc.failResultSetIsClosed = true;
+
+        JDBCDataReader<Object> reader = reader(jdbc, prepared("select 1"));
+        reader.executeQuery(Collections.<Object>emptyList());
+
+        try {
+            reader.getNextPage(1);
+            fail("Expected ResultSet state failure");
+        }
+        catch (RuntimeException expected) {
+            assertTrue(rootCause(expected) instanceof SQLException);
+            assertEquals("ResultSet state failure", rootCause(expected).getMessage());
+        }
+
+        assertTrue(jdbc.statements.get(0).resultSetClosed);
+        assertTrue(jdbc.statements.get(0).closed);
+        assertTrue(reader.isEOF());
+    }
+
+    @Test
     public void expiredCursorIsRolledBackReexecutedAndResumesAfterReturnedRow() throws Exception {
         RecoveryJdbc jdbc = new RecoveryJdbc();
 
@@ -587,6 +610,7 @@ public class JDBCDataReaderPreparedSqlTest {
         final List<StatementCalls> statements = new ArrayList<>();
         int failOnBinding = -1;
         boolean resultSetHasRow;
+        boolean failResultSetIsClosed;
         boolean failResultSetClose;
         boolean failStatementClose;
 
@@ -598,6 +622,7 @@ public class JDBCDataReaderPreparedSqlTest {
                                     (String) args[0],
                                     failOnBinding,
                                     resultSetHasRow,
+                                    failResultSetIsClosed,
                                     failResultSetClose,
                                     failStatementClose
                             );
@@ -616,9 +641,11 @@ public class JDBCDataReaderPreparedSqlTest {
         final List<Integer> bindingOrder = new ArrayList<>();
         final int failOnBinding;
         final boolean resultSetHasRow;
+        final boolean failResultSetIsClosed;
         final boolean failResultSetClose;
         final boolean failStatementClose;
         boolean closed;
+        boolean resultSetClosed;
         int executions;
         int fetchSize;
 
@@ -626,12 +653,14 @@ public class JDBCDataReaderPreparedSqlTest {
                 String sql,
                 int failOnBinding,
                 boolean resultSetHasRow,
+                boolean failResultSetIsClosed,
                 boolean failResultSetClose,
                 boolean failStatementClose
         ) {
             this.sql = sql;
             this.failOnBinding = failOnBinding;
             this.resultSetHasRow = resultSetHasRow;
+            this.failResultSetIsClosed = failResultSetIsClosed;
             this.failResultSetClose = failResultSetClose;
             this.failStatementClose = failStatementClose;
         }
@@ -663,8 +692,6 @@ public class JDBCDataReaderPreparedSqlTest {
                     return Proxy.newProxyInstance(ResultSet.class.getClassLoader(),
                             new Class<?>[]{ResultSet.class}, new InvocationHandler() {
                                 private boolean first = true;
-                                private boolean resultSetClosed;
-
                                 @Override
                                 public Object invoke(
                                         Object rs,
@@ -686,6 +713,10 @@ public class JDBCDataReaderPreparedSqlTest {
                                                         "99998");
                                             return null;
                                         case "isClosed":
+                                            if (failResultSetIsClosed)
+                                                throw new SQLException(
+                                                        "ResultSet state failure",
+                                                        "99994");
                                             return resultSetClosed;
                                         default:
                                             throw new UnsupportedOperationException(
