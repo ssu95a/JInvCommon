@@ -64,11 +64,14 @@ class DbmsSqlDataCallTest {
         FakeWork work = new FakeWork(statement, values);
         IDataCall call = new SQLCallBuilder.DbmsSqlDataCall(work, statement, values, "oracle");
         List<String> events = new ArrayList<>();
+        List<Boolean> results = new ArrayList<>();
         List<String> outputs = new ArrayList<>();
         AtomicInteger callbacks = new AtomicInteger();
 
-        call.addDataCallListener(event -> events.add(
-                event.getEventType() + ":" + event.isBefore()));
+        call.addDataCallListener(event -> {
+            events.add(event.getEventType() + ":" + event.isBefore());
+            results.add(event.getExecutionSuccess());
+        });
         call.setValueCallback("a", () -> "in-" + callbacks.incrementAndGet());
         call.setValueListener((id, value) -> outputs.add(id + "=" + value));
         call.setValueListener("a", (id, value) -> outputs.add("individual=" + value));
@@ -86,6 +89,7 @@ class DbmsSqlDataCallTest {
         assertEquals("out-in-2", call.getParameter("A"));
         assertEquals("return-2", call.getReturnValue());
         assertEquals(Arrays.asList("EXECUTE:true", "EXECUTE:false", "EXECUTE:true", "EXECUTE:false"), events);
+        assertEquals(Arrays.asList(null, true, null, true), results);
         assertEquals(Arrays.asList(
                 "A=out-in-1", "individual=out-in-1", "RET=return-1",
                 "A=out-in-2", "individual=out-in-2", "RET=return-2"
@@ -106,14 +110,18 @@ class DbmsSqlDataCallTest {
         FakeWork work = new FakeWork(statement, values);
         work.executionFailure = new CallException("launcher failure");
         IDataCall call = new SQLCallBuilder.DbmsSqlDataCall(work, statement, values, null);
+        List<Boolean> results = new ArrayList<>();
         call.addDataCallListener(event -> {
-            if( event.getEventType() == DataCallEvent.Type.EXECUTE && event.isAfter() )
+            if( event.getEventType() == DataCallEvent.Type.EXECUTE && event.isAfter() ) {
+                results.add(event.getExecutionSuccess());
                 throw new IllegalStateException("after failure");
+            }
         });
 
         CallException error = assertThrows(CallException.class, call::execute);
         assertSame(work.executionFailure, error);
         assertEquals("after failure", error.getSuppressed()[0].getMessage());
+        assertEquals(Arrays.asList(false), results);
         call.close();
     }
 
@@ -134,7 +142,11 @@ class DbmsSqlDataCallTest {
         FakeWork work = new FakeWork(named, values);
         IDataCall failing = new SQLCallBuilder.DbmsSqlDataCall(work, named, values, null);
         List<String> events = new ArrayList<>();
-        failing.addDataCallListener(event -> events.add(event.getEventType() + ":" + event.isBefore()));
+        List<Boolean> results = new ArrayList<>();
+        failing.addDataCallListener(event -> {
+            events.add(event.getEventType() + ":" + event.isBefore());
+            results.add(event.getExecutionSuccess());
+        });
         failing.setValueCallback("A", () -> { throw new IllegalStateException("callback failure"); });
         failing.setValueListener((id, value) -> fail("OUT listener before execution"));
 
@@ -142,6 +154,7 @@ class DbmsSqlDataCallTest {
         assertEquals("callback failure", error.getCause().getMessage());
         assertEquals(0, work.executions);
         assertEquals(Arrays.asList("EXECUTE:true", "EXECUTE:false"), events);
+        assertEquals(Arrays.asList(null, false), results);
         failing.close();
     }
 

@@ -27,6 +27,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class JsonSqlCallValueConversionTest {
 
     @Test
+    void callbackFailureReportsUnsuccessfulExecuteAfter() throws CallException {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("begin use_value(:a); end;")
+                .lang(LangEnum.PL_pgSQL)
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("a").mode(IN).sqlType(Types.VARCHAR).build())
+                .build();
+        JsonSqlCall call = new JsonSqlCall(null, statement, null, "failed");
+        List<DataCallEvent> events = new ArrayList<>();
+        call.addDataCallListener(event -> {
+            events.add(event);
+            if (event.isAfter())
+                throw new IllegalStateException("after failed");
+        });
+        call.setValueCallback("a", () -> { throw new IllegalStateException("callback failed"); });
+
+        CallException failure = assertThrows(CallException.class, call::execute);
+
+        assertEquals("callback failed", failure.getCause().getMessage());
+        assertEquals("after failed", failure.getSuppressed()[0].getMessage());
+        assertEquals(2, events.size());
+        assertTrue(events.get(0).isBefore());
+        assertNull(events.get(0).getExecutionSuccess());
+        assertTrue(events.get(1).isAfter());
+        assertEquals(Boolean.FALSE, events.get(1).getExecutionSuccess());
+    }
+
+    @Test
     void scalarRequestPayloadKeepsLauncherContract() throws CallException {
         CallStatement statement = CallBuilder.NEW()
                 .sql("begin use_values("

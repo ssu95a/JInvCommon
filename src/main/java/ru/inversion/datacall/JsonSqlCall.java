@@ -714,7 +714,7 @@ public class JsonSqlCall implements IDataCall {
         dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, true  ) );
 
         String jsonSql = null;
-        CallException failure = null;
+        Throwable failure = null;
 
         try {
             final Map<String,String> substMap = new HashMap<>();
@@ -727,13 +727,14 @@ public class JsonSqlCall implements IDataCall {
             applyJsonResponse(response, substMap);
         }
         catch( Throwable th ) {
-            failure = new CallException(
+            CallException callFailure = new CallException(
                     Tags.PRODUCT_LABEL + "Error on execute JSON work",
                     null,
                     jsonSql,
                     th
             );
-            throw failure;
+            failure = callFailure;
+            throw callFailure;
         }
         finally {
             try {
@@ -741,13 +742,25 @@ public class JsonSqlCall implements IDataCall {
                     storedProcWork.set("plSql", null);
                 }
                 catch( RuntimeException | Error cleanupFailure ) {
-                    if( failure == null )
+                    if( failure == null ) {
+                        failure = cleanupFailure;
                         throw cleanupFailure;
-                    failure.addSuppressed(cleanupFailure);
+                    }
+                    if( failure != cleanupFailure )
+                        failure.addSuppressed(cleanupFailure);
                 }
             }
             finally {
-                dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
+                try {
+                    dataCallListeners.fire( new DataCallEvent(
+                            this, DataCallEvent.Type.EXECUTE, false, failure == null ) );
+                }
+                catch( RuntimeException | Error afterFailure ) {
+                    if( failure == null )
+                        throw afterFailure;
+                    if( failure != afterFailure )
+                        failure.addSuppressed(afterFailure);
+                }
             }
         }
 

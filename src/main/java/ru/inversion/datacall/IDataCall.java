@@ -69,8 +69,10 @@ public interface IDataCall extends IParameters, AutoCloseable {
      */
     Object getProperty( String propertyName ) throws CallException;
 
-    /** Выполнение хранимого кода
-      */
+    /**
+     * Выполнение хранимого кода. Событие EXECUTE after содержит результат
+     * выполнения в {@link DataCallEvent#getExecutionSuccess()}.
+     */
     <C extends IDataCall> C execute( ) throws CallException;
 
     /** Установка входного параметра для хранимого кода, через supplier

@@ -478,7 +478,7 @@ public class SQLCallBuilder {
             }
             finally {
                 try {
-                    dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false));
+                    dataCallListeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false, failure == null));
                 }
                 catch( RuntimeException | Error afterFailure ) {
                     if( failure == null )
@@ -702,7 +702,7 @@ public class SQLCallBuilder {
                 }
                 finally {
                     try {
-                        dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false ) );
+                        dataCallListeners.fire( new DataCallEvent( this, DataCallEvent.Type.EXECUTE, false, failure == null ) );
                     }
                     catch( RuntimeException | Error afterFailure ) {
                         if( failure == null )
