@@ -1,8 +1,10 @@
 package ru.inversion.dataset;
 
 import org.junit.Test;
+import ru.inversion.datacall.DataCallEvent;
 import ru.inversion.datacall.DataCallLinkBuilder;
 import ru.inversion.datacall.IDataCall;
+import ru.inversion.datacall.IDataCallListener;
 
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
@@ -154,6 +156,131 @@ public class LegacyLinkBuildersCompatibilityTest {
                         }
                     });
         }
+    }
+
+    private static final class CallSource {
+        final IDataCall dataCall;
+        final Map<String,Object> outputs = new HashMap<>();
+        final List<IDataCallListener> listeners = new ArrayList<>();
+        boolean failExecute;
+
+        CallSource() {
+            dataCall = (IDataCall)Proxy.newProxyInstance(getClass().getClassLoader(),
+                    new Class<?>[]{IDataCall.class}, (proxy, method, args) -> {
+                        switch (method.getName()) {
+                            case "addDataCallListener": listeners.add((IDataCallListener)args[0]); return null;
+                            case "removeDataCallListener": listeners.remove(args[0]); return null;
+                            case "getParameter": return outputs.get(args[0]);
+                            case "execute":
+                                fire(new DataCallEvent(proxy, DataCallEvent.Type.EXECUTE, true));
+                                fire(new DataCallEvent(proxy, DataCallEvent.Type.EXECUTE, false, !failExecute));
+                                if (failExecute) throw new IllegalStateException("call failed");
+                                return proxy;
+                            case "close":
+                                fire(new DataCallEvent(proxy, DataCallEvent.Type.CLOSE, true));
+                                fire(new DataCallEvent(proxy, DataCallEvent.Type.CLOSE, false));
+                                return null;
+                            default: throw new AssertionError("Unexpected IDataCall." + method.getName());
+                        }
+                    });
+        }
+
+        void fire(DataCallEvent event) {
+            for (IDataCallListener listener : new ArrayList<>(listeners))
+                listener.dataCallChanged(event);
+        }
+    }
+
+    @Test
+    public void dataCallToDataSetUpdatesOnlyAfterConfirmedSuccess() throws Exception {
+        CallSource source = new CallSource();
+        DataDestination destination = new DataDestination();
+        IDataLink<IDataCall,ISQLDataSet<Row>> link =
+                new DLBuilder<IDataCall,ISQLDataSet<Row>,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination.dataSet)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID")
+                        .joinColumn(call -> call.getParameter("KIND"), "KIND", false).link();
+
+        assertEquals(1, source.listeners.size());
+        assertEquals(0, destination.queries);
+        assertTrue(destination.filter.contains("PARENT_ID= :PARENT_ID"));
+        assertFalse(destination.filter.contains("KIND"));
+
+        source.outputs.put("ID", 1);
+        source.outputs.put("KIND", "A");
+        source.dataCall.execute();
+        assertEquals(1, destination.queries);
+        assertEquals(Integer.valueOf(1), destination.parameters.get("PARENT_ID"));
+        assertEquals("A", destination.parameters.get("KIND"));
+
+        source.outputs.put("ID", 2);
+        source.failExecute = true;
+        try {
+            source.dataCall.execute();
+            fail("Call should fail");
+        } catch (IllegalStateException expected) {
+            assertEquals("call failed", expected.getMessage());
+        }
+        source.failExecute = false;
+        source.fire(new DataCallEvent(source.dataCall, DataCallEvent.Type.EXECUTE, false));
+        assertEquals(1, destination.queries);
+        assertEquals(Integer.valueOf(1), destination.parameters.get("PARENT_ID"));
+
+        source.dataCall.execute();
+        assertEquals(2, destination.queries);
+        assertEquals(Integer.valueOf(2), destination.parameters.get("PARENT_ID"));
+        link.setAutoRequery(() -> false);
+        source.outputs.put("ID", 3);
+        source.dataCall.execute();
+        assertEquals(2, destination.queries);
+        assertEquals(Integer.valueOf(3), destination.parameters.get("PARENT_ID"));
+
+        ((AutoCloseable)link).close();
+        ((AutoCloseable)link).close();
+        assertTrue(source.listeners.isEmpty());
+        assertEquals(Integer.valueOf(31), destination.removedFilters.get(0));
+        source.outputs.put("ID", 4);
+        source.dataCall.execute();
+        assertEquals(Integer.valueOf(3), destination.parameters.get("PARENT_ID"));
+    }
+
+    @Test
+    public void closingSourceCallReleasesItsDataSetLink() {
+        CallSource source = new CallSource();
+        DataDestination destination = new DataDestination();
+        new DLBuilder<IDataCall,ISQLDataSet<Row>,IDataCall,Object>()
+                .source(source.dataCall).destination(destination.dataSet)
+                .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+
+        source.dataCall.close();
+
+        assertTrue(source.listeners.isEmpty());
+        assertEquals(1, destination.removedFilters.size());
+    }
+
+    @Test
+    public void failedDetailQueryCanBeRetriedOnNextCall() throws Exception {
+        CallSource source = new CallSource();
+        DataDestination destination = new DataDestination();
+        IDataLink<IDataCall,ISQLDataSet<Row>> link =
+                new DLBuilder<IDataCall,ISQLDataSet<Row>,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination.dataSet)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+        source.outputs.put("ID", 1);
+        destination.failQuery = true;
+
+        try {
+            source.dataCall.execute();
+            fail("Detail query should fail");
+        } catch (RuntimeException expected) {
+            assertEquals(1, source.listeners.size());
+            assertTrue(destination.removedFilters.isEmpty());
+        }
+
+        destination.failQuery = false;
+        source.dataCall.execute();
+        assertEquals(1, destination.queries);
+        ((AutoCloseable)link).close();
     }
 
     @Test
