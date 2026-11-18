@@ -36,6 +36,7 @@ public class DLBuilderCompatibilityTest {
         final List<IDataSetNavigationListener<Row>> navigation = new ArrayList<>();
         final List<IDataSetRowListener<Row>> rows = new ArrayList<>();
         Row current;
+        RuntimeException removeNavigationFailure;
 
         @SuppressWarnings("unchecked")
         DataSource(Row current) {
@@ -50,6 +51,7 @@ public class DLBuilderCompatibilityTest {
                                 return null;
                             case "removeNavigationListener":
                                 navigation.remove(invocationArgs[0]);
+                                if (removeNavigationFailure != null) throw removeNavigationFailure;
                                 return null;
                             case "addRowListener":
                                 rows.add((IDataSetRowListener<Row>) invocationArgs[0]);
@@ -88,6 +90,7 @@ public class DLBuilderCompatibilityTest {
         final List<ITreeDataSetListener<Row>> dataSetListeners = new ArrayList<>();
         ITreeDataSetItem<Row> current;
         Row currentValue;
+        RuntimeException removeNavigationFailure;
 
         @SuppressWarnings("unchecked")
         TreeSource(Row initial) {
@@ -101,6 +104,7 @@ public class DLBuilderCompatibilityTest {
                                 return null;
                             case "removeNavigationListener":
                                 navigation.remove(invocationArgs[0]);
+                                if (removeNavigationFailure != null) throw removeNavigationFailure;
                                 return null;
                             case "addItemListener":
                                 items.add((ITreeDataSetItemListener<Row>) invocationArgs[0]);
@@ -175,6 +179,7 @@ public class DLBuilderCompatibilityTest {
         int nextFilterId = 42;
         int queries;
         int clears;
+        RuntimeException removeFailure;
 
         @Override public int setFilter(String sql, boolean fixed, boolean append) {
             assertTrue(fixed);
@@ -186,7 +191,9 @@ public class DLBuilderCompatibilityTest {
         }
 
         @Override public String removeFilter(int id) {
-            return filters.remove(id);
+            String filter = filters.remove(id);
+            if (removeFailure != null) throw removeFailure;
+            return filter;
         }
 
         @Override public void setParameter(String name, Object value) {
@@ -210,6 +217,7 @@ public class DLBuilderCompatibilityTest {
         int queries;
         int clears;
         boolean failQuery;
+        RuntimeException removeFailure;
 
         @Override public int setFilter(String sql, boolean fixed, boolean append) {
             assertTrue(fixed);
@@ -221,7 +229,9 @@ public class DLBuilderCompatibilityTest {
         }
 
         @Override public String removeFilter(int id) {
-            return filters.remove(id);
+            String filter = filters.remove(id);
+            if (removeFailure != null) throw removeFailure;
+            return filter;
         }
 
         @Override public void setParameter(String name, Object value) {
@@ -302,6 +312,30 @@ public class DLBuilderCompatibilityTest {
     }
 
     @Test
+    public void dataSetToTreeUnsubscribeFailureStillRemovesFilter() throws Exception {
+        DataSource source = new DataSource(null);
+        TreeDestination destination = new TreeDestination();
+        IDataLink<IDataSet<Row>, SQLTreeDataSet<Row>> link =
+                new DLBuilder<IDataSet<Row>, SQLTreeDataSet<Row>, Row, Integer>()
+                        .source(source.dataSet).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        IllegalStateException failure = new IllegalStateException("unsubscribe failed");
+        source.removeNavigationFailure = failure;
+
+        try {
+            ((AutoCloseable) link).close();
+            fail("Close should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+        assertTrue(destination.filters.isEmpty());
+    }
+
+    @Test
     public void treeToDataSetPreservesNavigationItemChangeAndEmptyItem() throws Exception {
         TreeSource source = new TreeSource(new Row(10));
         DataDestination destination = new DataDestination();
@@ -366,6 +400,37 @@ public class DLBuilderCompatibilityTest {
         assertTrue(source.navigation.isEmpty());
         assertTrue(source.items.isEmpty());
         assertTrue(source.dataSetListeners.isEmpty());
+    }
+
+    @Test
+    public void treeLinkCleansUpAfterMultipleCloseFailures() throws Exception {
+        TreeSource source = new TreeSource(null);
+        DataDestination destination = new DataDestination();
+        IDataLink<ITreeDataSet<Row>, ISQLDataSet<Row>> link =
+                new DLBuilder<ITreeDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                        .source(source.tree).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        IllegalStateException unsubscribeFailure = new IllegalStateException("unsubscribe failed");
+        IllegalStateException filterFailure = new IllegalStateException("filter failed");
+        source.removeNavigationFailure = unsubscribeFailure;
+        destination.removeFailure = filterFailure;
+
+        try {
+            ((AutoCloseable) link).close();
+            fail("Close should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(unsubscribeFailure, actual);
+            assertEquals(1, actual.getSuppressed().length);
+            assertSame(filterFailure, actual.getSuppressed()[0]);
+        }
+
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.items.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
+        assertTrue(destination.filters.isEmpty());
+        ((AutoCloseable) link).close();
     }
 
     @Test
@@ -479,6 +544,31 @@ public class DLBuilderCompatibilityTest {
         assertTrue(source.dataSetListeners.isEmpty());
         assertNull(destination.callbacks.get("PARENT_ID").get());
         assertEquals(0, destination.closes);
+    }
+
+    @Test
+    public void failedTreeListenerRemovalClearsLazyCallInput() throws Exception {
+        TreeSource source = new TreeSource(new Row(1));
+        CallDestination destination = new CallDestination();
+        IDataLink<ITreeDataSet<Row>, IDataCall> link =
+                new DLBuilder<ITreeDataSet<Row>, IDataCall, Row, Integer>()
+                        .source(source.tree).destination(destination.call)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        IllegalStateException failure = new IllegalStateException("unsubscribe failed");
+        source.removeNavigationFailure = failure;
+
+        try {
+            ((AutoCloseable) link).close();
+            fail("Close should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.items.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+        assertNull(link.getSource());
+        ((AutoCloseable) link).close();
     }
 
     @Test

@@ -19,6 +19,26 @@ import java.util.function.Supplier;
 /** */
 public class DLBuilder<S,D,P,T> {
 
+    // При закрытии выполняем каждую операцию и сохраняем первую ошибку.
+    private static Throwable cleanup(Throwable failure, Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException | Error error) {
+            if (failure == null)
+                return error;
+            if (failure != error)
+                failure.addSuppressed(error);
+        }
+        return failure;
+    }
+
+    private static void throwCleanupFailure(Throwable failure) {
+        if (failure instanceof Error)
+            throw (Error)failure;
+        if (failure != null)
+            throw (RuntimeException)failure;
+    }
+
     private static abstract class AbstractLink<S,D,P,T> implements IDataLink<S, D>,
         IDataSetNavigationListener<P>,
         IDataSetRowListener<P>,
@@ -113,8 +133,9 @@ public class DLBuilder<S,D,P,T> {
             } catch (RuntimeException | Error failure) {
                 try {
                     close();
-                } catch (Exception cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
+                } catch (RuntimeException | Error cleanupFailure) {
+                    if (failure != cleanupFailure)
+                        failure.addSuppressed(cleanupFailure);
                 }
                 throw failure;
             }
@@ -126,35 +147,41 @@ public class DLBuilder<S,D,P,T> {
             if( source == null )
                 return;
 
-            if( source instanceof IDataSet )
-            {
-                IDataSet<P> ds = (IDataSet<P>)source;
-                ds.removeNavigationListener(this);
-                ds.removeRowListener(this);
-            }
-            else if( source instanceof ITreeDataSet )
-            {
-                ITreeDataSet<P> ds = (ITreeDataSet<P>)source;
-                ds.removeNavigationListener(this);
-                ds.removeItemListener      (this);
-                ds.removeDataSetListener   (this);
-            }
-            else if( source instanceof IDataCall )
-                ((IDataCall)source).removeDataCallListener(this);
+            Throwable failure = null;
+            try {
+                if( source instanceof IDataSet ) {
+                    IDataSet<P> ds = (IDataSet<P>)source;
+                    failure = cleanup(failure, () -> ds.removeNavigationListener(this));
+                    failure = cleanup(failure, () -> ds.removeRowListener(this));
+                }
+                else if( source instanceof ITreeDataSet ) {
+                    ITreeDataSet<P> ds = (ITreeDataSet<P>)source;
+                    failure = cleanup(failure, () -> ds.removeNavigationListener(this));
+                    failure = cleanup(failure, () -> ds.removeItemListener(this));
+                    failure = cleanup(failure, () -> ds.removeDataSetListener(this));
+                }
+                else if( source instanceof IDataCall ) {
+                    IDataCall call = (IDataCall)source;
+                    failure = cleanup(failure, () -> call.removeDataCallListener(this));
+                }
 
-            if( filterId != null )
-            {
-                if( destination instanceof ISQLDataSet<?> )
-                    ((ISQLDataSet<?>)destination).removeFilter(filterId);
-                else if( destination instanceof SQLTreeDataSet<?> )
-                    ((SQLTreeDataSet<?>)destination).removeFilter(filterId);
+                if( filterId != null ) {
+                    if( destination instanceof ISQLDataSet<?> ) {
+                        ISQLDataSet<?> ds = (ISQLDataSet<?>)destination;
+                        failure = cleanup(failure, () -> ds.removeFilter(filterId));
+                    }
+                    else if( destination instanceof SQLTreeDataSet<?> ) {
+                        SQLTreeDataSet<?> ds = (SQLTreeDataSet<?>)destination;
+                        failure = cleanup(failure, () -> ds.removeFilter(filterId));
+                    }
+                }
+            } finally {
+                destination = null;
+                source = null;
+                requeryIf = () -> false;
+                pairsColumn = null;
             }
-
-            destination = null;
-            source 		= null;
-
-            requeryIf   = ()->false;
-            pairsColumn = null;
+            throwCleanupFailure(failure);
         }
 
         /** */
@@ -375,7 +402,8 @@ public class DLBuilder<S,D,P,T> {
                 try {
                     close();
                 } catch (RuntimeException | Error cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
+                    if (failure != cleanupFailure)
+                        failure.addSuppressed(cleanupFailure);
                 }
                 throw failure;
             }
@@ -420,18 +448,22 @@ public class DLBuilder<S,D,P,T> {
         @Override public void close() {
             if (source == null)
                 return;
+            Throwable failure = null;
             try {
-                source.removeNavigationListener(this);
-                source.removeRowListener(this);
-                if (source instanceof SQLDataSet<?>)
-                    source.removeDataSetListener(this);
+                IDataSet<P> ds = source;
+                ISQLDataSet<?> detail = destination;
+                failure = cleanup(failure, () -> ds.removeNavigationListener(this));
+                failure = cleanup(failure, () -> ds.removeRowListener(this));
+                if (ds instanceof SQLDataSet<?>)
+                    failure = cleanup(failure, () -> ds.removeDataSetListener(this));
                 if (filterId != 0)
-                    destination.removeFilter(filterId);
+                    failure = cleanup(failure, () -> detail.removeFilter(filterId));
             } finally {
                 source = null;
                 destination = null;
                 requeryIf = () -> false;
             }
+            throwCleanupFailure(failure);
         }
 
         @Override public boolean isAutoRequery() { return requeryIf.get(); }
@@ -481,9 +513,14 @@ public class DLBuilder<S,D,P,T> {
                 source.addNavigationListener(this);
                 source.addRowListener(this);
                 source.addDataSetListener(this);
-            } catch (Throwable th) {
-                close();
-                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on build link between DataSet and DataCall", th);
+            } catch (Throwable failure) {
+                try {
+                    close();
+                } catch (RuntimeException | Error cleanupFailure) {
+                    if (failure != cleanupFailure)
+                        failure.addSuppressed(cleanupFailure);
+                }
+                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on build link between DataSet and DataCall", failure);
             }
         }
 
@@ -499,11 +536,8 @@ public class DLBuilder<S,D,P,T> {
 
         @Override public void dataSetChanged(DataSetEvent event) {
             if (event.isBefore() && event.getEventType() == DataSetEvent.DataSetEventType.CLOSE) {
-                try {
-                    destination.close();
-                } finally {
-                    close();
-                }
+                Throwable failure = cleanup(null, destination::close);
+                throwCleanupFailure(cleanup(failure, this::close));
             }
         }
 
@@ -523,11 +557,17 @@ public class DLBuilder<S,D,P,T> {
         @Override public void close() {
             if (source == null)
                 return;
-            source.removeNavigationListener(this);
-            source.removeRowListener(this);
-            source.removeDataSetListener(this);
-            source = null;
-            requeryIf = () -> false;
+            Throwable failure = null;
+            try {
+                IDataSet<P> ds = source;
+                failure = cleanup(failure, () -> ds.removeNavigationListener(this));
+                failure = cleanup(failure, () -> ds.removeRowListener(this));
+                failure = cleanup(failure, () -> ds.removeDataSetListener(this));
+            } finally {
+                source = null;
+                requeryIf = () -> false;
+            }
+            throwCleanupFailure(failure);
         }
     }
 
@@ -558,9 +598,14 @@ public class DLBuilder<S,D,P,T> {
                 source.addNavigationListener(this);
                 source.addItemListener(this);
                 source.addDataSetListener(this);
-            } catch (Throwable th) {
-                close();
-                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on build link between TreeDataSet and DataCall", th);
+            } catch (Throwable failure) {
+                try {
+                    close();
+                } catch (RuntimeException | Error cleanupFailure) {
+                    if (failure != cleanupFailure)
+                        failure.addSuppressed(cleanupFailure);
+                }
+                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on build link between TreeDataSet and DataCall", failure);
             }
         }
 
@@ -576,11 +621,8 @@ public class DLBuilder<S,D,P,T> {
 
         @Override public void dataSetChanged(TreeDataSetEvent<P> event) {
             if (event.isBefore() && event.getEventType() == DataSetEvent.DataSetEventType.CLOSE) {
-                try {
-                    destination.close();
-                } finally {
-                    close();
-                }
+                Throwable failure = cleanup(null, destination::close);
+                throwCleanupFailure(cleanup(failure, this::close));
             }
         }
 
@@ -600,11 +642,17 @@ public class DLBuilder<S,D,P,T> {
         @Override public void close() {
             if (source == null)
                 return;
-            source.removeNavigationListener(this);
-            source.removeItemListener(this);
-            source.removeDataSetListener(this);
-            source = null;
-            requeryIf = () -> false;
+            Throwable failure = null;
+            try {
+                ITreeDataSet<P> tree = source;
+                failure = cleanup(failure, () -> tree.removeNavigationListener(this));
+                failure = cleanup(failure, () -> tree.removeItemListener(this));
+                failure = cleanup(failure, () -> tree.removeDataSetListener(this));
+            } finally {
+                source = null;
+                requeryIf = () -> false;
+            }
+            throwCleanupFailure(failure);
         }
     }
 
@@ -636,7 +684,8 @@ public class DLBuilder<S,D,P,T> {
                 try {
                     close();
                 } catch (RuntimeException | Error cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
+                    if (failure != cleanupFailure)
+                        failure.addSuppressed(cleanupFailure);
                 }
                 throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on build link between DataCalls", failure);
             }
@@ -649,8 +698,8 @@ public class DLBuilder<S,D,P,T> {
             if (source == null)
                 return;
             if (event.getEventType() == DataCallEvent.Type.CLOSE && event.isBefore()) {
-                close();
-                destination.close();
+                Throwable failure = cleanup(null, this::close);
+                throwCleanupFailure(cleanup(failure, destination::close));
             } else if (event.getEventType() == DataCallEvent.Type.EXECUTE && event.isAfter()
                     && Boolean.TRUE.equals(event.getExecutionSuccess())) {
                 try {
@@ -676,9 +725,15 @@ public class DLBuilder<S,D,P,T> {
         @Override public void close() {
             if (source == null)
                 return;
-            source.removeDataCallListener(this);
-            source = null;
-            requeryIf = () -> false;
+            Throwable failure = null;
+            try {
+                IDataCall call = source;
+                failure = cleanup(failure, () -> call.removeDataCallListener(this));
+            } finally {
+                source = null;
+                requeryIf = () -> false;
+            }
+            throwCleanupFailure(failure);
         }
     }
 

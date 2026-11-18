@@ -36,6 +36,7 @@ public class LegacyLinkBuildersCompatibilityTest {
         final List<IDataSetRowListener<Row>> rows = new ArrayList<>();
         final List<IDataSetListener> dataSetListeners = new ArrayList<>();
         Row current;
+        RuntimeException removeNavigationFailure;
 
         @SuppressWarnings("unchecked")
         Source(Row current) {
@@ -50,6 +51,7 @@ public class LegacyLinkBuildersCompatibilityTest {
                                 return null;
                             case "removeNavigationListener":
                                 navigation.remove(args[0]);
+                                if (removeNavigationFailure != null) throw removeNavigationFailure;
                                 return null;
                             case "addRowListener":
                                 rows.add((IDataSetRowListener<Row>) args[0]);
@@ -177,6 +179,7 @@ public class LegacyLinkBuildersCompatibilityTest {
         boolean failExecute;
         boolean failClose;
         Runnable onExecute;
+        RuntimeException callbackFailure;
 
         CallDestination() {
             dataCall = (IDataCall) Proxy.newProxyInstance(
@@ -184,6 +187,7 @@ public class LegacyLinkBuildersCompatibilityTest {
                     (proxy, method, args) -> {
                         switch (method.getName()) {
                             case "setValueCallback":
+                                if (callbackFailure != null) throw callbackFailure;
                                 callbacks.put((String) args[0], (Supplier<?>) args[1]);
                                 return null;
                             case "execute":
@@ -208,13 +212,17 @@ public class LegacyLinkBuildersCompatibilityTest {
         final Map<String,Object> outputs = new HashMap<>();
         final List<IDataCallListener> listeners = new ArrayList<>();
         boolean failExecute;
+        RuntimeException removeListenerFailure;
 
         CallSource() {
             dataCall = (IDataCall)Proxy.newProxyInstance(getClass().getClassLoader(),
                     new Class<?>[]{IDataCall.class}, (proxy, method, args) -> {
                         switch (method.getName()) {
                             case "addDataCallListener": listeners.add((IDataCallListener)args[0]); return null;
-                            case "removeDataCallListener": listeners.remove(args[0]); return null;
+                            case "removeDataCallListener":
+                                listeners.remove(args[0]);
+                                if (removeListenerFailure != null) throw removeListenerFailure;
+                                return null;
                             case "getParameter": return outputs.get(args[0]);
                             case "execute":
                                 fire(new DataCallEvent(proxy, DataCallEvent.Type.EXECUTE, true));
@@ -300,6 +308,30 @@ public class LegacyLinkBuildersCompatibilityTest {
         source.dataCall.close();
 
         assertTrue(source.listeners.isEmpty());
+        assertEquals(1, destination.removedFilters.size());
+    }
+
+    @Test
+    public void failedCallToDataSetFilterRemovalDetachesLink() throws Exception {
+        CallSource source = new CallSource();
+        DataDestination destination = new DataDestination();
+        IDataLink<IDataCall,ISQLDataSet<Row>> link =
+                new DLBuilder<IDataCall,ISQLDataSet<Row>,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination.dataSet)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+        IllegalStateException failure = new IllegalStateException("filter failed");
+        destination.removeFailure = failure;
+
+        try {
+            ((AutoCloseable) link).close();
+            fail("Close should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertTrue(source.listeners.isEmpty());
+        ((AutoCloseable) link).close();
         assertEquals(1, destination.removedFilters.size());
     }
 
@@ -484,6 +516,29 @@ public class LegacyLinkBuildersCompatibilityTest {
     }
 
     @Test
+    public void failedCallListenerRemovalStillClosesDependentCall() {
+        CallSource source = new CallSource();
+        CallDestination destination = new CallDestination();
+        IDataLink<IDataCall,IDataCall> link =
+                new DLBuilder<IDataCall,IDataCall,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination.dataCall)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+        IllegalStateException failure = new IllegalStateException("unsubscribe failed");
+        source.removeListenerFailure = failure;
+
+        try {
+            source.dataCall.close();
+            fail("Close should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+        assertEquals(1, destination.closes);
+        assertTrue(source.listeners.isEmpty());
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+        assertNull(link.getSource());
+    }
+
+    @Test
     public void reentrantCallChainFailsWithoutRecursingForever() throws Exception {
         CallSource source = new CallSource();
         CallDestination destination = new CallDestination();
@@ -638,6 +693,29 @@ public class LegacyLinkBuildersCompatibilityTest {
         assertTrue(source.rows.isEmpty());
         assertEquals(1, destination.removedFilters.size());
         link.close();
+        assertEquals(1, destination.removedFilters.size());
+    }
+
+    @Test
+    public void failedDataSetLinkUnsubscribeStillRemovesFilter() throws Exception {
+        Source source = new Source(null);
+        DataDestination destination = new DataDestination();
+        IDataSetLink<Row> link = new DataLinkBuilder<Row>()
+                .source(source.dataSet).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID").build();
+        IllegalStateException failure = new IllegalStateException("unsubscribe failed");
+        source.removeNavigationFailure = failure;
+
+        try {
+            link.close();
+            fail("Close should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+        assertNull(link.getSource());
+        assertNull(link.getDestination());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
         assertEquals(1, destination.removedFilters.size());
     }
 
@@ -834,6 +912,80 @@ public class LegacyLinkBuildersCompatibilityTest {
         assertTrue(source.navigation.isEmpty());
         assertTrue(source.rows.isEmpty());
         assertTrue(source.dataSetListeners.isEmpty());
+    }
+
+    @Test
+    public void failedDataSetListenerRemovalDetachesCallLinkAndKeepsOriginalFailure() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        CallDestination destination = new CallDestination();
+        IDataLink<IDataSet<Row>, IDataCall> link =
+                new DLBuilder<IDataSet<Row>, IDataCall, Row, Integer>()
+                        .source(source.dataSet).destination(destination.dataCall)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        IllegalStateException failure = new IllegalStateException("unsubscribe failed");
+        source.removeNavigationFailure = failure;
+
+        try {
+            ((AutoCloseable) link).close();
+            fail("Close should fail");
+        } catch (IllegalStateException actual) {
+            assertSame(failure, actual);
+        }
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+        assertNull(link.getSource());
+        ((AutoCloseable) link).close();
+    }
+
+    @Test
+    public void failedDependentClosePreservesFailureAndDetachesDataSetCallLink() {
+        Source source = new Source(new Row(1, "A"));
+        CallDestination destination = new CallDestination();
+        IDataLink<IDataSet<Row>, IDataCall> link =
+                new DLBuilder<IDataSet<Row>, IDataCall, Row, Integer>()
+                        .source(source.dataSet).destination(destination.dataCall)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        IllegalStateException cleanupFailure = new IllegalStateException("unsubscribe failed");
+        source.removeNavigationFailure = cleanupFailure;
+        destination.failClose = true;
+
+        try {
+            source.closeBefore();
+            fail("Dependent close should fail");
+        } catch (IllegalStateException actual) {
+            assertEquals("dependent close failed", actual.getMessage());
+            assertEquals(1, actual.getSuppressed().length);
+            assertSame(cleanupFailure, actual.getSuppressed()[0]);
+        }
+        assertEquals(1, destination.closes);
+        assertNull(link.getSource());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+        assertTrue(source.dataSetListeners.isEmpty());
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+    }
+
+    @Test
+    public void failedCallLinkConstructionKeepsOriginalFailureWithCleanupSuppressed() {
+        Source source = new Source(new Row(1, "A"));
+        CallDestination destination = new CallDestination();
+        IllegalStateException failure = new IllegalStateException("callback failed");
+        IllegalStateException cleanupFailure = new IllegalStateException("unsubscribe failed");
+        destination.callbackFailure = failure;
+        source.removeNavigationFailure = cleanupFailure;
+
+        try {
+            new DLBuilder<IDataSet<Row>, IDataCall, Row, Integer>()
+                    .source(source.dataSet).destination(destination.dataCall)
+                    .joinColumn(row -> row.id, "PARENT_ID").link();
+            fail("Construction should fail");
+        } catch (RuntimeException actual) {
+            assertSame(failure, actual.getCause());
+            assertEquals(1, failure.getSuppressed().length);
+            assertSame(cleanupFailure, failure.getSuppressed()[0]);
+        }
     }
 
     @Test
