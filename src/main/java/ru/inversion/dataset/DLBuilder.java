@@ -335,7 +335,7 @@ public class DLBuilder<S,D,P,T> {
 
     /** Связь двух DataSet с сохранением контракта IDataSetLink. */
     private static class DataSet2DataSetLink<P,T> implements IDataSetLink<P>,
-            IDataSetNavigationListener<P>, IDataSetRowListener<P> {
+            IDataSetNavigationListener<P>, IDataSetRowListener<P>, IDataSetListener {
 
         private IDataSet<P> source;
         private ISQLDataSet<?> destination;
@@ -366,6 +366,8 @@ public class DLBuilder<S,D,P,T> {
             try {
                 source.addNavigationListener(this);
                 source.addRowListener(this);
+                if (source instanceof SQLDataSet<?>)
+                    source.addDataSetListener(this);
                 P row = source.getCurrentRow();
                 if (row != null)
                     refreshDestination(row);
@@ -389,6 +391,11 @@ public class DLBuilder<S,D,P,T> {
         @Override public void rowOperation(DataSetRowEvent<P> event) {
             if (event.getRowOperation() == DataSetRowEvent.RowOperationEnum.REFRESH)
                 refreshDestination(event.getNewRow());
+        }
+
+        @Override public void dataSetChanged(DataSetEvent event) {
+            if (event.isBefore() && event.getEventType() == DataSetEvent.DataSetEventType.CLOSE)
+                close();
         }
 
         private void refreshDestination(P row) {
@@ -415,6 +422,8 @@ public class DLBuilder<S,D,P,T> {
                 return;
             source.removeNavigationListener(this);
             source.removeRowListener(this);
+            if (source instanceof SQLDataSet<?>)
+                source.removeDataSetListener(this);
             if (filterId != 0)
                 destination.removeFilter(filterId);
             source = null;

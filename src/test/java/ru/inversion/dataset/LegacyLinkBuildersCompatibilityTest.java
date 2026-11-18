@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.junit.Assert.*;
@@ -89,6 +90,20 @@ public class LegacyLinkBuildersCompatibilityTest {
             DataSetEvent event = new DataSetEvent(dataSet, DataSetEvent.DataSetEventType.CLOSE, true);
             for (IDataSetListener listener : new ArrayList<>(dataSetListeners))
                 listener.dataSetChanged(event);
+        }
+    }
+
+    private static final class SqlSource extends SQLDataSet<Row> {
+        void useReader(Runnable onClose) {
+            dataReader = (ISQLDataReader<Row>) Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[]{ISQLDataReader.class},
+                    (proxy, method, args) -> {
+                        if ("close".equals(method.getName())) {
+                            onClose.run();
+                            return null;
+                        }
+                        throw new AssertionError("Unexpected ISQLDataReader." + method.getName());
+                    });
         }
     }
 
@@ -555,6 +570,66 @@ public class LegacyLinkBuildersCompatibilityTest {
         assertTrue(source.rows.isEmpty());
         source.navigate(new Row(5, "E"));
         assertEquals(2, destination.queries);
+    }
+
+    @Test
+    public void sqlDataSetCloseReleasesItsDataSetLinkBeforeReaderClose() throws Exception {
+        SqlSource source = new SqlSource();
+        DataDestination destination = new DataDestination();
+        int[] readerCloses = {0};
+        AtomicReference<IDataSetLink<Row>> link = new AtomicReference<>();
+        source.useReader(() -> {
+            assertNull(link.get().getSource());
+            assertNull(link.get().getDestination());
+            readerCloses[0]++;
+        });
+        link.set(new DataLinkBuilder<Row>()
+                .source(source).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID").build());
+
+        source.close();
+
+        assertEquals(1, readerCloses[0]);
+        assertEquals(1, destination.removedFilters.size());
+        assertEquals(Integer.valueOf(31), destination.removedFilters.get(0));
+        assertEquals(0, destination.clears);
+        link.get().close();
+        assertEquals(1, destination.removedFilters.size());
+    }
+
+    @Test
+    public void sqlDataSetCloseWithoutReaderKeepsLinkUntilExplicitClose() throws Exception {
+        SqlSource source = new SqlSource();
+        DataDestination destination = new DataDestination();
+        IDataSetLink<Row> link = new DataLinkBuilder<Row>()
+                .source(source).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID").build();
+
+        source.close();
+
+        assertSame(source, link.getSource());
+        assertTrue(destination.removedFilters.isEmpty());
+        link.close();
+        assertEquals(1, destination.removedFilters.size());
+    }
+
+    @Test
+    public void nonSqlDataSetKeepsExplicitLinkLifecycle() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+        IDataSetLink<Row> link = new DataLinkBuilder<Row>()
+                .source(source.dataSet).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID").build();
+
+        assertTrue(source.dataSetListeners.isEmpty());
+        source.closeBefore();
+        assertSame(source.dataSet, link.getSource());
+        assertTrue(destination.removedFilters.isEmpty());
+
+        link.close();
+        assertEquals(1, destination.removedFilters.size());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
     }
 
     @Test
