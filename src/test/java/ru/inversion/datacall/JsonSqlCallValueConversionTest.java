@@ -285,6 +285,37 @@ class JsonSqlCallValueConversionTest {
         assertEquals("nullValue=null", notifications.get(3));
     }
 
+    @Test
+    void responseConversionFailureKeepsPreviousValuesAndSkipsListeners() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("begin use_values(:first, :second); end;")
+                .lang(LangEnum.PL_pgSQL)
+                .parameter(INOUT, "first", Types.INTEGER, null, Integer.class, null, true)
+                .parameter(INOUT, "second", Types.VARCHAR, null, Integer.class, null, true)
+                .build();
+        JsonSqlCall call = new JsonSqlCall(null, statement, null, "response-failure");
+        call.setParameter("first", 1);
+        call.setParameter("second", 2);
+        List<Object> notifications = new ArrayList<>();
+        call.setValueListener((id, value) -> notifications.add(id));
+        call.setValueListener("first", (id, value) -> notifications.add(id));
+
+        Map<String,String> substitutions = new HashMap<>();
+        call.prepareJson(substitutions);
+
+        assertThrows(NumberFormatException.class, () -> call.applyJsonResponse(
+                "{\"parameters\":["
+                        + "{\"name\":\"p_first\",\"value\":42},"
+                        + "{\"name\":\"p_second\",\"value\":\"bad-integer\"}"
+                        + "]}",
+                substitutions
+        ));
+
+        assertEquals(Integer.valueOf(1), call.getParameter("first"));
+        assertEquals(Integer.valueOf(2), call.getParameter("second"));
+        assertTrue(notifications.isEmpty());
+    }
+
     private static Map<String,JsonObject> parametersByName(JsonArray values) {
         Map<String,JsonObject> result = new HashMap<>();
         for( int i = 0; i < values.size(); i++ ) {

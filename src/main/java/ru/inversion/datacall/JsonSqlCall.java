@@ -561,7 +561,7 @@ public class JsonSqlCall implements IDataCall {
         return javaType == null ? value : TypeConverter.convert( value, javaType );
     }
 
-    /** Applies a jf_exec response without coupling JSON decoding to JDBC execution. */
+    /** Конвертирует весь ответ jf_exec до обновления параметров и уведомления слушателей. */
     void applyJsonResponse( String response, Map<String,String> substMap ) {
         if( response == null )
             return;
@@ -575,16 +575,21 @@ public class JsonSqlCall implements IDataCall {
             return;
 
         final TaskContext tc = storedProcWork.getTaskContext();
-        for( JsonValue jsonValue : root.getJsonArray("parameters") )
-            applyOutputParameter((JsonObject)jsonValue, substMap, tc);
+        final JsonArray parameters = root.getJsonArray("parameters");
+        final List<Pair<Comparable<?>, Object>> outputs = new ArrayList<>(parameters.size());
+        for( JsonValue jsonValue : parameters )
+            outputs.add(decodeOutputParameter((JsonObject)jsonValue, substMap, tc));
+
+        for( Pair<Comparable<?>, Object> output : outputs )
+            setOutputValue(output.first, output.second);
     }
 
-    private void applyOutputParameter(
+    private Pair<Comparable<?>, Object> decodeOutputParameter(
             JsonObject jsonParameter,
             Map<String,String> substMap,
             TaskContext tc
     ) {
-        final Comparable parameterId = resolveOutputParameterId(
+        final Comparable<?> parameterId = resolveOutputParameterId(
                 jsonParameter.getString("name"), substMap
         );
         final ParameterMetadata<?> parameter = castParameter(
@@ -592,7 +597,7 @@ public class JsonSqlCall implements IDataCall {
         );
         final Object value = getJsonValue(jsonParameter, "value");
 
-        setOutputValue(parameterId, convertOutputValue(value, parameter, tc));
+        return Pair.makePair(parameterId, convertOutputValue(value, parameter, tc));
     }
 
     private static Object convertOutputValue(
