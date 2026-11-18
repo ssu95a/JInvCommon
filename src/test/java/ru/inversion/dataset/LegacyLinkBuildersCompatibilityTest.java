@@ -1,0 +1,260 @@
+package ru.inversion.dataset;
+
+import org.junit.Test;
+import ru.inversion.datacall.DataCallLinkBuilder;
+import ru.inversion.datacall.IDataCall;
+
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
+
+import static org.junit.Assert.*;
+
+public class LegacyLinkBuildersCompatibilityTest {
+
+    private static final class Row {
+        final int id;
+        final String kind;
+
+        Row(int id, String kind) {
+            this.id = id;
+            this.kind = kind;
+        }
+    }
+
+    private static final class Source {
+        final IDataSet<Row> dataSet;
+        final List<IDataSetNavigationListener<Row>> navigation = new ArrayList<>();
+        final List<IDataSetRowListener<Row>> rows = new ArrayList<>();
+        final List<IDataSetListener> dataSetListeners = new ArrayList<>();
+        Row current;
+
+        @SuppressWarnings("unchecked")
+        Source(Row current) {
+            this.current = current;
+            dataSet = (IDataSet<Row>) Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[]{IDataSet.class},
+                    (proxy, method, args) -> {
+                        switch (method.getName()) {
+                            case "getCurrentRow": return this.current;
+                            case "addNavigationListener":
+                                navigation.add((IDataSetNavigationListener<Row>) args[0]);
+                                return null;
+                            case "removeNavigationListener":
+                                navigation.remove(args[0]);
+                                return null;
+                            case "addRowListener":
+                                rows.add((IDataSetRowListener<Row>) args[0]);
+                                return null;
+                            case "removeRowListener":
+                                rows.remove(args[0]);
+                                return null;
+                            case "addDataSetListener":
+                                dataSetListeners.add((IDataSetListener) args[0]);
+                                return null;
+                            case "removeDataSetListener":
+                                dataSetListeners.remove(args[0]);
+                                return null;
+                            default: throw new AssertionError("Unexpected IDataSet." + method.getName());
+                        }
+                    });
+        }
+
+        void navigate(Row next) {
+            Row previous = current;
+            current = next;
+            DataSetNavigationEvent<Row> event =
+                    new DataSetNavigationEvent<>(dataSet, previous, next, 0, 0);
+            for (IDataSetNavigationListener<Row> listener : new ArrayList<>(navigation))
+                listener.navigated(event);
+        }
+
+        void rowOperation(DataSetRowEvent.RowOperationEnum operation, Row next) {
+            Row previous = current;
+            current = next;
+            DataSetRowEvent<Row> event =
+                    new DataSetRowEvent<>(dataSet, operation, previous, next, 0, 1);
+            for (IDataSetRowListener<Row> listener : new ArrayList<>(rows))
+                listener.rowOperation(event);
+        }
+
+        void closeBefore() {
+            DataSetEvent event = new DataSetEvent(dataSet, DataSetEvent.DataSetEventType.CLOSE, true);
+            for (IDataSetListener listener : new ArrayList<>(dataSetListeners))
+                listener.dataSetChanged(event);
+        }
+    }
+
+    private static final class DataDestination {
+        final ISQLDataSet<Row> dataSet;
+        final Map<String, Object> parameters = new HashMap<>();
+        final List<Integer> removedFilters = new ArrayList<>();
+        String filter;
+        int queries;
+        int clears;
+
+        @SuppressWarnings("unchecked")
+        DataDestination() {
+            dataSet = (ISQLDataSet<Row>) Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[]{ISQLDataSet.class},
+                    (proxy, method, args) -> {
+                        switch (method.getName()) {
+                            case "setFilter":
+                                filter = (String) args[0];
+                                assertEquals(Boolean.TRUE, args[1]);
+                                assertEquals(Boolean.TRUE, args[2]);
+                                return 31;
+                            case "removeFilter":
+                                removedFilters.add((Integer) args[0]);
+                                return filter;
+                            case "setParameter":
+                                parameters.put((String) args[0], args[1]);
+                                return null;
+                            case "executeQuery":
+                                queries++;
+                                return null;
+                            case "clear":
+                                clears++;
+                                return null;
+                            default: throw new AssertionError("Unexpected ISQLDataSet." + method.getName());
+                        }
+                    });
+        }
+    }
+
+    private static final class CallDestination {
+        final IDataCall dataCall;
+        final Map<String, Supplier<?>> callbacks = new HashMap<>();
+        final List<Map<String, Object>> executions = new ArrayList<>();
+        int closes;
+
+        CallDestination() {
+            dataCall = (IDataCall) Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[]{IDataCall.class},
+                    (proxy, method, args) -> {
+                        switch (method.getName()) {
+                            case "setValueCallback":
+                                callbacks.put((String) args[0], (Supplier<?>) args[1]);
+                                return null;
+                            case "execute":
+                                Map<String, Object> values = new HashMap<>();
+                                callbacks.forEach((name, callback) -> values.put(name, callback.get()));
+                                executions.add(values);
+                                return proxy;
+                            case "close":
+                                closes++;
+                                return null;
+                            default: throw new AssertionError("Unexpected IDataCall." + method.getName());
+                        }
+                    });
+        }
+    }
+
+    @Test
+    public void dataLinkBuilderPreservesFilterParametersInitializerAndClose() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+
+        IDataSetLink<Row> link = new DataLinkBuilder<Row>()
+                .source(source.dataSet).destination(destination.dataSet)
+                .joinColumn(row -> row.id, "PARENT_ID")
+                .joinColumn(row -> row.kind, "KIND", false)
+                .autoRequery(false).build();
+
+        assertSame(source.dataSet, link.getSource());
+        assertSame(destination.dataSet, link.getDestination());
+        assertTrue(destination.filter.contains("PARENT_ID=:PARENT_ID"));
+        assertFalse(destination.filter.contains("KIND"));
+        assertEquals(Integer.valueOf(1), destination.parameters.get("PARENT_ID"));
+        assertEquals("A", destination.parameters.get("KIND"));
+        assertEquals(0, destination.queries);
+        assertFalse(link.isAutoRequery());
+
+        Map<String, Object> initialValues = new HashMap<>();
+        link.initDestinationRow((value, column) -> initialValues.put(column, value));
+        assertEquals(Integer.valueOf(1), initialValues.get("PARENT_ID"));
+        assertEquals("A", initialValues.get("KIND"));
+
+        link.setAutoRequery(true);
+        source.navigate(new Row(2, "B"));
+        source.rowOperation(DataSetRowEvent.RowOperationEnum.REFRESH, new Row(3, "C"));
+        assertEquals(2, destination.queries);
+        assertEquals(Integer.valueOf(3), destination.parameters.get("PARENT_ID"));
+        assertEquals("C", destination.parameters.get("KIND"));
+
+        link.setAutoRequery(false);
+        source.navigate(new Row(4, "D"));
+        assertEquals(2, destination.queries);
+        assertEquals(Integer.valueOf(4), destination.parameters.get("PARENT_ID"));
+        source.navigate(null);
+        assertEquals(1, destination.clears);
+        assertNull(destination.parameters.get("PARENT_ID"));
+        assertNull(destination.parameters.get("KIND"));
+
+        link.setAutoRequery((Supplier<Boolean>) null);
+        assertTrue(link.isAutoRequery());
+
+        link.close();
+        assertEquals(Integer.valueOf(31), destination.removedFilters.get(0));
+        assertEquals(1, destination.removedFilters.size());
+        assertTrue(source.navigation.isEmpty());
+        assertTrue(source.rows.isEmpty());
+        source.navigate(new Row(5, "E"));
+        assertEquals(2, destination.queries);
+    }
+
+    @Test
+    public void dlBuilderKeepsTheLegacyDataSetLinkReturnContract() throws Exception {
+        Source source = new Source(new Row(1, "A"));
+        DataDestination destination = new DataDestination();
+
+        IDataLink<IDataSet<Row>, ISQLDataSet<Row>> link =
+                new DLBuilder<IDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                        .source(source.dataSet).destination(destination.dataSet)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+
+        assertTrue(((Object) link) instanceof IDataSetLink);
+        assertEquals(1, destination.queries);
+        ((AutoCloseable) link).close();
+        assertEquals(Integer.valueOf(31), destination.removedFilters.get(0));
+    }
+
+    @Test
+    public void dataCallLinkPreservesLazyInputsAndNavigationExecution() {
+        Source source = new Source(new Row(1, "A"));
+        CallDestination destination = new CallDestination();
+
+        IDataLink link = DataCallLinkBuilder.NEW()
+                .source(source.dataSet).destination(destination.dataCall)
+                .join((Row row) -> row.id, "PARENT_ID")
+                .join((Row row) -> row.kind, "KIND")
+                .build();
+
+        assertSame(source.dataSet, link.getSource());
+        assertSame(destination.dataCall, link.getDestination());
+        assertTrue(destination.executions.isEmpty());
+        assertEquals(Integer.valueOf(1), destination.callbacks.get("PARENT_ID").get());
+
+        source.navigate(new Row(2, "B"));
+        source.rowOperation(DataSetRowEvent.RowOperationEnum.REFRESH, new Row(3, "C"));
+        assertEquals(2, destination.executions.size());
+        assertEquals(Integer.valueOf(2), destination.executions.get(0).get("PARENT_ID"));
+        assertEquals("B", destination.executions.get(0).get("KIND"));
+        assertEquals(Integer.valueOf(3), destination.executions.get(1).get("PARENT_ID"));
+
+        source.rowOperation(DataSetRowEvent.RowOperationEnum.UPDATE, new Row(4, "D"));
+        assertEquals(2, destination.executions.size());
+        link.setAutoRequery(() -> false);
+        source.navigate(new Row(5, "E"));
+        assertEquals(2, destination.executions.size());
+        assertEquals(Integer.valueOf(5), destination.callbacks.get("PARENT_ID").get());
+        source.navigate(null);
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+
+        source.closeBefore();
+        assertEquals(1, destination.closes);
+    }
+}
