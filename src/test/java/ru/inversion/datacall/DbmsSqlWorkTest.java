@@ -114,6 +114,30 @@ class DbmsSqlWorkTest {
     }
 
     @Test
+    void mixedBindsReachLauncherAndOutputsReturnToSourceParameters() {
+        ParametersValues values = new ParametersValues();
+        values.setParameter(0, "old-zero");
+        values.setParameter("A", 42);
+        values.setParameter(1, "old-one");
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.outs = Arrays.asList("new-zero", "new-a", null);
+        launcher.resultCode = 0;
+        DbmsSqlWork work = new DbmsSqlWork(
+                CallBuilder.NEW().sql("begin ? := :A + ? + :a; end;").build(),
+                values, launcher);
+
+        work.execute(null);
+
+        String sql = (String)launcher.bound.get("plSql");
+        assertTrue(sql.matches("(?is).*:b1\\s*:=\\s*:b2\\s*\\+\\s*:b3\\s*\\+\\s*:b2\\s*;.*"), sql);
+        assertEquals(Arrays.asList("b1", "b2", "b3"), launcher.bound.get("vars"));
+        assertEquals(Arrays.asList("old-zero", "42", "old-one"), launcher.bound.get("vals"));
+        assertEquals("new-zero", values.get(0));
+        assertEquals("new-a", values.get("a"));
+        assertNull(values.get(1));
+    }
+
+    @Test
     void serverReturnCodeIsCheckedBeforeReadingOutputs() {
         ParametersValues values = new ParametersValues();
         values.setParameter("A", "old");

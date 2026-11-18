@@ -2,7 +2,9 @@ package ru.inversion.datacall;
 
 import ru.inversion.dataset.IParameters;
 import ru.inversion.meta.impl.work.IDBWork;
+import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
+import ru.inversion.utils.ParametersValues;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.converter.TypeConverter;
 
@@ -31,8 +33,8 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** */
     final List<String> vars = new ArrayList<>();
 
-    /** Исходные имена в том же порядке, что и vars. */
-    private final List<String> parameterNames = new ArrayList<>();
+    /** Исходные имена и индексы в том же порядке, что и vars. */
+    private final List<Comparable<?>> parameterIds = new ArrayList<>();
 
     /** Результат последнего вызова серверной функции. */
     private Integer resultCode;
@@ -75,31 +77,37 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         this.callBackParameters = callBackParameters;
         this.storedProcWork = Objects.requireNonNull(storedProcWork, "storedProcWork");
 
-        // Идентичность имен совпадает с CallStatement и ParametersValues.
-        final Map<String,Integer> positions = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         this.plSql = callStatement.prepareSql(
-                (t, c) -> {
-                        switch(t.getType()) {
-                            case NAMED_PARAMETER: {
-                                final String sourceName = t.getValue().toString();
-                                Integer index = positions.get(sourceName);
-                                if( index == null ) {
-                                    index = vars.size() + 1;
-                                    positions.put(sourceName, index);
-                                    vars.add("b" + index);
-                                    parameterNames.add(sourceName);
-                                }
-                                final String newParamName = vars.get(index - 1);
+                new AbstractCallMakerBase() {
+                    private final Map<Comparable<?>, String> bindNames = new TreeMap<>(ParametersValues.ParamIdComparator);
 
-                                c.append(" :").append(newParamName).sp();
-
-                                if( c.isCommentParameters() )
-                                    c.append("/* ").append(newParamName.substring(1)).append(", :").append(t.getValue()).append(" */ ");
-                            }
-                            break;
+                    @Override
+                    public void accept(Token token, CallPrepareContext context) {
+                        final Comparable<?> id;
+                        switch( token.getType() ) {
+                            case NAMED_PARAMETER:
+                                id = token.getValue().toString();
+                                break;
+                            case INDEXED_PARAMETER:
+                                id = nIndex++;
+                                break;
                             default:
-                                c.append(t);
+                                context.append(token);
+                                return;
                         }
+
+                        String bindName = bindNames.get(id);
+                        if( bindName == null ) {
+                            bindName = "b" + (vars.size() + 1);
+                            bindNames.put(id, bindName);
+                            vars.add(bindName);
+                            parameterIds.add(id);
+                        }
+
+                        context.append(" :").append(bindName).sp();
+                        if( context.isCommentParameters() )
+                            context.append("/* ").append(bindName.substring(1)).append(", :").append(token.getValue()).append(" */ ");
+                    }
                 },
                 (type, id, value) -> { }
         );
@@ -109,13 +117,21 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** Читает значения непосредственно перед очередным запуском. */
     List<String> inputValues() {
         final List<String> vals = new ArrayList<>(vars.size());
-        for( String parameterName : parameterNames ) {
-            if( callBackParameters != null && callBackParameters.hasParameter(parameterName) ) {
-                final Object value = callBackParameters.getParameter(parameterName);
-                vals.add(value == null ? null : TypeConverter.convert(value, String.class));
+        for( Comparable<?> id : parameterIds ) {
+            Object value = null;
+            if( callBackParameters != null ) {
+                if( id instanceof Integer ) {
+                    int index = (Integer)id;
+                    if( callBackParameters.hasParameter(index) )
+                        value = callBackParameters.getParameter(index);
+                }
+                else {
+                    String name = (String)id;
+                    if( callBackParameters.hasParameter(name) )
+                        value = callBackParameters.getParameter(name);
+                }
             }
-            else
-                vals.add(null);
+            vals.add(value == null ? null : TypeConverter.convert(value, String.class));
         }
         return vals;
     }
@@ -129,9 +145,17 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
                             + " values for " + vars.size() + " variables"
             );
 
-        if( callBackParameters != null )
-            for( int i = 0; i < parameterNames.size(); i++ )
-                callBackParameters.setParameter(parameterNames.get(i), outs.get(i));
+        if( callBackParameters == null )
+            return;
+
+        for( int i = 0; i < parameterIds.size(); i++ ) {
+            Comparable<?> id = parameterIds.get(i);
+            String value = outs.get(i);
+            if( id instanceof Integer )
+                callBackParameters.setParameter((Integer)id, value);
+            else
+                callBackParameters.setParameter((String)id, value);
+        }
     }
 
     /** Выполнение запроса */
