@@ -5,6 +5,7 @@ import ru.inversion.datacall.DataCallEvent;
 import ru.inversion.datacall.DataCallLinkBuilder;
 import ru.inversion.datacall.IDataCall;
 import ru.inversion.datacall.IDataCallListener;
+import ru.inversion.tds.SQLTreeDataSet;
 
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
@@ -130,11 +131,35 @@ public class LegacyLinkBuildersCompatibilityTest {
         }
     }
 
+    private static final class TreeDestination extends SQLTreeDataSet<Row> {
+        final Map<String,Object> parameters = new HashMap<>();
+        final List<Integer> removedFilters = new ArrayList<>();
+        String filter;
+        int queries;
+
+        @Override public void setParameter(String name, Object value) {
+            parameters.put(name, value);
+        }
+        @Override public int setFilter(String sql, boolean fixed, boolean append) {
+            filter = sql;
+            return 41;
+        }
+        @Override public String removeFilter(int id) {
+            removedFilters.add(id);
+            return filter;
+        }
+        @Override public void executeQuery() { queries++; }
+        @Override public void clear() { parameters.clear(); }
+    }
+
     private static final class CallDestination {
         final IDataCall dataCall;
         final Map<String, Supplier<?>> callbacks = new HashMap<>();
         final List<Map<String, Object>> executions = new ArrayList<>();
         int closes;
+        boolean failExecute;
+        boolean failClose;
+        Runnable onExecute;
 
         CallDestination() {
             dataCall = (IDataCall) Proxy.newProxyInstance(
@@ -145,12 +170,15 @@ public class LegacyLinkBuildersCompatibilityTest {
                                 callbacks.put((String) args[0], (Supplier<?>) args[1]);
                                 return null;
                             case "execute":
+                                if (failExecute) throw new IllegalStateException("dependent failed");
+                                if (onExecute != null) onExecute.run();
                                 Map<String, Object> values = new HashMap<>();
                                 callbacks.forEach((name, callback) -> values.put(name, callback.get()));
                                 executions.add(values);
                                 return proxy;
                             case "close":
                                 closes++;
+                                if (failClose) throw new IllegalStateException("dependent close failed");
                                 return null;
                             default: throw new AssertionError("Unexpected IDataCall." + method.getName());
                         }
@@ -281,6 +309,199 @@ public class LegacyLinkBuildersCompatibilityTest {
         source.dataCall.execute();
         assertEquals(1, destination.queries);
         ((AutoCloseable)link).close();
+    }
+
+    @Test
+    public void dataCallToTreeUpdatesOnlyAfterSuccessfulExecution() throws Exception {
+        CallSource source = new CallSource();
+        TreeDestination destination = new TreeDestination();
+        IDataLink<IDataCall,SQLTreeDataSet<Row>> link =
+                new DLBuilder<IDataCall,SQLTreeDataSet<Row>,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID")
+                        .joinColumn(call -> call.getParameter("EXTRA"), "EXTRA", false).link();
+
+        assertEquals(0, destination.queries);
+        assertTrue(destination.filter.contains("PARENT_ID= :PARENT_ID"));
+        assertFalse(destination.filter.contains("EXTRA"));
+        source.outputs.put("ID", 1);
+        source.outputs.put("EXTRA", "A");
+        source.dataCall.execute();
+        assertEquals(1, destination.queries);
+        assertEquals(Integer.valueOf(1), destination.parameters.get("PARENT_ID"));
+        assertEquals("A", destination.parameters.get("EXTRA"));
+
+        source.outputs.put("ID", 2);
+        source.failExecute = true;
+        try {
+            source.dataCall.execute();
+            fail("Call should fail");
+        } catch (IllegalStateException expected) {
+            assertEquals(1, destination.queries);
+            assertEquals(Integer.valueOf(1), destination.parameters.get("PARENT_ID"));
+        }
+        source.failExecute = false;
+        source.fire(new DataCallEvent(source.dataCall, DataCallEvent.Type.EXECUTE, false));
+        assertEquals(1, destination.queries);
+        source.dataCall.execute();
+        assertEquals(2, destination.queries);
+        assertEquals(Integer.valueOf(2), destination.parameters.get("PARENT_ID"));
+
+        link.setAutoRequery(() -> false);
+        source.outputs.put("ID", 3);
+        source.dataCall.execute();
+        assertEquals(2, destination.queries);
+        assertEquals(Integer.valueOf(3), destination.parameters.get("PARENT_ID"));
+
+        source.dataCall.close();
+        ((AutoCloseable)link).close();
+        assertTrue(source.listeners.isEmpty());
+        assertEquals(Integer.valueOf(41), destination.removedFilters.get(0));
+        source.outputs.put("ID", 4);
+        source.dataCall.execute();
+        assertEquals(2, destination.queries);
+    }
+
+    @Test
+    public void dataCallToCallChainsOnlyConfirmedSuccessAndReleasesListeners() throws Exception {
+        CallSource source = new CallSource();
+        CallDestination destination = new CallDestination();
+        IDataLink<IDataCall,IDataCall> link =
+                new DLBuilder<IDataCall,IDataCall,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination.dataCall)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID")
+                        .joinColumn(call -> call.getParameter("KIND"), "KIND").link();
+
+        assertTrue(destination.executions.isEmpty());
+        source.outputs.put("ID", 1);
+        source.outputs.put("KIND", "A");
+        source.dataCall.execute();
+        assertEquals(Integer.valueOf(1), destination.executions.get(0).get("PARENT_ID"));
+        assertEquals("A", destination.executions.get(0).get("KIND"));
+
+        source.outputs.put("ID", 2);
+        source.failExecute = true;
+        try {
+            source.dataCall.execute();
+            fail("Call should fail");
+        } catch (IllegalStateException expected) {
+            assertEquals(1, destination.executions.size());
+        }
+        source.failExecute = false;
+        source.fire(new DataCallEvent(source.dataCall, DataCallEvent.Type.EXECUTE, false));
+        assertEquals(1, destination.executions.size());
+        link.setAutoRequery(() -> false);
+        source.dataCall.execute();
+        assertEquals(1, destination.executions.size());
+        assertEquals(Integer.valueOf(2), destination.callbacks.get("PARENT_ID").get());
+        link.setAutoRequery(() -> true);
+        source.dataCall.execute();
+        assertEquals(Integer.valueOf(2), destination.executions.get(1).get("PARENT_ID"));
+
+        ((AutoCloseable)link).close();
+        ((AutoCloseable)link).close();
+        assertTrue(source.listeners.isEmpty());
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+        source.dataCall.execute();
+        assertEquals(2, destination.executions.size());
+        assertEquals(0, destination.closes);
+    }
+
+    @Test
+    public void sourceCallCloseAlsoClosesDependentCall() {
+        CallSource source = new CallSource();
+        CallDestination destination = new CallDestination();
+        new DLBuilder<IDataCall,IDataCall,IDataCall,Object>()
+                .source(source.dataCall).destination(destination.dataCall)
+                .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+
+        source.dataCall.close();
+
+        assertEquals(1, destination.closes);
+        assertTrue(source.listeners.isEmpty());
+        assertNull(destination.callbacks.get("PARENT_ID").get());
+    }
+
+    @Test
+    public void failedDependentCallCanBeRetriedWithoutRelinking() throws Exception {
+        CallSource source = new CallSource();
+        CallDestination destination = new CallDestination();
+        IDataLink<IDataCall,IDataCall> link =
+                new DLBuilder<IDataCall,IDataCall,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination.dataCall)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+        destination.failExecute = true;
+        source.outputs.put("ID", 1);
+
+        try {
+            source.dataCall.execute();
+            fail("Dependent call should fail");
+        } catch (RuntimeException expected) {
+            assertEquals(1, source.listeners.size());
+            assertTrue(destination.executions.isEmpty());
+        }
+
+        destination.failExecute = false;
+        source.dataCall.execute();
+        assertEquals(Integer.valueOf(1), destination.executions.get(0).get("PARENT_ID"));
+        ((AutoCloseable)link).close();
+    }
+
+    @Test
+    public void failedDependentCloseStillReleasesSourceListener() {
+        CallSource source = new CallSource();
+        CallDestination destination = new CallDestination();
+        destination.failClose = true;
+        new DLBuilder<IDataCall,IDataCall,IDataCall,Object>()
+                .source(source.dataCall).destination(destination.dataCall)
+                .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+
+        try {
+            source.dataCall.close();
+            fail("Dependent close should fail");
+        } catch (IllegalStateException expected) {
+            assertTrue(source.listeners.isEmpty());
+            assertEquals(1, destination.closes);
+            assertNull(destination.callbacks.get("PARENT_ID").get());
+        }
+    }
+
+    @Test
+    public void reentrantCallChainFailsWithoutRecursingForever() throws Exception {
+        CallSource source = new CallSource();
+        CallDestination destination = new CallDestination();
+        IDataLink<IDataCall,IDataCall> link =
+                new DLBuilder<IDataCall,IDataCall,IDataCall,Object>()
+                        .source(source.dataCall).destination(destination.dataCall)
+                        .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+        destination.onExecute = () -> source.fire(
+                new DataCallEvent(source.dataCall, DataCallEvent.Type.EXECUTE, false, true));
+
+        try {
+            source.dataCall.execute();
+            fail("Reentrant chain should fail");
+        } catch (RuntimeException expected) {
+            assertTrue(destination.executions.isEmpty());
+            assertEquals(1, source.listeners.size());
+        }
+
+        destination.onExecute = null;
+        source.dataCall.execute();
+        assertEquals(1, destination.executions.size());
+        ((AutoCloseable)link).close();
+    }
+
+    @Test
+    public void dataCallCannotLinkToItself() {
+        CallSource source = new CallSource();
+        try {
+            new DLBuilder<IDataCall,IDataCall,IDataCall,Object>()
+                    .source(source.dataCall).destination(source.dataCall)
+                    .joinColumn(call -> call.getParameter("ID"), "PARENT_ID").link();
+            fail("Self link should be rejected");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(source.listeners.isEmpty());
+        }
     }
 
     @Test

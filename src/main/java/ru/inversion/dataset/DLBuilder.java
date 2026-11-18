@@ -11,6 +11,7 @@ import ru.inversion.utils.U;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -317,6 +318,17 @@ public class DLBuilder<S,D,P,T> {
         }
     }
 
+    /** Связь результата успешного вызова с ведомым SQL-деревом. */
+    private static class DataCall2TreeLink<P,T>
+            extends AbstractLink<IDataCall,SQLTreeDataSet<?>,P,T> {
+
+        DataCall2TreeLink(IDataCall source, SQLTreeDataSet<?> destination,
+                          Supplier<Boolean> requeryIf,
+                          List<Triplet<Function<P,T>,String,Boolean>> columns) {
+            super(source, destination, requeryIf, columns);
+        }
+    }
+
     /** Связь двух DataSet с сохранением контракта IDataSetLink. */
     private static class DataSet2DataSetLink<P,T> implements IDataSetLink<P>,
             IDataSetNavigationListener<P>, IDataSetRowListener<P> {
@@ -580,6 +592,80 @@ public class DLBuilder<S,D,P,T> {
         }
     }
 
+    /** Ведомый вызов использует выходные параметры последнего выполнения ведущего. */
+    private static class DataCall2CallLink<P,T> implements IDataLink<IDataCall,IDataCall>,
+            IDataCallListener, AutoCloseable {
+
+        private IDataCall source;
+        private final IDataCall destination;
+        private Supplier<Boolean> requeryIf;
+        private final AtomicBoolean forwarding = new AtomicBoolean();
+
+        DataCall2CallLink(IDataCall source, IDataCall destination,
+                          Supplier<Boolean> requeryIf,
+                          List<Triplet<Function<P,T>,String,Boolean>> columns) {
+            if (source == destination)
+                throw new IllegalArgumentException(Tags.PRODUCT_LABEL + "DataCall cannot be linked to itself");
+            this.source = source;
+            this.destination = destination;
+            this.requeryIf = requeryIf == null ? () -> true : requeryIf;
+            try {
+                for (Triplet<Function<P,T>,String,Boolean> column : columns)
+                    destination.setValueCallback(column.second, () -> {
+                        IDataCall currentSource = this.source;
+                        return currentSource == null ? null : column.first.apply((P)currentSource);
+                    });
+                source.addDataCallListener(this);
+            } catch (Throwable failure) {
+                try {
+                    close();
+                } catch (RuntimeException | Error cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+                throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on build link between DataCalls", failure);
+            }
+        }
+
+        @Override public IDataCall getSource() { return source; }
+        @Override public IDataCall getDestination() { return destination; }
+
+        @Override public void dataCallChanged(DataCallEvent event) {
+            if (source == null)
+                return;
+            if (event.getEventType() == DataCallEvent.Type.CLOSE && event.isBefore()) {
+                close();
+                destination.close();
+            } else if (event.getEventType() == DataCallEvent.Type.EXECUTE && event.isAfter()
+                    && Boolean.TRUE.equals(event.getExecutionSuccess())) {
+                try {
+                    if (!Boolean.TRUE.equals(requeryIf.get()))
+                        return;
+                    if (!forwarding.compareAndSet(false, true))
+                        throw new IllegalStateException(Tags.PRODUCT_LABEL + "Cyclic DataCall link execution");
+                    try {
+                        destination.execute();
+                    } finally {
+                        forwarding.set(false);
+                    }
+                } catch (Throwable failure) {
+                    throw new RuntimeException(Tags.PRODUCT_LABEL + "Error on execute dependent DataCall", failure);
+                }
+            }
+        }
+
+        @Override public void setAutoRequery(Supplier<Boolean> value) {
+            requeryIf = Objects.requireNonNull(value, "'requeryIf' is null");
+        }
+
+        @Override public void close() {
+            if (source == null)
+                return;
+            source.removeDataCallListener(this);
+            source = null;
+            requeryIf = () -> false;
+        }
+    }
+
 
    /**
     * Данные Builder'a
@@ -660,6 +746,25 @@ public class DLBuilder<S,D,P,T> {
         {
             return (IDataLink<S,D>)new DataCall2DataSetLink<>(
                     (IDataCall)source, (ISQLDataSet<?>)destination,
+                    requeryIf, new ArrayList<>(pairsColumn));
+        }
+
+        if( source instanceof IDataCall && destination instanceof SQLTreeDataSet )
+        {
+            return (IDataLink<S,D>)new DataCall2TreeLink<>(
+                    (IDataCall)source, (SQLTreeDataSet<?>)destination,
+                    requeryIf, new ArrayList<>(pairsColumn));
+        }
+
+        if( source instanceof IDataCall && destination instanceof IDataCall )
+        {
+            for (Triplet<Function<P,T>,String,Boolean> column : pairsColumn) {
+                if (ru.inversion.utils.S.isNullOrEmpty(column.second))
+                    throw new IllegalArgumentException("'destinationParam' is null or empty");
+                Objects.requireNonNull(column.first, "'sourceValue' is null");
+            }
+            return (IDataLink<S,D>)new DataCall2CallLink<>(
+                    (IDataCall)source, (IDataCall)destination,
                     requeryIf, new ArrayList<>(pairsColumn));
         }
 
