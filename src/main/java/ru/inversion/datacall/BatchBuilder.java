@@ -5,7 +5,6 @@ import ru.inversion.dataset.IParameters;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.meta.IEntityMetaData;
 import ru.inversion.meta.IEntityProperty;
-import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
 import ru.inversion.utils.lstn.IListenerManEvent;
@@ -23,7 +22,6 @@ import java.util.function.Function;
 
 import static ru.inversion.datacall.BatchBuilder.BatchModeEnum.DELETE;
 import static ru.inversion.datacall.BatchBuilder.BatchModeEnum.INSERT;
-import static ru.inversion.parser.statement.PrepareModeEnum.QUERY;
 
 
 /** */
@@ -258,8 +256,8 @@ BatchBuilder<T> {
 
                     final CallStatement cs = SQLCallBuilder.NEW(tc).url(url).name(name).buildStatement();
 
-                    final String st = cs.prepareSql(AbstractCallMakerBase.createPLSqlMaker(QUERY),
-                            ( pos, id, value ) -> {
+                    final String st = cs.prepareJdbcSql(
+                            ( pos, id ) -> {
                                 if(id instanceof Integer) {
                                     valuesMap.put(pos, ( t ) -> parameters.getParameter((Integer)id));
                                 }
@@ -268,12 +266,10 @@ BatchBuilder<T> {
                                     final IEntityProperty< T, ? > p = metaData.getProperty((String)id);
                                     valuesMap.put(pos, p == null ? ( t ) -> parameters.getParameter((String)id) : ( t ) -> p.invokeGetter(t));
                                 }
-                                else if(id instanceof Token.TypeEnum)
-                                    valuesMap.put(pos, ( t ) -> value);
                                 else
                                     throw new IllegalArgumentException("Unsupported batch parameter: " + id);
-
-                            }
+                            },
+                            ( pos, value ) -> valuesMap.put(pos, ( t ) -> value)
                     );
 
                     if( rowMapper == null )

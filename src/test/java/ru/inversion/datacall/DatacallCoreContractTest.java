@@ -110,6 +110,30 @@ class DatacallCoreContractTest {
     }
 
     @Test
+    void jdbcPreparationKeepsBindAndLiteralPositionsInSqlOrder() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("update t set name=:name, kind='active' where id=? and old_name=:name and score=?")
+                .replaceConstants(true)
+                .build();
+        List<List<?>> parameters = new ArrayList<>();
+
+        String sql = statement.prepareJdbcSql(
+                (position, id) -> parameters.add(Arrays.asList(position, "bind", id)),
+                (position, value) -> parameters.add(Arrays.asList(position, "literal", value))
+        );
+
+        assertEquals(Arrays.asList(
+                Arrays.asList(1, "bind", "name"),
+                Arrays.asList(2, "literal", "active"),
+                Arrays.asList(3, "bind", 0),
+                Arrays.asList(4, "bind", "name"),
+                Arrays.asList(5, "bind", 1)
+        ), parameters);
+        assertEquals(5L, sql.chars().filter(ch -> ch == '?').count());
+        assertFalse(sql.contains("'active'"));
+    }
+
+    @Test
     void queryWithValuesDoesNotDeleteBindTokens() {
         CallStatement statement = CallBuilder.NEW()
                 .sql("select * from t where id=:id or parent_id=:ID and kind=?")

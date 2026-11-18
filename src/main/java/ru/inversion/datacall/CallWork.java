@@ -9,7 +9,6 @@ import ru.inversion.db.rs.RSUtils;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.meta.impl.ArrayMetaData;
 import ru.inversion.meta.impl.StructMetaData;
-import ru.inversion.parser.token.Token;
 import ru.inversion.property.Property;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
@@ -31,7 +30,6 @@ import java.util.stream.StreamSupport;
 
 import static javax.persistence.ParameterMode.*;
 import static ru.inversion.meta.EntityMetadataFactory.getEntityMetaData;
-import static ru.inversion.parser.statement.PrepareModeEnum.QUERY;
 
 
 /**
@@ -831,7 +829,10 @@ public class CallWork implements AutoCloseable {
 
         pvMap.values().forEach(pv -> pv.posList.clear());
 
-        String sql = callStatement.prepareSql( AbstractCallMakerBase.createPLSqlMaker(QUERY), this::registerParameterPosition );
+        String sql = callStatement.prepareJdbcSql(
+                this::registerParameterPosition,
+                ( position, value ) -> constantList.add(Pair.makePair(position, value))
+        );
 
         final List<Integer> hiddenPositions = U.toList( pvMap.values().stream().filter(PV::isBound).filter(pv -> !pv.pm.isLogValue()).flatMap(pv -> pv.posList.stream()).iterator() );
 
@@ -858,14 +859,9 @@ public class CallWork implements AutoCloseable {
         jdbcSql = sql;
     }
 
-    /** Регистрирует позицию bind-параметра или SQL-константы. */
-    private void registerParameterPosition( Integer position, Comparable identifier, Object value )
+    /** Регистрирует позицию bind-параметра. */
+    private void registerParameterPosition( Integer position, Comparable<?> identifier )
     {
-        if( identifier instanceof Token.TypeEnum ) {
-            constantList.add(Pair.makePair(position, value));
-            return;
-        }
-
         PV parameter = pvMap.get(identifier);
 
         if( parameter == null )

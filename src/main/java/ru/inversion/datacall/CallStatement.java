@@ -113,6 +113,16 @@ public class CallStatement {
         return context.getSQL( );
     }
 
+    /** Передаёт bind-параметры и параметризованные литералы по их JDBC-позициям. */
+    String prepareJdbcSql( BiConsumer<Integer, Comparable<?>> onBind, BiConsumer<Integer, Object> onLiteral ) {
+        return prepareSql( AbstractCallMakerBase.createPLSqlMaker(PrepareModeEnum.QUERY), ( position, id, value ) -> {
+            if( id instanceof Token.TypeEnum )
+                onLiteral.accept( position, value );
+            else
+                onBind.accept( position, id );
+        } );
+    }
+
     /** */
     public Iterable<ParameterMetadata<?>> getParameterIter() {
 
