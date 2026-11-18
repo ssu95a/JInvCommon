@@ -1,6 +1,7 @@
 package ru.inversion.dataset;
 
 import ru.inversion.datacall.DataCallEvent;
+import ru.inversion.datacall.DataCallLinkBuilder;
 import ru.inversion.datacall.IDataCall;
 import ru.inversion.datacall.IDataCallListener;
 import ru.inversion.tds.*;
@@ -298,7 +299,7 @@ public class DLBuilder<S,D,P,T> {
     }
 
     /**
-     * Создает объект связи между 2-мя DataSet
+     * Создает связь между объектами работы с данными.
      * @return
      *         {@link IDataLink}
      * @throws
@@ -331,6 +332,16 @@ public class DLBuilder<S,D,P,T> {
         {
             final Tree2DataSetLink<P,T> dlb = new Tree2DataSetLink<P,T>( (ITreeDataSet<P>)source, (ISQLDataSet<?>) destination, this.requeryIf, pairsColumn );
             return (IDataLink< S, D >)dlb;
+        }
+
+        if( source instanceof IDataSet && destination instanceof IDataCall )
+        {
+            final DataCallLinkBuilder dlb = DataCallLinkBuilder.NEW()
+                    .source(source).destination(destination);
+            pairsColumn.forEach(p -> dlb.join((P row) -> p.first.apply(row), p.second));
+            if( requeryIf != null )
+                dlb.autoRequery(requeryIf);
+            return (IDataLink<S,D>) dlb.build();
         }
 
         return null;

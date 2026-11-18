@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 import static org.junit.Assert.*;
@@ -256,5 +257,53 @@ public class LegacyLinkBuildersCompatibilityTest {
 
         source.closeBefore();
         assertEquals(1, destination.closes);
+    }
+
+    @Test
+    public void dlBuilderDataCallForwardsLazyInputsAndRequeryCondition() {
+        Source source = new Source(new Row(1, "A"));
+        CallDestination destination = new CallDestination();
+        AtomicBoolean requery = new AtomicBoolean(false);
+
+        IDataLink<IDataSet<Row>, IDataCall> link =
+                new DLBuilder<IDataSet<Row>, IDataCall, Row, Object>()
+                        .source(source.dataSet).destination(destination.dataCall)
+                        .joinColumn(row -> row.id, "PARENT_ID")
+                        .joinColumn(row -> row.kind, "KIND")
+                        .requeryIf(requery::get).link();
+
+        assertNotNull(link);
+        assertSame(source.dataSet, link.getSource());
+        assertSame(destination.dataCall, link.getDestination());
+        assertTrue(destination.executions.isEmpty());
+        source.navigate(new Row(2, "B"));
+        assertTrue(destination.executions.isEmpty());
+        assertEquals(Integer.valueOf(2), destination.callbacks.get("PARENT_ID").get());
+
+        requery.set(true);
+        source.rowOperation(DataSetRowEvent.RowOperationEnum.REFRESH, new Row(3, "C"));
+        assertEquals(1, destination.executions.size());
+        assertEquals(Integer.valueOf(3), destination.executions.get(0).get("PARENT_ID"));
+        assertEquals("C", destination.executions.get(0).get("KIND"));
+
+        source.closeBefore();
+        assertEquals(1, destination.closes);
+    }
+
+    @Test
+    public void dlBuilderDataCallUsesDefaultRequeryForStaticLink() {
+        Source source = new Source(new Row(1, "A"));
+        CallDestination destination = new CallDestination();
+
+        IDataLink<IDataSet<Row>, IDataCall> link =
+                DLBuilder.<IDataSet<Row>, IDataCall, Row, Integer>link(
+                        source.dataSet, destination.dataCall,
+                        row -> row.id, "PARENT_ID", null);
+
+        assertNotNull(link);
+        assertTrue(destination.executions.isEmpty());
+        source.navigate(new Row(2, "B"));
+        assertEquals(1, destination.executions.size());
+        assertEquals(Integer.valueOf(2), destination.executions.get(0).get("PARENT_ID"));
     }
 }
