@@ -151,7 +151,9 @@ public class DLBuilderCompatibilityTest {
 
     private static final class TreeDestination extends SQLTreeDataSet<Row> {
         final Map<String, Object> parameters = new HashMap<>();
+        final Map<Integer, String> filters = new HashMap<>();
         String filter;
+        int nextFilterId = 42;
         int queries;
         int clears;
 
@@ -159,7 +161,13 @@ public class DLBuilderCompatibilityTest {
             assertTrue(fixed);
             assertTrue(append);
             filter = sql;
-            return 42;
+            int id = nextFilterId++;
+            filters.put(id, sql);
+            return id;
+        }
+
+        @Override public String removeFilter(int id) {
+            return filters.remove(id);
         }
 
         @Override public void setParameter(String name, Object value) {
@@ -177,7 +185,9 @@ public class DLBuilderCompatibilityTest {
 
     private static final class DataDestination extends SQLDataSet<Row> {
         final Map<String, Object> parameters = new HashMap<>();
+        final Map<Integer, String> filters = new HashMap<>();
         String filter;
+        int nextFilterId = 43;
         int queries;
         int clears;
 
@@ -185,7 +195,13 @@ public class DLBuilderCompatibilityTest {
             assertTrue(fixed);
             assertTrue(append);
             filter = sql;
-            return 43;
+            int id = nextFilterId++;
+            filters.put(id, sql);
+            return id;
+        }
+
+        @Override public String removeFilter(int id) {
+            return filters.remove(id);
         }
 
         @Override public void setParameter(String name, Object value) {
@@ -278,5 +294,59 @@ public class DLBuilderCompatibilityTest {
         assertTrue(source.items.isEmpty());
         source.navigate(new Row(14));
         assertEquals(3, destination.queries);
+    }
+
+    @Test
+    public void dataSetToTreeCloseRemovesOnlyItsFilterAcrossRelinking() throws Exception {
+        TreeDestination destination = new TreeDestination();
+        int ownFilter = destination.setFilter("ACTIVE=1", true, true);
+
+        IDataLink<IDataSet<Row>, SQLTreeDataSet<Row>> first =
+                new DLBuilder<IDataSet<Row>, SQLTreeDataSet<Row>, Row, Integer>()
+                        .source(new DataSource(null).dataSet).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        assertEquals(2, destination.filters.size());
+
+        ((AutoCloseable) first).close();
+        assertEquals(1, destination.filters.size());
+        assertEquals("ACTIVE=1", destination.filters.get(ownFilter));
+
+        IDataLink<IDataSet<Row>, SQLTreeDataSet<Row>> second =
+                new DLBuilder<IDataSet<Row>, SQLTreeDataSet<Row>, Row, Integer>()
+                        .source(new DataSource(null).dataSet).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        assertEquals(2, destination.filters.size());
+
+        ((AutoCloseable) second).close();
+        ((AutoCloseable) second).close();
+        assertEquals(1, destination.filters.size());
+        assertEquals("ACTIVE=1", destination.filters.get(ownFilter));
+    }
+
+    @Test
+    public void treeToDataSetCloseRemovesOnlyItsFilterAcrossRelinking() throws Exception {
+        DataDestination destination = new DataDestination();
+        int ownFilter = destination.setFilter("ACTIVE=1", true, true);
+
+        IDataLink<ITreeDataSet<Row>, ISQLDataSet<Row>> first =
+                new DLBuilder<ITreeDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                        .source(new TreeSource(null).tree).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        assertEquals(2, destination.filters.size());
+
+        ((AutoCloseable) first).close();
+        assertEquals(1, destination.filters.size());
+        assertEquals("ACTIVE=1", destination.filters.get(ownFilter));
+
+        IDataLink<ITreeDataSet<Row>, ISQLDataSet<Row>> second =
+                new DLBuilder<ITreeDataSet<Row>, ISQLDataSet<Row>, Row, Integer>()
+                        .source(new TreeSource(null).tree).destination(destination)
+                        .joinColumn(row -> row.id, "PARENT_ID").link();
+        assertEquals(2, destination.filters.size());
+
+        ((AutoCloseable) second).close();
+        ((AutoCloseable) second).close();
+        assertEquals(1, destination.filters.size());
+        assertEquals("ACTIVE=1", destination.filters.get(ownFilter));
     }
 }

@@ -31,6 +31,7 @@ public class DLBuilder<S,D,P,T> {
         protected Supplier<Boolean> requeryIf;
         /** */
         private List< Pair< Function<P,T>,String> > pairsColumn;
+        private final Integer filterId;
 
         /** */
         public AbstractLink( S source, D destination, Supplier<Boolean> requeryIf, List<Pair<Function< P, T >, String> > pairsColumn )
@@ -59,7 +60,7 @@ public class DLBuilder<S,D,P,T> {
 
                 });
                 sb.append(")/*P]*/");
-                sqds.setFilter( sb.toString(), true, true );
+                filterId = sqds.setFilter( sb.toString(), true, true );
             }
             else if( destination instanceof SQLTreeDataSet )
             {
@@ -74,8 +75,10 @@ public class DLBuilder<S,D,P,T> {
                 });
                 sb.append(")/*P]*/");
 
-                sqds.setFilter( sb.toString(), true, true );
+                filterId = sqds.setFilter( sb.toString(), true, true );
             }
+            else
+                filterId = null;
 
             if( source instanceof IDataSet )
             {
@@ -132,6 +135,14 @@ public class DLBuilder<S,D,P,T> {
                 ds.removeNavigationListener(this);
                 ds.removeItemListener      (this);
                 ds.removeDataSetListener   (this);
+            }
+
+            if( filterId != null )
+            {
+                if( destination instanceof SQLDataSet<?> )
+                    ((SQLDataSet<?>)destination).removeFilter(filterId);
+                else if( destination instanceof SQLTreeDataSet<?> )
+                    ((SQLTreeDataSet<?>)destination).removeFilter(filterId);
             }
 
             destination = null;
