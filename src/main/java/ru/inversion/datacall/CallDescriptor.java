@@ -8,6 +8,7 @@ import ru.inversion.utils.*;
 import java.sql.Types;
 import java.util.*;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -101,6 +102,18 @@ public class CallDescriptor {
     public Iterator<Token<?>> getTokenIterator( Predicate<Token<?>> predicate ) {
         return U.mapIter( tokenList.iterator(), Function.identity(), predicate );
     }
+
+    // Имена и позиции bind-параметров в порядке появления в SQL.
+    void forEachParameterId( Consumer<Comparable<?>> consumer ) {
+        int position = 0;
+        for( Token<?> token : tokenList ) {
+            if( token.getType() == NAMED_PARAMETER )
+                consumer.accept( (String)token.getValue() );
+            else if( token.getType() == INDEXED_PARAMETER )
+                consumer.accept( position++ );
+        }
+    }
+
     /** */
     public void preparePLSql( CallPrepareContext context ) {
         tokenList.forEach( t->context.sqlMaker().accept( t, context ));

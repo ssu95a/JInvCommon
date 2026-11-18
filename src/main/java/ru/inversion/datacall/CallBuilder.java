@@ -1,20 +1,15 @@
 package ru.inversion.datacall;
 
 import ru.inversion.parser.statement.LangEnum;
-import ru.inversion.parser.token.Token;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
-import ru.inversion.utils.U;
 
 import javax.persistence.ParameterMode;
 import java.sql.Types;
 import java.util.*;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 import static javax.persistence.ParameterMode.OUT;
-import static ru.inversion.parser.token.Token.TypeEnum.INDEXED_PARAMETER;
-import static ru.inversion.parser.token.Token.TypeEnum.NAMED_PARAMETER;
 import static ru.inversion.utils.ParametersValues.ParamIdComparator;
 
 
@@ -152,42 +147,21 @@ public class CallBuilder {
 
             CallDescriptor descriptor = CallDescriptor.create( sql, lang );
 
-            final Predicate<Token<?>> filter = ( token) -> U.in( token.getType(), NAMED_PARAMETER, INDEXED_PARAMETER );
+            descriptor.forEachParameterId( id -> {
+                if( parameters().get( id ) != null )
+                    return;
 
-            //инициализация параметров
-            int index = 0;
-
-            for( Token t : U.iterable( descriptor.getTokenIterator(filter) ) ) {
-
-                if( t.getType() == NAMED_PARAMETER ) {
-
-                    String name = (String)t.getValue();
-
-                    ParameterMetadata p = parameters().get( name );
-
-                    if( p == null )
-                    {
-                        final ParameterMode mode = parameterModeStrategy.apply(name);
-
-                        p = new RawParameterMetadata( name,
-                                                   mode == OUT ? Types.VARCHAR : null,
-                                                   null, mode, null, false, null, true, false );
-                        putParameter( p );
-                    }
+                if( id instanceof String ) {
+                    String name = (String)id;
+                    ParameterMode mode = parameterModeStrategy.apply( name );
+                    putParameter( new RawParameterMetadata( name, mode == OUT ? Types.VARCHAR : null,
+                                                           null, mode, null, false, null, true, false ) );
                 }
-                else if( t.getType() == INDEXED_PARAMETER ) {
-
-                    ParameterMetadata p = parameters().get( index );
-
-                    if( p == null )
-                    {
-                        p = new RawParameterMetadata( index, null, null, ParameterMode.IN, null, false, null, true, false );
-                        putParameter( p );
-                    }
-
-                    index++;
+                else {
+                    putParameter( new RawParameterMetadata( (Integer)id, null, null, ParameterMode.IN,
+                                                           null, false, null, true, false ) );
                 }
-            }
+            } );
 
             if( descriptor.getLang() == LangEnum.JDBC )
                 removeAdditionalInfo = true;

@@ -5,6 +5,7 @@ import ru.inversion.parser.statement.PrepareModeEnum;
 
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static javax.persistence.ParameterMode.IN;
@@ -44,6 +45,29 @@ class DatacallCoreContractTest {
                 .build();
 
         assertNull(statement.getParameter("value").getSQLType());
+    }
+
+    @Test
+    void mixedBindParametersKeepZeroBasedPositionsAndReuseNamedMetadata() {
+        List<String> inferredNames = new ArrayList<>();
+
+        CallStatement statement = CallBuilder.NEW()
+                .sql("begin apply_values(:result, ?, :RESULT, :other, ?); end;")
+                .parameter(IN, 1, Types.BIGINT, null, null, null, true)
+                .parameterModeStrategy(name -> {
+                    inferredNames.add(name);
+                    return "result".equalsIgnoreCase(name) ? OUT : IN;
+                })
+                .build();
+
+        assertEquals(Arrays.asList("result", "other"), inferredNames);
+        assertEquals(OUT, statement.getParameter("RESULT").getMode());
+        assertEquals(Integer.valueOf(Types.VARCHAR), statement.getParameter("result").getSQLType());
+        assertEquals(IN, statement.getParameter("other").getMode());
+        assertEquals(IN, statement.getParameter(0).getMode());
+        assertNull(statement.getParameter(0).getSQLType());
+        assertEquals(Integer.valueOf(Types.BIGINT), statement.getParameter(1).getSQLType());
+        assertNull(statement.getParameter(2));
     }
 
     @Test
