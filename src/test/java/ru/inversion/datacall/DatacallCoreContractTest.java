@@ -112,15 +112,16 @@ class DatacallCoreContractTest {
     @Test
     void queryWithValuesDoesNotDeleteBindTokens() {
         CallStatement statement = CallBuilder.NEW()
-                .sql("select * from t where id=:id")
+                .sql("select * from t where id=:id or parent_id=:ID and kind=?")
                 .build();
+        List<Object> values = new ArrayList<>();
 
-        String sql = statement.prepareSql(
-                PrepareModeEnum.QUERY_WITH_VALUES,
-                new ArrayList<Object>()
-        );
+        String sql = statement.prepareSql(PrepareModeEnum.QUERY_WITH_VALUES, values);
 
-        assertTrue(sql.contains(":id"));
+        assertTrue(sql.contains(":id"), sql);
+        assertTrue(sql.contains(":ID"), sql);
+        assertTrue(sql.contains("?"), sql);
+        assertTrue(values.isEmpty());
     }
 
     @Test

@@ -8,15 +8,8 @@ public class CallMaker_WithParametersValue extends AbstractCallMakerBase {
 
     @Override
     public void accept( Token t, CallPrepareContext c ) {
-        switch( t.getType() ) {
-            case INDEXED_PARAMETER:
-                c.append(t);
-                break;
-            case NAMED_PARAMETER:
-                c.append(t);
-                break;
-            default:
-                c.append( t );
-        }
+        if( t.getType() == Token.TypeEnum.NAMED_PARAMETER )
+            c.append( ':' );
+        c.append( t );
     }
 }
