@@ -48,6 +48,48 @@ public class SQLDataSetSparserIntegrationTest {
     }
 
     @Test
+    public void stringFilterExtractsTopLevelOrderByWithoutReformattingPredicate() {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+        String predicate = "note = 'order by hidden' and id in "
+                + "(select id from child order by created_at)";
+
+        int id = ds.setFilter(predicate + " ORDER BY coalesce(name, 'a,b') DESC", false, false);
+
+        assertEquals(predicate, ds.predicates().get(id).getFilterStr());
+        assertEquals("~coalesce(name, 'a,b') DESC~", ds.getOrderBy());
+    }
+
+    @Test
+    public void stringFilterWithOnlyOrderBySetsSortWithoutPredicate() {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+
+        assertEquals(-1, ds.setFilter("order by name", false, false));
+        assertTrue(ds.predicates().isEmpty());
+        assertEquals("~name~", ds.getOrderBy());
+    }
+
+    @Test
+    public void trailingLineCommentDoesNotSwallowPredicateBoundary() {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+
+        int id = ds.setFilter("id = :id -- comment\nORDER BY name", false, false);
+
+        assertEquals("id = :id", ds.predicates().get(id).getFilterStr());
+        assertEquals("~name~", ds.getOrderBy());
+    }
+
+    @Test
+    public void expressionWithOrderByOnlyInLiteralIsAccepted() throws Exception {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+        SQLExpression expression = new SQLExpression("note = 'order by hidden' and id = :id");
+
+        int id = ds.setFilter(expression, false, false);
+
+        assertSame(expression, ds.predicates().get(id).getExpression());
+        assertNull(ds.getOrderBy());
+    }
+
+    @Test
     public void replacementAndPreFinalBehaviorRemainInDataSet() throws Exception {
         SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
         int oldId = ds.setFilter(new SQLExpression("a = :a"), false, false);

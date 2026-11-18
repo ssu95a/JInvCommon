@@ -1,23 +1,20 @@
 package ru.inversion.dataset;
 
-import ru.inversion.datacall.CallDescriptor;
-import ru.inversion.datacall.CallPrepareContext;
-import ru.inversion.datacall.maker.CallMaker_WithParametersValue;
 import ru.inversion.dataset.aggr.*;
 import ru.inversion.dataset.impl.*;
+import ru.inversion.dataset.parser.OrderByParser;
 import ru.inversion.dataset.parser.SqlScannerFactory;
 import ru.inversion.dataset.parser.SqlValueFormatter;
 import ru.inversion.dataset.parser.jdbc.Parameter;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.lexer.SqlScanner;
+import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
 import ru.inversion.dataset.parser.select.SqlSelect;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.db.entity.ColumnSQLDefinition;
 import ru.inversion.meta.EntityMetadataFactory;
 import ru.inversion.meta.IEntityProperty;
-import ru.inversion.parser.statement.LangEnum;
-import ru.inversion.parser.token.Token;
 import ru.inversion.property.BooleanProperty;
 import ru.inversion.property.IProperty;
 import ru.inversion.tc.TaskContext;
@@ -31,8 +28,6 @@ import javax.persistence.*;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.function.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static ru.inversion.dataset.DataSetEvent.DataSetEventType.*;
@@ -1148,10 +1143,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          return 0;
 
       String sql = sqlExpression.getSQL();
-      // Старый setFilter(String) переносит ORDER BY в другое поле,
-      // поэтому с параметризованным ISQLExpression такую трансформацию
-      // до выделения отдельного SQL-aware split делать нельзя.
-      if (orderByPattern.matcher(removeNestedParentheses(sql)).find())
+      // Выражение с собственными параметрами нельзя разрывать между
+      // предикатом и сортировкой без переноса источника значений.
+      if (splitFilterOrderBy(sql)[1] != null)
          throw new DataSetException(
                  "Embedded ORDER BY in ISQLExpression filter is not supported");
 
@@ -1171,8 +1165,16 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return setFilter( filterString, fixed, append, false );
    }
 
-   static final private Pattern orderByPattern = Pattern.compile( "(?i)\\W*order\\s+by\\s*" );
-   private final static Pattern parenthesis = Pattern.compile("\\s*\\([^()]*\\)");
+   private String[] splitFilterOrderBy(String filter) {
+      if( !filter.toUpperCase(Locale.ROOT).contains("ORDER") )
+         return new String[] {filter, null};
+
+      TaskContext tc = getTaskContext();
+      SqlScanner scanner = tc == null
+              ? new OracleSqlScanner()
+              : SqlScannerFactory.create(tc.dialect());
+      return OrderByParser.splitFilter(filter, scanner);
+   }
 
    protected int setFilter( String filterString, boolean fixed, boolean append, boolean auto ) {
 
@@ -1180,6 +1182,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       if( S.isNullOrEmpty( newfilterString )  )
          return 0;
+
+      String[] filterParts = splitFilterOrderBy(newfilterString);
 
       int filterId = -1;
 
@@ -1198,52 +1202,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          }
       }
 
-      //
-      // Если вдруг в фильтре 'order by' кто-то написал
-      //
-      String bezSkobok = removeNestedParentheses(newfilterString);
-      Matcher orderByMatcher = orderByPattern.matcher( bezSkobok );
-
-      if(  orderByMatcher.find() && orderByMatcher.group() != null  )
-      {
-            /*
-            SQLQueryStatement qs = new SQLQueryStatement( newfilterString ); // <-- туда не лазить
-
-            BiConsumer<INode, PrepareContext > sqlMaker = new SQLMaker_WithParametersValue() {
-                @Override
-                public void accept( OrderByNode on, PrepareContext c ) { // <-- и туда не лазить
-                    c.append( (char)255 );
-                    //super.accept( on, c );
-                }
-            };
-            */
-
-         CallDescriptor d = CallDescriptor.create( filterString, LangEnum.SQL );
-
-         BiConsumer< Token, CallPrepareContext > sqlMaker = new CallMaker_WithParametersValue() {
-            @Override
-            public void accept( Token token, CallPrepareContext c ) {
-               if( token == Token.OrderBy )
-                  c.append((char)255);
-               else
-                  super.accept(token, c);
-            }
-         };
-
-         TriConsumer< Integer,Comparable,Object > parameterHandler = (a,b,c)->{};
-         final CallPrepareContext prepareContext = new CallPrepareContext(sqlMaker, parameterHandler);
-         d.preparePLSql( prepareContext );
-
-         String s = prepareContext.getSQL();
-
-         int index = s.indexOf( (char)255 );
-         if ( index > -1 ){
-            newfilterString = s.substring( 0, index ).trim();
-
-            String orderBy  = "~" + s.substring( index + 1) + "~";
-
-            setOrderBy( orderBy );
-         }
+      if( filterParts[1] != null ) {
+         newfilterString = filterParts[0];
+         setOrderBy("~" + filterParts[1] + "~");
       }
 
       if( !S.isNullOrEmpty(newfilterString ) )
@@ -1259,14 +1220,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
       else
          return -1;
-   }
-
-   private String removeNestedParentheses( final String filterString ) {
-      Matcher matcher = parenthesis.matcher( filterString );
-      if ( matcher.find() ) {
-         return removeNestedParentheses( matcher.replaceAll( "" ) );
-      }
-      return filterString;
    }
 
    /** {@inheritDoc}
