@@ -279,6 +279,42 @@ public class JDBCDataReaderPreparedSqlTest {
     }
 
     @Test
+    public void mapperFailureOnLaterPageClosesReader() throws Exception {
+        RecordingJdbc jdbc = new RecordingJdbc();
+        jdbc.resultSetRowCount = 3;
+
+        JDBCDataReader<Object> reader = new JDBCDataReader<>(
+                jdbc.connection(),
+                prepared("select 1"),
+                (rs, rowNum) -> {
+                    if (rowNum == 1)
+                        throw new IllegalArgumentException("Mapper failure");
+                    return new Object();
+                },
+                null,
+                false
+        );
+        reader.executeQuery(Collections.<Object>emptyList());
+
+        assertEquals(1, reader.getNextPage(1).size());
+        assertFalse(reader.isEOF());
+
+        try {
+            reader.getNextPage(1);
+            fail("Expected mapper failure");
+        }
+        catch (RuntimeException expected) {
+            assertTrue(rootCause(expected) instanceof IllegalArgumentException);
+            assertEquals("Mapper failure", rootCause(expected).getMessage());
+        }
+
+        assertTrue(jdbc.statements.get(0).resultSetClosed);
+        assertTrue(jdbc.statements.get(0).closed);
+        assertTrue(reader.isEOF());
+        assertTrue(reader.getNextPage(1).isEmpty());
+    }
+
+    @Test
     public void expiredCursorIsRolledBackReexecutedAndResumesAfterReturnedRow() throws Exception {
         RecoveryJdbc jdbc = new RecoveryJdbc();
 
@@ -610,6 +646,7 @@ public class JDBCDataReaderPreparedSqlTest {
         final List<StatementCalls> statements = new ArrayList<>();
         int failOnBinding = -1;
         boolean resultSetHasRow;
+        int resultSetRowCount = -1;
         boolean failResultSetIsClosed;
         boolean failResultSetClose;
         boolean failStatementClose;
@@ -622,6 +659,7 @@ public class JDBCDataReaderPreparedSqlTest {
                                     (String) args[0],
                                     failOnBinding,
                                     resultSetHasRow,
+                                    resultSetRowCount,
                                     failResultSetIsClosed,
                                     failResultSetClose,
                                     failStatementClose
@@ -641,6 +679,7 @@ public class JDBCDataReaderPreparedSqlTest {
         final List<Integer> bindingOrder = new ArrayList<>();
         final int failOnBinding;
         final boolean resultSetHasRow;
+        final int resultSetRowCount;
         final boolean failResultSetIsClosed;
         final boolean failResultSetClose;
         final boolean failStatementClose;
@@ -653,6 +692,7 @@ public class JDBCDataReaderPreparedSqlTest {
                 String sql,
                 int failOnBinding,
                 boolean resultSetHasRow,
+                int resultSetRowCount,
                 boolean failResultSetIsClosed,
                 boolean failResultSetClose,
                 boolean failStatementClose
@@ -660,6 +700,7 @@ public class JDBCDataReaderPreparedSqlTest {
             this.sql = sql;
             this.failOnBinding = failOnBinding;
             this.resultSetHasRow = resultSetHasRow;
+            this.resultSetRowCount = resultSetRowCount;
             this.failResultSetIsClosed = failResultSetIsClosed;
             this.failResultSetClose = failResultSetClose;
             this.failStatementClose = failStatementClose;
@@ -691,7 +732,7 @@ public class JDBCDataReaderPreparedSqlTest {
                     executions++;
                     return Proxy.newProxyInstance(ResultSet.class.getClassLoader(),
                             new Class<?>[]{ResultSet.class}, new InvocationHandler() {
-                                private boolean first = true;
+                                private int returnedRows;
                                 @Override
                                 public Object invoke(
                                         Object rs,
@@ -700,11 +741,9 @@ public class JDBCDataReaderPreparedSqlTest {
                                 ) throws Throwable {
                                     switch (m.getName()) {
                                         case "next":
-                                            if (first) {
-                                                first = false;
-                                                return resultSetHasRow;
-                                            }
-                                            return false;
+                                            return returnedRows++ < (resultSetRowCount >= 0
+                                                    ? resultSetRowCount
+                                                    : resultSetHasRow ? 1 : 0);
                                         case "close":
                                             resultSetClosed = true;
                                             if (failResultSetClose)

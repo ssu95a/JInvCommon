@@ -368,6 +368,10 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                             ex);
                 }
             }
+            catch ( RuntimeException | Error ex ) {
+                closeAfterFailure(ex);
+                throw ex;
+            }
             return row;
         }
     }
