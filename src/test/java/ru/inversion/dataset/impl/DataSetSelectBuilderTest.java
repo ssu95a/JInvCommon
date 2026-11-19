@@ -318,6 +318,24 @@ public class DataSetSelectBuilderTest {
                 .queryAlias("q where 1=1");
     }
 
+    @Test public void rejectedAliasKeepsPreviousSqlAfterPlanRebuild() {
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)
+                .queryAlias("q");
+        String originalSql = b.buildSql();
+        PreparedSql originalPlan = b.prepare();
+
+        assertThrows(IllegalArgumentException.class, () -> b.queryAlias("q where 1=1"));
+
+        assertEquals(originalSql, b.buildSql());
+        assertSame(originalPlan, b.prepare());
+
+        PreparedSql rebuilt = b.addPredicate("q.id = :id").prepare();
+        assertNotSame(originalPlan, rebuilt);
+        assertTrue(rebuilt.getSql().contains("SELECT q.* FROM ("));
+        assertTrue(rebuilt.getSql().contains("q.id = ?"));
+        assertEquals("id", rebuilt.getParameters().get(0).getName());
+    }
+
     @Test public void optimizerHintIsInsertedAfterTopLevelSelect() {
         DataSetSelectBuilder b =
                 new DataSetSelectBuilder("select id from client", SqlDialectFactory.ORACLE);

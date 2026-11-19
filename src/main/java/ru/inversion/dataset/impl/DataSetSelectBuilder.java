@@ -84,11 +84,13 @@ public class DataSetSelectBuilder {
      */
     public DataSetSelectBuilder queryAlias(String alias) {
         String value = alias == null ? null : alias.trim();
-        queryAlias = value == null || value.isEmpty() ? null : value;
+        if( value != null && value.isEmpty() )
+            value = null;
 
-        if( queryAlias != null )
-            validateAlias(queryAlias);
+        if( value != null )
+            validateAlias(value);
 
+        queryAlias = value;
         invalidate();
 
         return this;
