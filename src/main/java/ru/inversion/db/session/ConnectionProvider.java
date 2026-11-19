@@ -78,10 +78,7 @@ public class ConnectionProvider implements DataSource {
         {
             final DataSourceCfg dataSourceCfg = (DataSourceCfg)connectionSource;
             Properties p = dataSourceCfg.getConnectionProperties();
-            Connection connection = DriverManager.getConnection( dataSourceCfg.getConnectUrl(), p );
-            connection.setAutoCommit(false);
-
-            return connection;
+            return openConfiguredConnection( dataSourceCfg.getConnectUrl(), p );
         }
         else
         {
@@ -95,23 +92,19 @@ public class ConnectionProvider implements DataSource {
     @Override
     public Connection getConnection( String username, String password ) throws SQLException {
 
-        final Connection connection;
-
         if( isConfigMode() ) {
 
             final DataSourceCfg dataSourceCfg = (DataSourceCfg)connectionSource;
 
             Properties p = dataSourceCfg.getConnectionProperties(username, password, null);
-            connection   = DriverManager.getConnection(dataSourceCfg.getConnectUrl(), p);
-            connection.setAutoCommit(false);
-       }
+            return openConfiguredConnection( dataSourceCfg.getConnectUrl(), p );
+        }
         else
         {
             Supplier<DataSource> sup = (Supplier<DataSource>)connectionSource;
             DataSource dataSource = sup.get();
-            connection = dataSource.getConnection(username, password);
+            return dataSource.getConnection(username, password);
         }
-        return connection;
     }
 
     /** */
@@ -130,10 +123,26 @@ public class ConnectionProvider implements DataSource {
         if( p.containsKey("url") )
             url = p.getProperty("url");
 
-        Connection connection = DriverManager.getConnection ( url, p );
-        connection.setAutoCommit(false);
+        return openConfiguredConnection( url, p );
+    }
 
-        return connection;
+    private static Connection openConfiguredConnection( String url, Properties properties ) throws SQLException {
+        Connection connection = DriverManager.getConnection( url, properties );
+
+        try {
+            connection.setAutoCommit(false);
+            return connection;
+        }
+        catch( SQLException | RuntimeException | Error failure ) {
+            try {
+                connection.close();
+            }
+            catch( SQLException | RuntimeException | Error closeFailure ) {
+                if( closeFailure != failure )
+                    failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
     }
 
     /** */
