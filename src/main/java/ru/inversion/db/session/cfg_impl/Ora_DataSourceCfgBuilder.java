@@ -25,6 +25,8 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
 
     public static final String TNSNAMES_ORA = "tnsnames.ora";
 
+    private static final String THIN_PREFIX = "jdbc:oracle:thin:@";
+
     /**
      * @param appId
      */
@@ -65,6 +67,22 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
             throw new NoSuchFileException( Tags.PRODUCT_LABEL + "In the directory '" + s + "' does not exist file 'tnsnames.ora'");
     }
 
+    private static String prepareJdbcUrl(String url) throws Exception {
+        String jdbcUrl = url.indexOf(':') == -1 ? THIN_PREFIX + url : url;
+
+        if (jdbcUrl.startsWith(THIN_PREFIX)) {
+            int options = jdbcUrl.indexOf('?', THIN_PREFIX.length());
+            String target = jdbcUrl.substring(THIN_PREFIX.length(),
+                    options < 0 ? jdbcUrl.length() : options).trim();
+            // Алиас ссылается на tnsnames.ora, адрес и дескриптор заданы прямо в URL.
+            if (target.startsWith("(") || target.indexOf('/') >= 0 || target.indexOf(':') >= 0)
+                return jdbcUrl;
+        }
+
+        checkTnsPath();
+        return jdbcUrl;
+    }
+
     /** */
     private Properties initProperties( ) {
 
@@ -94,10 +112,8 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
 
         Properties p = initProperties( );
 
-        String  connectUrl     = null;
+        String  connectUrl     = prepareJdbcUrl(dbUrl);
         String  pseudoPassword = null;
-
-        checkTnsPath( );
 
         System.setProperty("ru.inversion.driver.class_name", ORACLE_DRIVER );
 
@@ -107,11 +123,6 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
         catch( Throwable th ) {
             throw new RuntimeException( Tags.PRODUCT_LABEL + "Error init JDBC driver", th );
         }
-
-        if( dbUrl.indexOf(':') == -1 )
-            connectUrl = String.format("jdbc:oracle:thin:@%s", dbUrl );
-        else
-            connectUrl = dbUrl;
 
         if( usePseudoConnection ) {
 
@@ -129,16 +140,8 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
 
                 try {
 
-                    String urlR = null;
                     String urlI = properties.getProperty("url");
-
-                    if( !S.isNullOrEmpty(urlI) )
-                    {
-                        if( urlI.indexOf(':') == -1 )
-                            urlR = String.format("jdbc:oracle:thin:@%s", urlI );
-                        else
-                            urlR = urlI;
-                    }
+                    String urlR = S.isNullOrEmpty(urlI) ? null : prepareJdbcUrl(urlI);
 
                     if( "true".equals( properties.getProperty( "ru.inversion.pseudo_connection" ) ) )
                     {

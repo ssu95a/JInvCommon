@@ -137,10 +137,14 @@ public abstract class AbstractDataSourceCfgBuilder {
             if( S.isNullOrEmpty(s) )
                 s = p.apply("url");
 
-            if( !S.isNullOrEmpty(s) && s.contains("postgres") )
-                 return new Pg_DataSourceCfgBuilder ( appId );
-            else
+            if( s != null && s.startsWith("jdbc:oracle:") )
                 return new Ora_DataSourceCfgBuilder( appId );
+
+            // Для прежних значений vendor_db и url сохраняем выбор по подстроке.
+            if( s != null && s.contains("postgres") )
+                return new Pg_DataSourceCfgBuilder( appId );
+
+            return new Ora_DataSourceCfgBuilder( appId );
         }
     }
 }

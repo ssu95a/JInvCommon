@@ -118,8 +118,8 @@ public class Logon {
 
             String connectString = new String( DatatypeConverter.parseBase64Binary(userId) );
 
-            int i1 = connectString.indexOf("/");
-            int i2 = connectString.lastIndexOf("@");
+            int i1 = connectString.indexOf('/');
+            int i2 = findDatabaseSeparator(connectString, i1 + 1);
 
             if(i1 > 0 && i2 > 0) {
 
@@ -184,5 +184,14 @@ public class Logon {
         } catch ( Throwable th ) {
             throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on login in database.", th );
         }
+    }
+
+    static int findDatabaseSeparator(String connectString, int passwordStart) {
+        // В полном JDBC URL тоже может быть символ '@'.
+        int oracle = connectString.indexOf("@jdbc:oracle:", passwordStart);
+        int postgres = connectString.indexOf("@jdbc:postgresql:", passwordStart);
+        if (postgres >= 0 && (oracle < 0 || postgres < oracle))
+            return postgres;
+        return oracle >= 0 ? oracle : connectString.lastIndexOf('@');
     }
 }
