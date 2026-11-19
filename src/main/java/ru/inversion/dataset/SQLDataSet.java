@@ -2287,7 +2287,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       Checks.Require.text(outerAlias, "outerAlias");
 
       String sql = aggregateSelectSql(aggregates)
-                 + " FROM (" + source.buildSql() + ") "
+                 + " FROM (" + source.buildSql() + "\n) "
                  + outerAlias;
 
       PreparedSql prepared = new SqlSelect(sql, dialect).prepare();

@@ -4,9 +4,16 @@ import org.junit.Test;
 import ru.inversion.dataset.aggr.AggrFuncEnum;
 import ru.inversion.dataset.aggr.IAggregator;
 import ru.inversion.dataset.aggr.IAggregatorBuilder;
+import ru.inversion.dataset.impl.DataSetSelectBuilder;
+import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.db.dialect.SqlDialect;
+import ru.inversion.db.dialect.SqlDialectFactory;
+import ru.inversion.utils.Triplet;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.Assert.*;
@@ -296,6 +303,26 @@ public class AggregatorContractTest {
                         new SQLExpression()
                 )
         );
+    }
+
+    @Test
+    public void aggregateSourceEndingInLineCommentKeepsBindOrder() {
+        List<Triplet<String, AggrFuncEnum, String>> aggregates = Collections.singletonList(
+                Triplet.makeTriplet("amount + :delta", AggrFuncEnum.SUM, "total")
+        );
+        SQLExpression values = new SQLExpression();
+        values.setParameter("delta", 10);
+        values.setParameter("minId", 7);
+
+        for( SqlDialect dialect : Arrays.asList(SqlDialectFactory.ORACLE, SqlDialectFactory.POSTGRES) ) {
+            DataSetSelectBuilder source = new DataSetSelectBuilder(
+                    "select amount from t where id > :minId -- source note", dialect
+            );
+            PreparedSql prepared = SQLDataSet.prepareAggregateSql(aggregates, source, dialect);
+
+            assertEquals(dialect.type().name(), Arrays.asList(10, 7),
+                    SQLDataSet.aggregateJdbcValues(prepared, source, values));
+        }
     }
 
     @Test
