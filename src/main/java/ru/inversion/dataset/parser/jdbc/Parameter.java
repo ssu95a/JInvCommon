@@ -7,9 +7,6 @@ import java.util.Objects;
 /**
  * Источник значения для одного JDBC-плейсхолдера в подготовленном SQL.
  * Позиция плейсхолдера определяется местом в списке параметров.
- *
- * Current execution uses one global parameter namespace. Fragment/source
- * ownership is no longer part of parameter resolution.
  */
 public final class Parameter {
 

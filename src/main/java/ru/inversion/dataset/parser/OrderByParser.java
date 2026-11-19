@@ -1,6 +1,7 @@
 package ru.inversion.dataset.parser;
 
 import ru.inversion.dataset.parser.lexer.SqlScanner;
+import ru.inversion.utils.Checks;
 import ru.inversion.utils.S;
 
 import java.util.ArrayList;
@@ -17,38 +18,47 @@ public final class OrderByParser {
     /**
      * Выделяет ORDER BY верхнего уровня из SQL-фильтра без пересборки текста.
      * Результат: [предикат, выражение сортировки]; второй элемент равен null,
-     * если сортировки в фильтре нет. Завершающий -- комментарий оканчивается
-     * переводом строки, чтобы следующий добавленный фрагмент не попал в него.
+     * если сортировки в фильтре нет.
+     * Завершающий -- комментарий оканчивается  переводом строки, чтобы следующий
+     * добавленный фрагмент не попал в него.
      */
-    public static String[] splitFilter(String filter, SqlScanner scanner) {
-        Objects.requireNonNull(filter, "filter");
-        Objects.requireNonNull(scanner, "scanner");
+    public static String[] splitFilter(String filter, SqlScanner scanner)
+    {
+        Checks.Require.text  ( filter, "filter"  );
+        Checks.Require.object( scanner, "scanner");
+
         List<SqlScanner.Token> tokens = scanner.scan(filter);
+
         int depth = 0;
 
-        for (int i = 0; i < tokens.size(); i++) {
+        for (int i = 0; i < tokens.size(); i++)
+        {
             SqlScanner.Token token = tokens.get(i);
 
-            if (token.kind() == SqlScanner.Kind.SYMBOL) {
+            if( token.kind() == SqlScanner.Kind.SYMBOL)
+            {
                 String symbol = token.text(filter);
+
                 if ("(".equals(symbol))
                     depth++;
+
                 else if (")".equals(symbol) && depth > 0)
                     depth--;
             }
 
-            if (depth != 0 || !token.isWord(filter, "ORDER"))
+            if( depth != 0 || !token.isWord(filter, "ORDER") )
                 continue;
 
             int by = i + 1;
-            while (by < tokens.size()
-                    && (tokens.get(by).kind() == SqlScanner.Kind.WHITESPACE
-                    || tokens.get(by).kind() == SqlScanner.Kind.COMMENT))
+
+            while(  by < tokens.size() && (tokens.get(by).kind() == SqlScanner.Kind.WHITESPACE || tokens.get(by).kind() == SqlScanner.Kind.COMMENT))
                 by++;
 
-            if (by < tokens.size() && tokens.get(by).isWord(filter, "BY")) {
+            if( by < tokens.size() && tokens.get(by).isWord(filter, "BY"))
+            {
                 int predicateEnd = token.start();
-                for (int previous = i - 1; previous >= 0; previous--) {
+                for (int previous = i - 1; previous >= 0; previous--)
+                {
                     SqlScanner.Token tail = tokens.get(previous);
                     if (tail.kind() == SqlScanner.Kind.WHITESPACE)
                         continue;
@@ -88,6 +98,7 @@ public final class OrderByParser {
      * Commas inside parentheses, quoted text and comments are preserved.
      */
     public static List<String> parseAndGetColumnsList(String expression) {
+
         if( S.isNullOrEmpty(expression) )
             return Collections.emptyList();
 
@@ -95,10 +106,11 @@ public final class OrderByParser {
             return Collections.singletonList(expression);
 
         List<String> result = new ArrayList<>();
-        int itemStart = 0;
+        int itemStart        = 0;
         int parenthesisDepth = 0;
 
-        for( int i = 0; i < expression.length(); i++ ) {
+        for( int i = 0; i < expression.length(); i++ )
+        {
             char current = expression.charAt(i);
 
             if( current == '\'' || current == '"' ) {
@@ -134,6 +146,7 @@ public final class OrderByParser {
         }
 
         result.add(expression.substring(itemStart).trim());
+
         return result;
     }
 

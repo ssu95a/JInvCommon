@@ -133,12 +133,12 @@ public final class XXIConnectClient implements Closeable {
             final int msTotal = elapsedMs(t0);
 
             logger.info (
-                    "auth.client.ok uri={} http={} rid={} alias={} login={} ms_total={}",
-                    authUri,
-                    result.httpStatus(),
-                    result.requestId(),
-                    request.getAlias(), request.getLogin(),
-                    msTotal
+                "auth.client.ok uri={} http={} rid={} alias={} login={} ms_total={}",
+                authUri,
+                result.httpStatus(),
+                result.requestId(),
+                request.getAlias(), request.getLogin(),
+                msTotal
             );
 
             return result;

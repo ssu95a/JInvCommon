@@ -4,6 +4,7 @@ import ru.inversion.dataset.*;
 import ru.inversion.dataset.mark.IMarkable;
 import ru.inversion.db.JInvDbException;
 import ru.inversion.meta.EntityMetadataFactory;
+import ru.inversion.utils.Checks;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
@@ -45,71 +46,81 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
 
     private ResultSet rowSet;
     private PreparedStatement statement;
+
     private IRowMapper<T> rowMapper;
     private boolean isOwnerMapper = false;
+
     private final Connection connection;
+
     private int rowCounter = 0;
     private boolean enableMark = false;
+
     private final Class<T> rowClass;
+
     private final PreparedSql preparedSql;
 
-    /** Prepared SQL produced by sparser; values are resolved for every execution. */
-    public JDBCDataReader(Connection connection, PreparedSql preparedSql,
-                          IRowMapper<T> rowMapper, Class<T> rowClass, boolean enableMark) {
-        if (!U.containsNotNull(rowMapper, rowClass))
+    /** Подготовленный SQL-запрос, созданный с помощью sparser; значения определяются при каждом выполнении */
+    public JDBCDataReader (
+        Connection connection,
+        PreparedSql preparedSql,
+        IRowMapper<T> rowMapper,
+        Class<T> rowClass,
+        boolean enableMark)
+    {
+        if( rowMapper == null && rowClass == null )
             throw new IllegalArgumentException(Tags.PRODUCT_LABEL + "'rowMapper' and 'rowClass' both null!");
 
-        this.connection = Objects.requireNonNull(connection, "connection");
-        this.preparedSql = Objects.requireNonNull(preparedSql, "preparedSql");
-        this.rowMapper = rowMapper;
-        this.rowClass = rowClass;
-        this.enableMark = enableMark;
+        this.connection  = Checks.Require.object( connection,  "connection" );
+        this.preparedSql = Checks.Require.object( preparedSql, "preparedSql");
+
+        this.rowMapper   = rowMapper;
+        this.rowClass    = rowClass;
+
+        this.enableMark  = enableMark;
     }
 
-    /**
-     * Compatibility entry point. New internal code should resolve values
-     * before crossing the JDBCDataReader boundary.
-     */
+    /** */
     @Deprecated
     @Override
-    public void executeQuery( IParameters callbackParameters ) throws DataSetException {
+    public void executeQuery( IParameters callbackParameters ) throws DataSetException
+    {
         try {
-            executeQuery(
-                    PreparedSqlValues.jdbc(preparedSql, callbackParameters)
-            );
+            executeQuery( PreparedSqlValues.jdbc(preparedSql, callbackParameters) );
         }
         catch( DataSetException ex ) {
             throw ex;
         }
         catch( Exception ex ) {
             closeAfterFailure(ex);
-            throw new DataSetException(
-                    Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
+            throw new DataSetException( Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
         }
     }
 
-    /** Execute with values already resolved in physical JDBC placeholder order. */
+    /** Выполнить с установленными значениями параметров, в заданном порядке. */
     @Override
     public synchronized void executeQuery( List<Object> jdbcValues ) throws DataSetException {
         try {
+
             closeOrThrow();
+
             rowCounter = 0;
 
-            if( jdbcValues == null
-                    || jdbcValues.size() != preparedSql.getParameters().size() )
-                throw new IllegalArgumentException(
-                        "PreparedSql parameters/value count mismatch");
+            if( jdbcValues == null || jdbcValues.size() != preparedSql.getParameters().size() )
+                throw new IllegalArgumentException( "PreparedSql parameters/value count mismatch");
 
             final List<Object> pv = new ArrayList<>(jdbcValues);
 
             try {
-                statement = connection.prepareStatement(preparedSql.getSql());
+
+                statement = connection.prepareStatement( preparedSql.getSql() );
 
                 int nIndex = 1;
+
                 for( Object value : pv )
-                    statement.setObject(nIndex++, value);
+                     statement.setObject( nIndex++, value );
 
                 statement.setFetchSize(currentPageSize);
+
                 rowSet = statement.executeQuery();
             }
             catch( SQLException ex ) {
@@ -123,34 +134,34 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         }
         catch( Exception ex ) {
             closeAfterFailure(ex);
-            throw new DataSetException(
-                    Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex);
+            throw new DataSetException( Tags.PRODUCT_LABEL + "Error on dataReader executeQuery", ex );
         }
     }
 
     /** */
-    private void initMapper() throws SQLException {
-        if( this.rowMapper == null ) {
+    private void initMapper() throws SQLException
+    {
+        if( this.rowMapper == null )
+        {
             if( rowClass == null || rowClass == Object[].class )
                 this.rowMapper = (IRowMapper<T>)new ObjectArrayRowMapper( rowSet );
             else
                 this.rowMapper = EntityMetadataFactory.getEntityMetaData(rowClass).createRSRowMapper(rowSet);
+
             isOwnerMapper = true;
         }
     }
 
-    /**
-     * Close both JDBC resources and preserve every close failure.
-     * Fields are cleared before close so repeated cleanup never closes
-     * the same JDBC object twice.
-     */
+    /** */
     private SQLException closeResources() {
+
         SQLException failure = null;
 
         ResultSet currentRowSet = rowSet;
         rowSet = null;
 
-        if( currentRowSet != null ) {
+        if( currentRowSet != null )
+        {
             try {
                 currentRowSet.close();
             }
@@ -162,7 +173,8 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         PreparedStatement currentStatement = statement;
         statement = null;
 
-        if( currentStatement != null ) {
+        if( currentStatement != null )
+        {
             try {
                 currentStatement.close();
             }
@@ -180,6 +192,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         return failure;
     }
 
+    /** */
     private void closeOrThrow() throws SQLException {
 
         SQLException failure = closeResources();
@@ -188,6 +201,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             throw failure;
     }
 
+    /** */
     private void closeAfterFailure(Throwable failure) {
 
         SQLException closeFailure = closeResources();
@@ -222,15 +236,16 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
 
     @Override
     public void close() throws DataSetException {
+
         SQLException failure = closeResources();
 
         if( failure != null )
-            throw new DataSetException(
-                    Tags.PRODUCT_LABEL + "Error on dataReader close",
-                    failure);
+            throw new DataSetException( Tags.PRODUCT_LABEL + "Error on dataReader close", failure);
     }
 
+    /** */
     private class RestoreContext {
+
         final private T row;
         final private int nCounter;
 
@@ -240,7 +255,9 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         }
     }
 
+    /** */
     private class RSIterator implements Iterator<T> {
+
         private int nCounter = -1;
 
         public RSIterator( int nRowCount ) {
@@ -248,36 +265,25 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         }
 
         @Override
-        synchronized public boolean hasNext() {
+        synchronized public boolean hasNext()
+        {
             try {
-                if( nCounter == 0 || isEOF() || rowSet.isClosed() )
-                    return false;
-                return true;
+                return nCounter != 0 && !isEOF() && !rowSet.isClosed();
             }
             catch( SQLException ex ) {
                 closeAfterFailure(ex);
-                throw new RuntimeException(
-                        Tags.PRODUCT_LABEL
-                                + "Error on check ResultSet state",
-                        ex);
+                throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on check ResultSet state", ex);
             }
         }
 
         /**
-         * Recover a PostgreSQL non-hold cursor invalidated by a transaction
-         * boundary while a DataSet grid remains open.
-         *
-         * Application DML performed from a modal editor is expected to finish
-         * its own transaction before control returns to the grid. If the next
-         * cursor operation fails with SQLSTATE 34000, PostgreSQL no longer has
-         * the server-side cursor and the failed operation leaves this connection
-         * unusable for re-execution until rollback.
-         *
-         * The SELECT is therefore executed again and positioned AFTER the row
-         * already returned by the current iterator call.
+         * Восстановление неблокирующего курсора PostgreSQL,
+         * ставшего недействительным из-за транзакции
          */
         private int restore( RestoreContext ctx ) {
+
             try {
+
                 ResultSet currentRowSet = rowSet;
                 rowSet = null;
 
@@ -288,22 +294,21 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
 
                 rowSet = statement.executeQuery();
 
-                final Comparator<T> comparator =
-                        EntityMetadataFactory
-                                .getEntityMetaData(rowClass)
-                                .getIdComparator();
+                final Comparator<T> comparator = EntityMetadataFactory.getEntityMetaData(rowClass).getIdComparator();
 
-                if( isOwnerMapper ) {
+                if( isOwnerMapper )
+                {
                     rowMapper = null;
                     initMapper();
                 }
 
                 boolean found = false;
+
                 int restoredRow = 0;
 
-                while( rowSet.next() ) {
-                    T candidate = rowMapper.mapRow(
-                            rowSet, restoredRow++);
+                while( rowSet.next() )
+                {
+                    T candidate = rowMapper.mapRow( rowSet, restoredRow++);
 
                     if( comparator.compare(ctx.row, candidate) == 0 ) {
                         found = true;
@@ -312,14 +317,9 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                 }
 
                 if( !found )
-                    throw new IllegalStateException(
-                            "Can not restore ResultSet position after SQLSTATE 34000");
+                    throw new IllegalStateException( "Can not restore ResultSet position after SQLSTATE 34000");
 
-                /*
-                 * The current next() call still returns ctx.row, so the restored
-                 * cursor must point to the following row, exactly as a successful
-                 * rowSet.next() would have done before the cursor expired.
-                 */
+                /* переходим на след строку */
                 if( !rowSet.next() ) {
                     closeOrThrow();
                     return 0;
@@ -329,30 +329,28 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
             }
             catch( Throwable th ) {
                 closeAfterFailure(th);
-                throw new RuntimeException(
-                        Tags.PRODUCT_LABEL
-                                + "Error on restore resultSet after '34000' code",
-                        th);
+                throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on restore resultSet after PG '34000' code", th );
             }
         }
 
         @Override
-        synchronized public T next() {
+        synchronized public T next()
+        {
             T row = null;
+
             try {
                 row = rowMapper.mapRow( rowSet, rowCounter++ );
+
                 if( enableMark )
                     ((IMarkable) row).setMark( rowSet.getBoolean(IMarkable.MARK_COLUMN) );
 
-                if( !rowSet.next() ) {
+                if( !rowSet.next() )
+                {
                     SQLException closeFailure = closeResources();
                     nCounter = 0;
 
                     if( closeFailure != null )
-                        throw new RuntimeException(
-                                Tags.PRODUCT_LABEL
-                                        + "Error on dataReader close at EOF",
-                                closeFailure);
+                        throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on dataReader close at EOF", closeFailure );
                 }
                 else
                     nCounter--;
@@ -362,10 +360,7 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                     nCounter = restore( new RestoreContext( row, nCounter ) );
                 else {
                     closeAfterFailure(ex);
-                    throw new RuntimeException(
-                            Tags.PRODUCT_LABEL
-                                    + "Error on read Row from resultSet",
-                            ex);
+                    throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on read Row from resultSet", ex);
                 }
             }
             catch ( RuntimeException | Error ex ) {

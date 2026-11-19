@@ -2,12 +2,15 @@ package ru.inversion.dataset.impl;
 
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.ISQLExpression;
+import ru.inversion.dataset.parser.lexer.SqlKeyword;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.dataset.parser.jdbc.Parameter;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.SqlScannerFactory;
 import ru.inversion.dataset.parser.lexer.SqlScanner;
 import ru.inversion.dataset.parser.select.SqlSelect;
+import ru.inversion.utils.Checks;
+import ru.inversion.utils.S;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,35 +19,46 @@ import java.util.Objects;
 
 /**
  * Основной builder одного SELECT для DataSet.
- *
+ * <p>
  * Владелец predicates, их типов и жизненного цикла — SQLDataSet.
  * Builder принимает текущий набор SQL-частей и не хранит бизнес-состояние DataSet.
- *
+ * <p>
  * Не является API построения агрегатных, INSERT/DELETE или mark-operation запросов.
  */
 public class DataSetSelectBuilder {
 
     private final String sourceSql;
+
     private final SqlDialect dialect;
     private final SqlScanner scanner;
+
     private final List<Part> predicates = new ArrayList<>();
+
     private Part sorting;
+
     private Integer rowLimit;
+
     private String mark;
+
     private String queryAlias;
+
     private String optimizerHint;
 
     private PreparedSql prepared;
 
-    public DataSetSelectBuilder(String sql, SqlDialect dialect) {
-        this.sourceSql = Objects.requireNonNull(sql, "sql");
-        this.dialect = Objects.requireNonNull(dialect, "dialect");
-        this.scanner = SqlScannerFactory.create(dialect);
+    public DataSetSelectBuilder(String sql, SqlDialect dialect)
+    {
+        this.sourceSql = Checks.Require.text  ( sql, "sql");
+        this.dialect   = Checks.Require.object( dialect, "dialect");
+
+        this.scanner   = SqlScannerFactory.create(dialect);
     }
 
     /** Добавить строковый predicate с параметрами из общего контекста DataSet. */
     public DataSetSelectBuilder addPredicate(String sql) {
-        if (sql != null && !sql.trim().isEmpty()) {
+
+        if( !S.isNullOrEmpty(sql) )
+        {
             predicates.add(new Part(sql, null));
             invalidate();
         }
@@ -52,12 +66,15 @@ public class DataSetSelectBuilder {
     }
 
     /** Добавить predicate с собственными fallback-значениями параметров. */
-    public DataSetSelectBuilder addPredicate(ISQLExpression expression) {
-        Objects.requireNonNull(expression, "expression");
-        String sql = Objects.requireNonNull(expression.getSQL(), "expression.sql");
-        if (sql.trim().isEmpty()) throw new IllegalArgumentException("Empty predicate expression");
-        predicates.add(new Part(sql, expression));
+    public DataSetSelectBuilder addPredicate(ISQLExpression expression)
+    {
+        Checks.Require.object(expression, "expression");
+        String sql = Checks.Require.text( expression.getSQL(), "expression.sql");
+
+        predicates.add( new Part(sql, expression) );
+
         invalidate();
+
         return this;
     }
 
@@ -68,8 +85,12 @@ public class DataSetSelectBuilder {
     public DataSetSelectBuilder queryAlias(String alias) {
         String value = alias == null ? null : alias.trim();
         queryAlias = value == null || value.isEmpty() ? null : value;
-        if (queryAlias != null) validateAlias(queryAlias);
+
+        if( queryAlias != null )
+            validateAlias(queryAlias);
+
         invalidate();
+
         return this;
     }
 
@@ -88,17 +109,19 @@ public class DataSetSelectBuilder {
         return this;
     }
 
+    /** */
     public DataSetSelectBuilder orderBy(String sql) {
-        sorting = sql == null || sql.trim().isEmpty() ? null : new Part(sql, null);
+        sorting = S.isNullOrEmpty(sql) ? null : new Part( sql, null );
         invalidate();
         return this;
     }
 
     /** ORDER BY может иметь собственные fallback-параметры; DataSet всегда приоритетнее. */
     public DataSetSelectBuilder orderBy(ISQLExpression expression) {
-        if (expression == null) return orderBy((String) null);
-        String sql = Objects.requireNonNull(expression.getSQL(), "orderBy.sql");
-        if (sql.trim().isEmpty()) throw new IllegalArgumentException("Empty ORDER BY expression");
+
+        if (expression == null)
+            return orderBy((String) null);
+        String sql = Checks.Require.text( expression.getSQL(), "orderBy.sql");
         sorting = new Part(sql, expression);
         invalidate();
         return this;
@@ -106,6 +129,7 @@ public class DataSetSelectBuilder {
 
     /** Ограничить количество строк внешнего SELECT. null снимает override. */
     public DataSetSelectBuilder rowLimit(Integer value) {
+
         if( value != null && value < 0 )
             throw new IllegalArgumentException("rowLimit must be >= 0");
 
@@ -115,8 +139,9 @@ public class DataSetSelectBuilder {
     }
 
     /** Выражение mark добавляется последним SELECT-столбцом с alias MARK. */
-    public DataSetSelectBuilder mark(String expression) {
-        mark = expression == null || expression.trim().isEmpty() ? null : expression;
+    public DataSetSelectBuilder mark( String expression )
+    {
+        mark = S.isNullOrEmpty( expression) ? null : expression;
         invalidate();
         return this;
     }
@@ -133,14 +158,10 @@ public class DataSetSelectBuilder {
     public PreparedSql prepare() {
         if (prepared == null)
             prepared = createSelect().prepare();
-
         return prepared;
     }
 
-    /**
-     * Resolve runtime values directly in physical JDBC placeholder order.
-     * primary (DataSet/callback) has priority over ISQLExpression fallbacks.
-     */
+    /** */
     public List<Object> values(IParameters primary) {
         return values(primary, 0);
     }
@@ -152,23 +173,20 @@ public class DataSetSelectBuilder {
      * Only primary '?' indexes are shifted. Expression fallback indexes and
      * explicit numbered parameters ($n) keep their own established namespace.
      */
-    public List<Object> values(
-            IParameters primary,
-            int positionalOffset
-    ) {
-        Objects.requireNonNull(primary, "primary");
-
-        if( positionalOffset < 0 )
-            throw new IllegalArgumentException(
-                    "positionalOffset must be >= 0");
+    public List<Object> values( IParameters primary, int positionalOffset )
+    {
+        Checks.Require.object( primary, "primary");
+        Checks.Numeric.positiveOrZero(positionalOffset,"positionalOffset");
 
         PreparedSql plan = prepare();
+
         List<ISQLExpression> fallbacks = fallbacks();
 
         List<Object> values = new ArrayList<>(plan.getParameters().size());
         int positionalIndex = 0;
 
-        for (Parameter parameter : plan.getParameters()) {
+        for( Parameter parameter : plan.getParameters() )
+        {
             Object value;
 
             switch (parameter.getKind()) {
@@ -213,29 +231,33 @@ public class DataSetSelectBuilder {
         return Collections.unmodifiableList(values);
     }
 
-    /** JDBC-ready values with legacy conversion preserved. */
+    /** Значения, готовые для вызова через JDBC */
     public List<Object> jdbcValues(IParameters primary) {
-        return PreparedSqlValues.jdbc(prepare(), values(primary));
+        return PreparedSqlValues.jdbc( prepare(), values(primary) );
     }
 
-    private SqlSelect createSelect() {
-        SqlSelect select = new SqlSelect(sourceForSelect(), dialect);
+    /** */
+    private SqlSelect createSelect()
+    {
+        SqlSelect select = new SqlSelect( sourceForSelect(), dialect);
         List<String> predicatesSql = new ArrayList<>(predicates.size());
 
-        for (Part part : predicates)
+        for( Part part : predicates )
             predicatesSql.add(part.sql);
 
         select.setPredicates(predicatesSql);
         select.setOrderBy(sorting == null ? null : sorting.sql);
         select.setRowLimit(rowLimit);
 
-        if (mark != null)
+        if( mark != null )
             select.setMark(mark, "MARK");
 
         return select;
     }
 
-    private String sourceForSelect() {
+    /** */
+    private String sourceForSelect()
+    {
         String source = queryAlias == null
                 ? sourceSql
                 : "SELECT " + queryAlias + ".* FROM (\n"
@@ -244,12 +266,17 @@ public class DataSetSelectBuilder {
         return optimizerHint == null ? source : addOptimizerHint(source);
     }
 
+    /** */
     private String addOptimizerHint(String source) {
+
         int depth = 0;
 
-        for (SqlScanner.Token token : scanner.scan(source)) {
-            if (token.kind() == SqlScanner.Kind.SYMBOL) {
+        for (SqlScanner.Token token : scanner.scan(source))
+        {
+            if( token.kind() == SqlScanner.Kind.SYMBOL)
+            {
                 String text = token.text(source);
+
                 if ("(".equals(text)) {
                     depth++;
                     continue;
@@ -260,65 +287,78 @@ public class DataSetSelectBuilder {
                 }
             }
 
-            if (depth == 0
-                    && token.kind() == SqlScanner.Kind.WORD
-                    && token.isWord(source, "SELECT")) {
-                return source.substring(0, token.end())
-                        + " /*" + optimizerHint + "*/ "
-                        + source.substring(token.end());
+            if( depth == 0 && token.isKeyword(source, SqlKeyword.SELECT) )
+            {
+                return source.substring(0, token.end()) + " /*" + optimizerHint + "*/ " + source.substring(token.end());
             }
         }
 
-        throw new IllegalArgumentException(
-                "Top-level SELECT not found for optimizerHint");
+        throw new IllegalArgumentException( "Top-level SELECT not found for optimizerHint");
     }
 
+    /** */
     private void validateAlias(String alias) {
-        List<SqlScanner.Token> tokens = scanner.scan(alias);
-        if (tokens.size() != 1
-                || (tokens.get(0).kind() != SqlScanner.Kind.WORD
-                && tokens.get(0).kind() != SqlScanner.Kind.QUOTED_IDENTIFIER)) {
+
+        final List<SqlScanner.Token> tokens = scanner.scan(alias);
+
+        if( tokens.size() != 1
+            ||
+            (
+                tokens.get(0).kind() != SqlScanner.Kind.WORD
+                &&
+                tokens.get(0).kind() != SqlScanner.Kind.QUOTED_IDENTIFIER)
+            )
+        {
             throw new IllegalArgumentException("queryAlias must be one SQL identifier");
         }
     }
 
+    /** */
     private List<ISQLExpression> fallbacks() {
+
         List<ISQLExpression> result = new ArrayList<>();
 
-        for (Part part : predicates)
-            addIfAbsent(result, part.expression);
+        for( Part part : predicates )
+             addIfAbsent(result, part.expression);
 
-        if (sorting != null)
+        if( sorting != null )
             addIfAbsent(result, sorting.expression);
 
         return result;
     }
 
-    private static void addIfAbsent(List<ISQLExpression> values, ISQLExpression candidate) {
-        if (candidate == null) return;
-        for (ISQLExpression existing : values) if (existing == candidate) return;
+    /** */
+    private static void addIfAbsent( List<ISQLExpression> values, ISQLExpression candidate )
+    {
+        if( candidate == null )
+            return;
+
+        for( ISQLExpression existing : values )
+            if( existing == candidate )
+                return;
+
         values.add(candidate);
     }
 
-    private static Object resolveNamed(
-            IParameters primary,
-            List<ISQLExpression> fallbacks,
-            String name
-    ) {
-        if (primary.hasParameter(name))
+    /** */
+    private static Object resolveNamed ( IParameters primary, List<ISQLExpression> fallbacks, String name )
+    {
+        if( primary.hasParameter(name) )
             return primary.getParameter(name);
 
         boolean found = false;
         Object value = null;
 
-        for (ISQLExpression fallback : fallbacks) {
+        for (ISQLExpression fallback : fallbacks)
+        {
             if (!fallback.hasParameter(name))
                 continue;
 
-            if (found)
+            if( found )
                 throw conflict(":" + name);
 
             found = true;
+
             value = fallback.getParameter(name);
         }
 
@@ -328,25 +368,20 @@ public class DataSetSelectBuilder {
         return value;
     }
 
-    private static Object resolveIndexed(
-            IParameters primary,
-            List<ISQLExpression> fallbacks,
-            int index
-    ) {
-        return resolveIndexed(
-                primary,
-                fallbacks,
-                index,
-                index
-        );
+    /** */
+    private static Object resolveIndexed( IParameters primary, List<ISQLExpression> fallbacks, int index )
+    {
+        return resolveIndexed( primary, fallbacks, index, index );
     }
 
-    private static Object resolveIndexed(
-            IParameters primary,
-            List<ISQLExpression> fallbacks,
-            int primaryIndex,
-            int fallbackIndex
-    ) {
+    /** */
+    private static Object resolveIndexed (
+        IParameters primary,
+        List<ISQLExpression> fallbacks,
+        int primaryIndex,
+        int fallbackIndex
+    )
+    {
         if( primary.hasParameter(primaryIndex) )
             return primary.getParameter(primaryIndex);
 
@@ -370,10 +405,12 @@ public class DataSetSelectBuilder {
         return value;
     }
 
+    /** */
     private static IllegalStateException conflict(String name) {
         return new IllegalStateException("Conflicting SQL parameter " + name + " in ISQLExpression");
     }
 
+    /** */
     private static IllegalStateException missing(String name) {
         return new IllegalStateException("Missing SQL parameter " + name);
     }
@@ -385,10 +422,9 @@ public class DataSetSelectBuilder {
     private static final class Part {
         final String sql;
         final ISQLExpression expression;
-        Part(String sql, ISQLExpression expression) {
+        Part( String sql, ISQLExpression expression ) {
             this.sql = sql;
             this.expression = expression;
         }
     }
-
 }

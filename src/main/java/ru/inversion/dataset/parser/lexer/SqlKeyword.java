@@ -64,15 +64,15 @@ public enum SqlKeyword {
     WITH,
     YEAR;
 
-    private static final TreeMap<String,SqlKeyword> BY_NAME =
-            new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    private static final TreeMap<String,SqlKeyword> BY_NAME = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
 
     static {
         for( SqlKeyword keyword : values() )
-            BY_NAME.put(keyword.name(), keyword);
+             BY_NAME.put(keyword.name(), keyword);
     }
 
-    public static boolean in( SqlKeyword keyword, SqlKeyword ... values ) {
+    public static boolean in( SqlKeyword keyword, SqlKeyword ... values )
+    {
         for( SqlKeyword value : values )
             if( keyword == value )
                 return true;
@@ -80,16 +80,19 @@ public enum SqlKeyword {
         return false;
     }
 
+    /** */
     boolean matches( String source, int start, int end)
     {
         String text = name();
         return end - start == text.length() && source.regionMatches( true, start, text, 0, text.length() );
     }
 
+    /** */
     static SqlKeyword of(String source, int start, int end) {
         return BY_NAME.get( source.substring(start, end) );
     }
 
+    /** */
     public static SqlKeyword of(String text) {
         return text == null ? null : BY_NAME.get(text);
     }
