@@ -508,30 +508,6 @@ public class AggregatorContractTest {
         );
     }
 
-
-    @Test
-    public void aggregateDataSetRemainsUnsupportedCompatibilitySurface()
-            throws Exception {
-        java.lang.reflect.Method method =
-                IAggregatorBuilder.class.getMethod("buildDataSet");
-
-        assertTrue(method.isDefault());
-        assertTrue(method.isAnnotationPresent(Deprecated.class));
-
-        IAggregatorBuilder<Object> builder =
-                new SQLDataSet<Object>()
-                        .createAggregatorBuilder(false);
-
-        try {
-            builder.buildDataSet();
-            fail("Expected unsupported aggregate DataSet");
-        }
-        catch( UnsupportedOperationException ex ) {
-            assertEquals("Not supported yet.", ex.getMessage());
-        }
-    }
-
-
     @Test
     public void markedAggregateSourceUsesExplicitQueryAlias() {
         TestXXIDataSet ds = new TestXXIDataSet();

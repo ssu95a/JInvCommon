@@ -4,6 +4,7 @@ import ru.inversion.dataset.IParameters;
 import ru.inversion.meta.impl.work.IDBWork;
 import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
+import ru.inversion.utils.Checks;
 import ru.inversion.utils.ParametersValues;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.converter.TypeConverter;
@@ -17,7 +18,7 @@ import static javax.persistence.ParameterMode.OUT;
 /**
  * Выполнение скрипта на сервере через пакет dbms_sql
  * <p>
- * alpha ver 0.1
+ * ver 1.1
  */
 public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
@@ -42,6 +43,8 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
     /**
     Выполнение SQL выражения через пакет DBMS_SQL.
+    <p>
+    <pre>
     FUNCTION execute_Dbms_Sql_Work (
             p_plSql      IN   VARCHAR2,
             p_vars       IN   SYS.ODCIVARCHAR2LIST,
@@ -50,9 +53,12 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
             p_outs       OUT  SYS.ODCIVARCHAR2LIST,
             p_resultInfo OUT  VARCHAR2
     )
-    RETURN INTEGER: 0 — успех, -1 — p_vals короче p_vars;
-    остальные ошибки сервер пробрасывает исключением.
-     * */
+    RETURN INTEGER: 0 — успех, -1 — ошибка;
+    </pre>
+    При ошибке в {@code p_resultInfo} ее описание
+    <p>
+    Остальные ошибки {@code execute_Dbms_Sql_Work} пробрасывает исключением.
+    */
     static private CallWork initStoredProc( TaskContext tc ) throws CallException {
         return CallBuilder.NEW()
            .sql("begin :ret := JF_PKG_UTIL.execute_Dbms_Sql_Work( :plSql, :vars, :vals, :typs, :outs, :rsltInf); end;")
@@ -73,17 +79,21 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     }
 
     /** Подмена только внутреннего вызова для теста контракта без Oracle. */
-    DbmsSqlWork(CallStatement callStatement, IParameters callBackParameters, CallWork storedProcWork) {
+    DbmsSqlWork(CallStatement callStatement, IParameters callBackParameters, CallWork storedProcWork)
+    {
         this.callBackParameters = callBackParameters;
-        this.storedProcWork = Objects.requireNonNull(storedProcWork, "storedProcWork");
+        this.storedProcWork     = Checks.Require.object( storedProcWork, "storedProcWork" );
 
-        this.plSql = callStatement.prepareSql(
+        this.plSql = callStatement.prepareSql (
                 new AbstractCallMakerBase() {
+
                     private final Map<Comparable<?>, String> bindNames = new TreeMap<>(ParametersValues.ParamIdComparator);
 
                     @Override
-                    public void accept(Token token, CallPrepareContext context) {
+                    public void accept( Token token, CallPrepareContext context )
+                    {
                         final Comparable<?> id;
+
                         switch( token.getType() ) {
                             case NAMED_PARAMETER:
                                 id = token.getValue().toString();
@@ -97,14 +107,19 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
                         }
 
                         String bindName = bindNames.get(id);
-                        if( bindName == null ) {
-                            bindName = "b" + (vars.size() + 1);
+
+                        if( bindName == null )
+                        {
+                            bindName = "b" + ( vars.size() + 1);
+
                             bindNames.put(id, bindName);
                             vars.add(bindName);
+
                             parameterIds.add(id);
                         }
 
                         context.append(" :").append(bindName).sp();
+
                         if( context.isCommentParameters() )
                             context.append("/* ").append(bindName.substring(1)).append(", :").append(token.getValue()).append(" */ ");
                     }
@@ -114,43 +129,51 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
     }
 
-    /** Читает значения непосредственно перед очередным запуском. */
-    List<String> inputValues() {
-        final List<String> vals = new ArrayList<>(vars.size());
-        for( Comparable<?> id : parameterIds ) {
+    /** Готовит значения непосредственно перед очередным запуском. */
+    List<String> inputValues( )
+    {
+        final List<String> vals = new ArrayList<>( vars.size() );
+
+        for( Comparable<?> id : parameterIds )
+        {
             Object value = null;
-            if( callBackParameters != null ) {
-                if( id instanceof Integer ) {
+
+            if( callBackParameters != null )
+            {
+                if( id instanceof Integer )
+                {
                     int index = (Integer)id;
                     if( callBackParameters.hasParameter(index) )
                         value = callBackParameters.getParameter(index);
                 }
-                else {
-                    String name = (String)id;
+                else
+                {
+                    String name = id.toString();
                     if( callBackParameters.hasParameter(name) )
                         value = callBackParameters.getParameter(name);
                 }
             }
-            vals.add(value == null ? null : TypeConverter.convert(value, String.class));
+
+            vals.add( value == null ? null : TypeConverter.convert(value, String.class) );
         }
+
         return vals;
     }
 
     /** Проверяет весь ответ до первой обратной записи. */
     void applyOutputs(List<String> outs) {
+
         if( outs == null || outs.size() != vars.size() )
-            throw new IllegalStateException(
-                    Tags.PRODUCT_LABEL + "DBMS_SQL returned "
-                            + (outs == null ? 0 : outs.size())
-                            + " values for " + vars.size() + " variables"
-            );
+            throw new IllegalStateException( Tags.PRODUCT_LABEL + "DBMS_SQL returned " + (outs == null ? 0 : outs.size()) + " values for " + vars.size() + " variables" );
 
         if( callBackParameters == null )
             return;
 
-        for( int i = 0; i < parameterIds.size(); i++ ) {
+        for( int i = 0; i < parameterIds.size(); i++ )
+        {
             Comparable<?> id = parameterIds.get(i);
             String value = outs.get(i);
+
             if( id instanceof Integer )
                 callBackParameters.setParameter((Integer)id, value);
             else
@@ -160,11 +183,14 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
     /** Выполнение запроса */
     public DbmsSqlWork execute( Void unused ) throws CallException {
+
         Throwable failure = null;
 
         try {
+
             resultCode = null;
             resultInfo = null;
+
             final List<String> vals = inputValues();
 
             storedProcWork.set( "plSql", plSql )
@@ -176,27 +202,23 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
             resultCode = storedProcWork.get("ret");
             resultInfo = storedProcWork.get("rsltInf");
+
             if( !Integer.valueOf(0).equals(resultCode) )
-                throw new CallException(
-                        Tags.PRODUCT_LABEL + "DBMS_SQL launcher returned "
-                                + resultCode
-                                + (resultInfo == null ? "" : ": " + resultInfo)
-                );
+                throw new CallException( Tags.PRODUCT_LABEL + "DBMS_SQL launcher returned " + resultCode + (resultInfo == null ? "" : ": " + resultInfo)                );
+
             applyOutputs(storedProcWork.get("outs"));
+
         }
-        catch( CallException ex ) {
-            failure = ex;
-            throw ex;
+        catch( CallException | Error e) {
+            failure = e;
+            throw e;
         }
         catch( RuntimeException ex ) {
             failure = new CallException(Tags.PRODUCT_LABEL + "Error on execute work", ex);
             throw (CallException)failure;
         }
-        catch( Error error ) {
-            failure = error;
-            throw error;
-        }
-        finally {
+        finally
+        {
             try {
                 close();
             }
@@ -211,7 +233,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
     String preparedSql() { return plSql; }
     Integer resultCode() { return resultCode; }
-    String resultInfo() { return resultInfo; }
+    String resultInfo()  { return resultInfo; }
 
     /** */
     @Override
