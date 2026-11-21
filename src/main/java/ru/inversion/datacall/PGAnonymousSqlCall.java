@@ -3,7 +3,6 @@ package ru.inversion.datacall;
 import org.postgresql.PGConnection;
 import org.postgresql.jdbc.PreferQueryMode;
 import ru.inversion.dataset.IParameters;
-import ru.inversion.dataset.parser.lexer.PostgresSqlScanner;
 import ru.inversion.dataset.parser.lexer.SqlScanner.Token;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.Jt2St;
@@ -112,7 +111,7 @@ public class PGAnonymousSqlCall implements IDataCall {
             if (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared())
                 parameters.put(parameter.getIdentifier(), new Parameter(parameter));
         }
-        List<Token> tokens = PostgresSqlScanner.forPlPgSql().scan(source);
+        List<Token> tokens = callStatement.sqlTokens();
         Set<String> identifiers = new HashSet<>();
         identifiers.add("found");
         for (Token token : tokens) {
@@ -154,11 +153,11 @@ public class PGAnonymousSqlCall implements IDataCall {
         Token last = null;
         int position = 0;
         for (Token token : tokens) {
-            String text = token.text(source);
             switch (token.kind()) {
                 case NAMED_PARAMETER:
                 case POSITIONAL_PARAMETER:
-                    Comparable<?> id = token.kind() == NAMED_PARAMETER ? text.substring(1) : position++;
+                    Comparable<?> id = token.kind() == NAMED_PARAMETER
+                            ? source.substring(token.start() + 1, token.end()) : position++;
                     Parameter parameter = parameters.computeIfAbsent(id, key -> new Parameter(inferredInput(key)));
                     bind(parameter, identifiers);
                     result.append(outerLabel).append(".\"").append(parameter.variable).append('"');
@@ -167,23 +166,23 @@ public class PGAnonymousSqlCall implements IDataCall {
                     throw new CallException(Tags.PRODUCT_LABEL + "Use :name or ? for anonymous block parameters");
                 case OPERATOR:
                     // Внутри DO оператор доходит до сервера без JDBC-экранирования.
-                    result.append(text.replace("??", "?"));
+                    result.append(token.text(source).replace("??", "?"));
                     break;
                 case WHITESPACE:
                 case COMMENT:
                 case HINT:
                 case PARAMETERIZE_OFF:
                 case PARAMETERIZE_ON:
-                    result.append(text);
+                    result.append(source, token.start(), token.end());
                     continue;
                 default:
-                    result.append(text);
+                    result.append(source, token.start(), token.end());
             }
             last = token;
         }
         if (last == null)
             throw new CallException(Tags.PRODUCT_LABEL + "Empty PostgreSQL anonymous block");
-        if (!";".equals(last.text(source)))
+        if (last.end() - last.start() != 1 || source.charAt(last.start()) != ';')
             result.append("\n;");
         return result.toString();
     }

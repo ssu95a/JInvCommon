@@ -26,9 +26,15 @@ final class OperatorRecognizer implements TokenRecognizer {
     };
 
     private final boolean postgres;
+    private final boolean call;
 
     OperatorRecognizer(boolean postgres) {
+        this(postgres, false);
+    }
+
+    OperatorRecognizer(boolean postgres, boolean call) {
         this.postgres = postgres;
+        this.call = call;
     }
 
     @Override
@@ -36,6 +42,11 @@ final class OperatorRecognizer implements TokenRecognizer {
         if (at + 1 < sql.length() && sql.charAt(at) == ':'
                 && (sql.charAt(at + 1) == ':' || sql.charAt(at + 1) == '=')) {
             return new SqlScanner.Token(OPERATOR, at, at + 2);
+        }
+        if (call && at + 1 < sql.length()) {
+            char ch = sql.charAt(at);
+            if ((ch == '<' || ch == '>') && sql.charAt(at + 1) == ch)
+                return new SqlScanner.Token(OPERATOR, at, at + 2);
         }
         return postgres ? postgresOperator(sql, at) : oracleOperator(sql, at);
     }

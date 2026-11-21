@@ -1,88 +1,87 @@
 package ru.inversion.datacall;
 
+import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
+import ru.inversion.dataset.parser.lexer.PostgresSqlScanner;
+import ru.inversion.dataset.parser.lexer.SqlScanner;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.parser.token.Token;
-import ru.inversion.parser.token.TokenHandler;
-import ru.inversion.utils.*;
+import ru.inversion.utils.S;
+import ru.inversion.utils.Tags;
+import ru.inversion.utils.U;
 
-import java.sql.Types;
-import java.util.*;
-import java.util.function.BiFunction;
+import java.util.Iterator;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
-import static ru.inversion.parser.token.Token.TypeEnum.*;
+import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.*;
 
+/** Исходный SQL и разобранные токены для повторной подготовки вызова. */
 public class CallDescriptor {
 
-    /** */
-    final private LinkedList<Token<?>> tokenList;
-    final private String sourceSql;
+    private static final SqlScanner CALL_SCANNER = OracleSqlScanner.forCall();
+    private static final SqlScanner PG_SCANNER = PostgresSqlScanner.forPlPgSql();
 
-    /** */
-    final private LangEnum lang;
+    private final List<SqlScanner.Token> tokenList;
+    private final String sourceSql;
+    private final LangEnum lang;
+    private final boolean anonymousBlock;
 
-    /** */
-    final private boolean isAnonymousBlock;
-
-    /** */
-    private CallDescriptor( String sourceSql, LinkedList<Token<?>> tokenList, LangEnum l ) {
-
+    private CallDescriptor( String sourceSql, List<SqlScanner.Token> tokens, LangEnum lang ) {
         this.sourceSql = sourceSql;
-        this.tokenList = tokenList;
+        this.tokenList = tokens;
 
-        if( l == null || l == LangEnum.UNKNOWN )
-            lang = determinateLang( tokenList );
-        else
-            lang = l;
-
-        Predicate<Token<?>> f = new Predicate< Token<?> >() {
-            @Override
-            public boolean test( Token t ) {
-                return
-                    t.getType() == EXPRESSION
-                    &&
-                    (
-                        "DECLARE".equalsIgnoreCase( (String)t.getValue() ) || "BEGIN".equalsIgnoreCase( (String)t.getValue()
-                    )
-                );
-            }
-        };
-
-        isAnonymousBlock = tokenList.stream().anyMatch(f);
+        int first = nextExecutableIndex(0);
+        anonymousBlock = startsAnonymousBlock(first);
+        this.lang = lang == null || lang == LangEnum.UNKNOWN ? inferLanguage(first) : lang;
     }
-    /** */
-    private static LangEnum determinateLang( List<Token<?>> tokenList ) {
 
-        int i = 0;
-
-        // skip first comment
-        for(; i < tokenList.size()
-                && U.in( tokenList.get(i).getType(), COMMENT, NL );
-                    i++ )
-            ;
-
-        if( i >= tokenList.size() )
+    private LangEnum inferLanguage( int first ) {
+        if( first == tokenList.size() )
             throw new IllegalArgumentException( Tags.PRODUCT_LABEL + "SQL text contains no executable tokens" );
-
-        Token<?> token = tokenList.get(i);
-
-        if( token.getType() == Token.TypeEnum.LEFT_BRACE )
+        SqlScanner.Token token = tokenList.get(first);
+        if( token.kind() == SYMBOL && sourceSql.charAt(token.start()) == '{' )
             return LangEnum.JDBC;
+        return anonymousBlock ? LangEnum.PL_SQL : LangEnum.SQL;
+    }
 
-        if( token.getType() == EXPRESSION
-            && (
-                "DECLARE".equalsIgnoreCase( (String)token.getValue() )
-                ||
-                "BEGIN".equalsIgnoreCase( (String)token.getValue() )
-            )
-        ) {
-            return LangEnum.PL_SQL;
+    private boolean startsAnonymousBlock( int first ) {
+        int index = first;
+        // Перед телом блока DECLARE/BEGIN могут стоять метки.
+        while( isLabelDelimiter(index, "<<") ) {
+            int name = nextExecutableIndex(index + 1);
+            if( name == tokenList.size() )
+                return false;
+            SqlScanner.Kind nameType = tokenList.get(name).kind();
+            int end = nextExecutableIndex(name + 1);
+            if( (nameType != WORD && nameType != QUOTED_IDENTIFIER) || !isLabelDelimiter(end, ">>") )
+                return false;
+            index = nextExecutableIndex(end + 1);
         }
-        return LangEnum.SQL;
+        if( index == tokenList.size() )
+            return false;
+        SqlScanner.Token token = tokenList.get(index);
+        return token.isWord(sourceSql, "DECLARE") || token.isWord(sourceSql, "BEGIN");
+    }
+
+    private boolean isLabelDelimiter( int index, String delimiter ) {
+        if( index == tokenList.size() )
+            return false;
+        SqlScanner.Token token = tokenList.get(index);
+        return token.kind() == OPERATOR && token.end() - token.start() == delimiter.length()
+                && sourceSql.startsWith(delimiter, token.start());
+    }
+
+    private int nextExecutableIndex( int index ) {
+        while( index < tokenList.size() ) {
+            SqlScanner.Kind kind = tokenList.get(index).kind();
+            if( kind != WHITESPACE && kind != COMMENT && kind != HINT
+                    && kind != PARAMETERIZE_OFF && kind != PARAMETERIZE_ON )
+                break;
+            index++;
+        }
+        return index;
     }
 
     /** */
@@ -93,39 +92,39 @@ public class CallDescriptor {
     /** */
     public static CallDescriptor create( String text, LangEnum lang )
     {
-        final LinkedList<Token<?>> l =
-            StreamSupport.stream( U.iterable( new TokenHandler( text ).iterator() ).spliterator(), false )
-                .collect( Collectors.toCollection(LinkedList::new) );
-
-        return new CallDescriptor( text, l, lang );
+        if( S.isNullOrEmpty(text) )
+            throw new IllegalArgumentException("'strSQL' is null");
+        SqlScanner scanner = lang == LangEnum.PL_pgSQL ? PG_SCANNER : CALL_SCANNER;
+        return new CallDescriptor( text, scanner.scan(text), lang );
     }
 
     String sourceSql() {
         return sourceSql;
     }
 
-    /** */
-    public Iterator<Token<?>> getTokenIterator( Predicate<Token<?>> predicate ) {
-        return U.mapIter( tokenList.iterator(), Function.identity(), predicate );
+    List<SqlScanner.Token> sqlTokens() {
+        return tokenList;
     }
 
-    /** Имена и позиции bind-параметров в порядке появления в SQL. */
+    /** */
+    public Iterator<Token<?>> getTokenIterator( Predicate<Token<?>> predicate ) {
+        return U.mapIter( new CallTokenIterator(sourceSql, tokenList), Function.identity(), predicate );
+    }
+
+    // Имена и позиции bind-параметров в порядке появления в SQL.
     void forEachParameterId( Consumer<Comparable<?>> consumer ) {
-
         int position = 0;
-
-        for( Token<?> token : tokenList )
-        {
-            if( token.getType() == NAMED_PARAMETER )
-                consumer.accept( (String)token.getValue() );
-            else if( token.getType() == INDEXED_PARAMETER )
+        for( SqlScanner.Token token : tokenList ) {
+            if( token.kind() == NAMED_PARAMETER )
+                consumer.accept( sourceSql.substring(token.start() + 1, token.end()) );
+            else if( token.kind() == POSITIONAL_PARAMETER )
                 consumer.accept( position++ );
         }
     }
 
     /** */
     public void preparePLSql( CallPrepareContext context ) {
-        tokenList.forEach( t->context.sqlMaker().accept( t, context ));
+        new CallTokenIterator(sourceSql, tokenList).forEachRemaining(t -> context.sqlMaker().accept(t, context));
     }
     /** */
     public boolean hasNamedParameter( String name ) {
@@ -133,15 +132,17 @@ public class CallDescriptor {
         if( S.isNullOrEmpty(name) )
             throw new IllegalArgumentException( "'name' is null" );
 
-        return tokenList.stream().anyMatch( (t)->t.getType() == Token.TypeEnum.NAMED_PARAMETER && name.equalsIgnoreCase( (String)t.getValue() ) );
+        return tokenList.stream().anyMatch(t -> t.kind() == NAMED_PARAMETER
+                && t.end() - t.start() == name.length() + 1
+                && sourceSql.regionMatches(true, t.start() + 1, name, 0, name.length()));
     }
     /** */
     public boolean hasNamedParameters() {
-        return tokenList.stream().anyMatch( (t)->t.getType() == Token.TypeEnum.NAMED_PARAMETER );
+        return tokenList.stream().anyMatch(t -> t.kind() == NAMED_PARAMETER);
     }
     /** */
     public boolean hasIndexedParameters() {
-        return tokenList.stream().anyMatch( (t)->t.getType() == Token.TypeEnum.INDEXED_PARAMETER );
+        return tokenList.stream().anyMatch(t -> t.kind() == POSITIONAL_PARAMETER);
     }
 
     /** */
@@ -149,6 +150,6 @@ public class CallDescriptor {
         return this.lang;
     }
 
-    /** */
-    public boolean isAnonymousBlock() { return isAnonymousBlock; }
+    /** После комментариев и меток следует начало тела блока DECLARE или BEGIN. */
+    public boolean isAnonymousBlock() { return anonymousBlock; }
 }

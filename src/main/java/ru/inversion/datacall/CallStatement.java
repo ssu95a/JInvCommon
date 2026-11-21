@@ -1,6 +1,7 @@
 package ru.inversion.datacall;
 
 import ru.inversion.dataset.IParameters;
+import ru.inversion.dataset.parser.lexer.SqlScanner;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.parser.statement.PrepareModeEnum;
 import ru.inversion.parser.token.Token;
@@ -81,6 +82,10 @@ public class CallStatement {
         return descriptor.sourceSql();
     }
 
+    List<SqlScanner.Token> sqlTokens() {
+        return descriptor.sqlTokens();
+    }
+
     /** */
     public boolean isAutoCommit() {
         return autoCommit;
@@ -105,11 +110,8 @@ public class CallStatement {
     {
         CallPrepareContext context = new CallPrepareContext( sqlMaker, handler );
 
-        if( removeAdditionalInfo ) {
-            context.setSkipComments     (true );
-            context.setCommentParameters(false);
-        }
-
+        context.setSkipComments( removeAdditionalInfo );
+        context.setCommentParameters( !removeAdditionalInfo );
         context.setEnableReplaceConstants( replaceConstants );
 
         descriptor.preparePLSql( context );

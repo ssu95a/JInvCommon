@@ -2,6 +2,7 @@ package ru.inversion.dataset.parser.lexer.recognizer;
 
 import ru.inversion.dataset.parser.lexer.TokenRecognizer;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -13,21 +14,29 @@ public final class RecognizerSets {
     private RecognizerSets() { }
 
     public static List<TokenRecognizer> oracle() {
-        return Arrays.<TokenRecognizer>asList(
+        return oracle(false);
+    }
+
+    public static List<TokenRecognizer> oracle(boolean call) {
+        List<TokenRecognizer> rules = new ArrayList<>(Arrays.asList(
                 new CommonRecognizers.Whitespace(),
                 new CommonRecognizers.LineComment(),
                 new ParameterizeDirectiveRecognizer(),
                 new OptimizerHintRecognizer(false),
-                new CommonRecognizers.BlockComment(false),
-                new UnsupportedQuotedLiteralRecognizer(true),
+                new CommonRecognizers.BlockComment(false)
+        ));
+        if( !call )
+            rules.add(new UnsupportedQuotedLiteralRecognizer(true));
+        rules.addAll(Arrays.asList(
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),
-                new OperatorRecognizer(false),
+                new OperatorRecognizer(false, call),
                 new CommonRecognizers.Parameter(true),
                 new NumberRecognizer(),
                 new CommonRecognizers.Word(true),
-                new CommonRecognizers.Symbol()
-        );
+                new CommonRecognizers.Symbol(call)
+        ));
+        return rules;
     }
 
     public static List<TokenRecognizer> postgres() {
@@ -50,7 +59,7 @@ public final class RecognizerSets {
                 new CommonRecognizers.Parameter(false),
                 new NumberRecognizer(),
                 new CommonRecognizers.Word(false),
-                new CommonRecognizers.Symbol()
+                new CommonRecognizers.Symbol(procedural)
         );
     }
 }

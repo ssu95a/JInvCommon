@@ -152,7 +152,7 @@ class CallWorkExecutionTest {
             try (IDataCall call = builder.build()) {
                 assertTrue(call instanceof PGAnonymousSqlCall);
             }
-            CallStatement sql = CallBuilder.NEW().sql("select 1").lang(LangEnum.SQL).build();
+            CallStatement sql = CallBuilder.NEW().sql("select t.begin from t").lang(LangEnum.PL_pgSQL).build();
             try (IDataCall call = SQLCallBuilder.NEW(tc).callStatement(ignored -> sql).build()) {
                 assertTrue(call instanceof SQLCallBuilder.SQLDataCall);
             }
@@ -167,6 +167,24 @@ class CallWorkExecutionTest {
             else
                 System.setProperty(property, previous);
         }
+    }
+
+    @Test
+    void postgresDirectCallKeepsSourceAroundReplacedBinds() {
+        JdbcScenario jdbc = new JdbcScenario();
+        jdbc.autoCommit = false;
+        CallStatement statement = CallBuilder.NEW()
+                .sql("<<блок>>\nBEGIN\n  PERFORM :БЛОК.Поле_2; -- :ignored\nEND;")
+                .lang(LangEnum.PL)
+                .build();
+
+        try (IDataCall call = new PGAnonymousSqlCall(taskContext(jdbc.connection()), statement, null, "sample")) {
+            call.setParameter("БЛОК.Поле_2", 7);
+            call.execute();
+        }
+
+        assertTrue(jdbc.preparedSql.contains(
+                "<<блок>>\nBEGIN\n  PERFORM jinv_outer.\"БЛОК.Поле_2\"; -- :ignored\nEND;"), jdbc.preparedSql);
     }
 
     @Test
@@ -464,6 +482,7 @@ class CallWorkExecutionTest {
 
         String generatedKeyLabel;
         Object generatedKeyValue;
+        String preparedSql;
 
         boolean autoCommit = true;
         boolean failExecute;
@@ -487,6 +506,7 @@ class CallWorkExecutionTest {
         ) throws Throwable {
             switch( method.getName() ) {
                 case "prepareStatement":
+                    preparedSql = (String)args[0];
                     return statement(false).proxy();
                 case "prepareCall":
                     return statement(true).proxy();
@@ -636,6 +656,8 @@ class CallWorkExecutionTest {
                     return scenario.outValues.get((Integer)args[0]);
                 case "getGeneratedKeys":
                     return scenario.generatedKeys();
+                case "getUpdateCount":
+                    return -1;
                 case "clearParameters":
                     clearCalls++;
                     if( scenario.failClearParameters )

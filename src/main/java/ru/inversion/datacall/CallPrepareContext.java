@@ -5,13 +5,13 @@ import ru.inversion.utils.TriConsumer;
 
 import java.util.function.BiConsumer;
 
+/** Состояние одного прохода подготовки SQL. */
 public class CallPrepareContext {
 
     /** осуществлять вывод или прекратить */
     private boolean enableOut = true;
 
-    /** буфер для вывода текста */
-    final private StringBuilder a = new StringBuilder();
+    private final StringBuilder sql = new StringBuilder();
 
     /** режим замены констант на параметры */
     private boolean replaceConstantMode = true;
@@ -32,8 +32,8 @@ public class CallPrepareContext {
     /** Режим order by не заменяем константы */
     private boolean orderByMode = false;
 
-    /** текущий уровень вывода */
-    private int level = 0;
+    /** Глубина скобок, открытых после ORDER BY. */
+    private int orderByParentheses;
 
     /** возможно ли замена констант на параметры */
     private boolean enableReplaceConstants = true;
@@ -103,15 +103,14 @@ public class CallPrepareContext {
 
     /** */
     private char lastChar() {
-        return a.length() == 0 ? 0 : a.charAt( a.length() - 1 );
+        return sql.length() == 0 ? 0 : sql.charAt(sql.length() - 1);
     }
 
     /** */
     public CallPrepareContext append( char ch ) {
 
         if( isEnableOut() )
-            //if( !U.inChar( lastChar(), ' ', '\n' ) )
-                a.append(ch);
+            sql.append(ch);
 
         return this;
     }
@@ -120,7 +119,7 @@ public class CallPrepareContext {
     public CallPrepareContext append( Object o ) {
 
         if( isEnableOut() )
-            a.append( o );
+            sql.append(o);
 
         return this;
     }
@@ -131,33 +130,34 @@ public class CallPrepareContext {
         switch( t.getType() ) {
             case ORDER_BY:
                 setOrderByMode(true);
-            break;
+                break;
             case UNCHANGED_MARK:
                 setReplaceConstantMode();
-            break;
+                break;
             case SEMICOLON:
                 if( isOrderByMode() )
                     setOrderByMode(false);
-            break;
+                break;
             case PARENTHESIS_LEFT:
                 if( isOrderByMode() )
-                    level++;
-            break;
+                    orderByParentheses++;
+                break;
             case PARENTHESIS_RIGHT:
-                if( isOrderByMode() )
-                    if( level == 0 )
-                        setOrderByMode(false);
-                    else
-                        level--;
-            break;
+                if( !isOrderByMode() )
+                    break;
+                if( orderByParentheses == 0 )
+                    setOrderByMode(false);
+                else
+                    orderByParentheses--;
+                break;
             case COMMENT:
                 if( isSkipComments() )
                     return this;
+                break;
         }
 
-        if( isEnableOut() ) {
-            t.accept(a);
-        }
+        if( isEnableOut() )
+            t.accept(sql);
 
         return this;
     }
@@ -184,7 +184,7 @@ public class CallPrepareContext {
 
     /** */
     public String getSQL() {
-        return a.toString();
+        return sql.toString();
     }
 
     /** */

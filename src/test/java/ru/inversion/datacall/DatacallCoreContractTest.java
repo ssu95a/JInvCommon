@@ -1,6 +1,7 @@
 package ru.inversion.datacall;
 
 import org.junit.jupiter.api.Test;
+import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.parser.statement.PrepareModeEnum;
 
 import java.sql.Types;
@@ -153,6 +154,64 @@ class DatacallCoreContractTest {
         assertThrows(CallException.class, () -> CallBuilder.NEW()
                 .sql("-- no executable statement")
                 .build());
+    }
+
+    @Test
+    void qualifiedCyrillicBindKeepsItsFullNameAndJdbcPosition() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("{? = call p(:БЛОК.Поле_2, ?, :amount_1)}")
+                .build();
+        List<Object> ids = new ArrayList<>();
+
+        assertEquals(LangEnum.JDBC, statement.getLang());
+        assertTrue(statement.prepareJdbcSql((position, id) -> ids.add(id), (position, value) -> {}).contains("{"));
+        assertEquals(Arrays.asList(0, "БЛОК.Поле_2", 1, "amount_1"), ids);
+        assertEquals("БЛОК.Поле_2", statement.getParameter("блок.поле_2").getName());
+    }
+
+    @Test
+    void orderByOrdinalIsKeptWhenLiteralsAreReplaced() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("select 7 from t order by 1")
+                .replaceConstants(true)
+                .build();
+        List<Object> values = new ArrayList<>();
+
+        String sql = statement.prepareSql(PrepareModeEnum.QUERY, values);
+
+        assertEquals(Arrays.asList(7), values);
+        assertTrue(sql.contains("ORDER BY 1"), sql);
+    }
+
+    @Test
+    void anonymousBlockIsDetectedByItsOpeningTokens() {
+        CallDescriptor query = CallDescriptor.create("select t.begin from t", LangEnum.PL_pgSQL);
+        assertEquals(LangEnum.PL_pgSQL, query.getLang());
+        assertFalse(query.isAnonymousBlock());
+
+        CallDescriptor jdbc = CallDescriptor.create("-- comment\n{call p(?)}");
+        assertEquals(LangEnum.JDBC, jdbc.getLang());
+        assertFalse(jdbc.isAnonymousBlock());
+
+        CallDescriptor block = CallDescriptor.create("-- comment\n<<block_label>>\nDeClArE\nBEGIN NULL; END;");
+        assertEquals(LangEnum.PL_SQL, block.getLang());
+        assertTrue(block.isAnonymousBlock());
+    }
+
+    @Test
+    void preparationCanKeepSourceCommentsAndBindAnnotations() {
+        String source = "select /*+ INDEX(t) */ /* source comment */ :value from t";
+        CallStatement statement = CallBuilder.NEW().sql(source).removeAdditionalInfo(false).build();
+        String withComments = statement.prepareSql(PrepareModeEnum.QUERY, new ArrayList<>());
+
+        assertTrue(withComments.contains("/* source comment */"), withComments);
+        assertTrue(withComments.contains("/* 1, :value */"), withComments);
+
+        CallStatement stripped = CallBuilder.NEW().sql(source).build();
+        String withoutComments = stripped.prepareSql(PrepareModeEnum.QUERY, new ArrayList<>());
+        assertFalse(withoutComments.contains("/* source comment */"), withoutComments);
+        assertFalse(withoutComments.contains("/* 1, :value */"), withoutComments);
+        assertTrue(withoutComments.contains("/*+ INDEX(t) */"), withoutComments);
     }
 
     @Test
