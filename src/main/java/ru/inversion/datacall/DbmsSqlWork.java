@@ -88,6 +88,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         this.storedProcWork     = Checks.Require.object( storedProcWork, "storedProcWork" );
 
         this.plSql = callStatement.prepareSql (
+
                 new AbstractCallMakerBase() {
 
                     private final Map<Comparable<?>, String> bindNames = new TreeMap<>(ParametersValues.ParamIdComparator);
@@ -173,12 +174,13 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
             return;
 
         Map<Comparable<?>, Object> converted = new LinkedHashMap<>();
-        for( int i = 0; i < parameterIds.size(); i++ ) {
+
+        for( int i = 0; i < parameterIds.size(); i++ )
+        {
             final Comparable<?> id = parameterIds.get(i);
             final ParameterMetadata<?> parameter = callStatement.getParameter(id);
             // Для параметров, найденных только в тексте блока, сохраняем строковую обратную запись.
-            final boolean declared = parameter != null
-                    && (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared());
+            final boolean declared = parameter != null && (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared());
             if( declared && parameter.getMode() == IN )
                 continue;
 
