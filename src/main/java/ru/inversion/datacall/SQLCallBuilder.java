@@ -32,6 +32,10 @@ import static ru.inversion.parser.statement.LangEnum.*;
 /**
  * Построитель объектов для выполнения хранимого блока кода на языке SQL, PL/SQL, JDBC, PLpg/SQL
  * <p>
+ * Системное свойство {@code ru.inversion.datacall.pg_anonymous_direct=true}
+ * включает выполнение анонимных блоков PL/pgSQL через {@link PGAnonymousSqlCall}.
+ * По умолчанию используется {@link JsonSqlCall}.
+ * <p>
  * @author Sulimoff
  * @version 3.0-04.02.2026/1.2-02.04.2019
  *
@@ -351,13 +355,13 @@ public class SQLCallBuilder {
         /** */
         if( !runByDbmsSql ) {
 
-            if (
-                //LangEnum.getGLangPL() == PL_pgSQL &&
-                    tc.dialect().type() == SqlDialect.DialectId.POSTGRES &&
-                            U.in( callStatement.getLang(), PL_pgSQL, PL ) &&
-                            callStatement.isAnonymousBlock()
-            )
+            if( tc.dialect().type() == SqlDialect.DialectId.POSTGRES
+                    && U.in( callStatement.getLang(), PL_pgSQL, PL )
+                    && callStatement.isAnonymousBlock() ) {
+                if( Boolean.parseBoolean(System.getProperty("ru.inversion.datacall.pg_anonymous_direct")) )
+                    return new PGAnonymousSqlCall( tc, callStatement, callBackParameters, name );
                 return new JsonSqlCall( tc, callStatement, callBackParameters, name );
+            }
 
             return new SQLDataCall(
                 callStatement.createCallWork( tc, callBackParameters, closeAfterExecute ),

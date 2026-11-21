@@ -4,10 +4,14 @@ import ru.inversion.utils.converter.TypeConverter;
 
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.sql.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.OffsetTime;
+import java.util.UUID;
 
 /**
  *
@@ -70,6 +74,11 @@ public class Jt2St {
     
     /** */
     public static int get( Class<?> clazz ) {
+        return get( clazz, Types.INTEGER );
+    }
+
+    /** Позволяет вызывающему коду выбрать JDBC-тип для Boolean. */
+    public static int get( Class<?> clazz, int booleanType ) {
     
         if( clazz == null )
             return Types.NULL;
@@ -79,8 +88,7 @@ public class Jt2St {
         if( clazz == String.class )
             return Types.VARCHAR;
         if( U.in(clazz, Boolean.class, boolean.class ) )
-
-            return Types.INTEGER;
+            return booleanType;
         if( clazz == Byte.class )
             return Types.TINYINT;
         if( U.in( clazz, Integer.class, Short.class ) )
@@ -89,6 +97,8 @@ public class Jt2St {
             return Types.BIGINT;
         if( clazz == BigDecimal.class )
             return Types.DECIMAL;
+        if( clazz == BigInteger.class )
+            return Types.NUMERIC;
         if( U.in( clazz, Float.class, Double.class ) )
             return Types.DOUBLE;
 
@@ -111,6 +121,12 @@ public class Jt2St {
             return Types.TIME;
         if( clazz == java.sql.Timestamp.class )
             return Types.TIMESTAMP;
+        if( clazz == OffsetDateTime.class )
+            return Types.TIMESTAMP_WITH_TIMEZONE;
+        if( clazz == OffsetTime.class )
+            return Types.TIME_WITH_TIMEZONE;
+        if( clazz == UUID.class )
+            return Types.OTHER;
 
         if( clazz == Clob.class )
             return Types.CLOB;

@@ -31,13 +31,18 @@ public final class RecognizerSets {
     }
 
     public static List<TokenRecognizer> postgres() {
+        return postgres(false);
+    }
+
+    public static List<TokenRecognizer> postgres(boolean procedural) {
         return Arrays.<TokenRecognizer>asList(
                 new CommonRecognizers.Whitespace(),
                 new CommonRecognizers.LineComment(),
                 new ParameterizeDirectiveRecognizer(),
                 new OptimizerHintRecognizer(true),
                 new CommonRecognizers.BlockComment(true),
-                new UnsupportedQuotedLiteralRecognizer(false),
+                procedural ? new PostgresRecognizers.QuotedLiteral()
+                           : new UnsupportedQuotedLiteralRecognizer(false),
                 new PostgresRecognizers.NumberedParameter(),
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),

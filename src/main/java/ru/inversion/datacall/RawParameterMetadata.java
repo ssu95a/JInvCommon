@@ -25,11 +25,13 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
     final private String        rawElementType;
     final private boolean       logValue;
     final private boolean       isReturnValue;
+    final private boolean       declared;
 
     /** */
     RawParameterMetadata( String name, Integer sqlType, Class<Object> javaType, ParameterMode mode, Object defaultValue, boolean isDefInParameterList, String rawElementType, boolean logValue, boolean isReturnValue ) {
         this.identifier     = Objects.requireNonNull( name, "'name' is null");
         this.isReturnValue  = isReturnValue;
+        this.declared       = isDefInParameterList;
         this.sqlType        = sqlType;
         this.mode           = mode;
         this.defaultValue   = defaultValue;
@@ -51,6 +53,7 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
         this.defaultValue   = defaultValue;
         this.rawElementType = rawElementType;
         this.isReturnValue  = isReturnValue;
+        this.declared       = isDefInParameterList;
 
         if( javaType == null && sqlType != null ) 
             this.javaType = getJavaType(sqlType);
@@ -103,6 +106,10 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
     /** */
     public boolean isIndexed( ) {
         return identifier instanceof Integer;
+    }
+
+    boolean isDeclared() {
+        return declared;
     }
     
     /** */

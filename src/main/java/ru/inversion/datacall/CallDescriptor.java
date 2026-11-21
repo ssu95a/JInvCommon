@@ -20,6 +20,7 @@ public class CallDescriptor {
 
     /** */
     final private LinkedList<Token<?>> tokenList;
+    final private String sourceSql;
 
     /** */
     final private LangEnum lang;
@@ -28,8 +29,9 @@ public class CallDescriptor {
     final private boolean isAnonymousBlock;
 
     /** */
-    private CallDescriptor( LinkedList<Token<?>> tokenList, LangEnum l ) {
+    private CallDescriptor( String sourceSql, LinkedList<Token<?>> tokenList, LangEnum l ) {
 
+        this.sourceSql = sourceSql;
         this.tokenList = tokenList;
 
         if( l == null || l == LangEnum.UNKNOWN )
@@ -95,7 +97,11 @@ public class CallDescriptor {
             StreamSupport.stream( U.iterable( new TokenHandler( text ).iterator() ).spliterator(), false )
                 .collect( Collectors.toCollection(LinkedList::new) );
 
-        return new CallDescriptor( l, lang );
+        return new CallDescriptor( text, l, lang );
+    }
+
+    String sourceSql() {
+        return sourceSql;
     }
 
     /** */

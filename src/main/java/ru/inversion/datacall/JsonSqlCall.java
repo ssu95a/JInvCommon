@@ -29,6 +29,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static javax.persistence.ParameterMode.IN;
+import static javax.persistence.ParameterMode.INOUT;
 import static javax.persistence.ParameterMode.OUT;
 import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
@@ -460,9 +461,19 @@ public class JsonSqlCall implements IDataCall {
             return supplier == null ? null : supplier.get();
         }
 
-        return parameter.isIndexed()
+        final boolean indexed = parameter.isIndexed();
+        final Object value = indexed
                 ? parametersValues.get(parameter.getPosition())
                 : parametersValues.get(parameter.getName());
+
+        if( value != null || parameter.getMode() != INOUT || parameter.getDefaultValue() == null )
+            return value;
+
+        // Явный null, в том числе результат предыдущего вызова, остаётся входным значением.
+        final boolean supplied = indexed
+                ? parametersValues.hasParameter(parameter.getPosition())
+                : parametersValues.hasParameter(parameter.getName());
+        return supplied ? null : parameter.getDefaultValue();
     }
 
     /** */

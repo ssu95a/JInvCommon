@@ -113,6 +113,21 @@ public class SqlScannerTest {
     }
 
     @Test
+    public void plPgSqlKeepsQuotedParameterTextAndFindsOnlyRealBinds() {
+        String sql = "begin :out := $str$:hidden ? $1 'str'$str$"
+                + " || E'quoted\\' :hidden ?' || date '2026-11-20'; end;";
+
+        List<SqlScanner.Token> tokens = PostgresSqlScanner.forPlPgSql().scan(sql);
+
+        assertEquals(3, count(tokens, STRING));
+        assertEquals(1, count(tokens, NAMED_PARAMETER));
+        assertEquals(0, count(tokens, POSITIONAL_PARAMETER));
+        assertEquals(0, count(tokens, NUMBERED_PARAMETER));
+        assertTrue(containsText(sql, tokens, NAMED_PARAMETER, ":out"));
+        assertEquals(sql, recreate(sql, tokens));
+    }
+
+    @Test
     public void oracleIdentifiersMayContainHash() {
         String sql = "select customer#id from t where id=:a#b";
 

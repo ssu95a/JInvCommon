@@ -77,6 +77,10 @@ public class CallStatement {
         return descriptor.isAnonymousBlock();
     }
 
+    String sourceSql() {
+        return descriptor.sourceSql();
+    }
+
     /** */
     public boolean isAutoCommit() {
         return autoCommit;

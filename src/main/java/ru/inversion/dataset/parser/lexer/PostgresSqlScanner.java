@@ -10,4 +10,12 @@ public final class PostgresSqlScanner extends SqlScanner {
     public PostgresSqlScanner() {
         super(RecognizerSets.postgres());
     }
+
+    private PostgresSqlScanner(boolean procedural) {
+        super(RecognizerSets.postgres(procedural));
+    }
+
+    public static PostgresSqlScanner forPlPgSql() {
+        return new PostgresSqlScanner(true);
+    }
 }

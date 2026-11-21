@@ -1,9 +1,15 @@
 package ru.inversion.datacall;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.parallel.Resources;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.tc.TaskContext;
 
+import javax.json.Json;
+import javax.json.JsonObject;
+import javax.json.JsonReader;
+import java.io.StringReader;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -28,6 +34,7 @@ import static javax.persistence.ParameterMode.IN;
 import static javax.persistence.ParameterMode.INOUT;
 import static javax.persistence.ParameterMode.OUT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -121,6 +128,86 @@ class CallWorkExecutionTest {
         ), notifications);
         assertEquals(Arrays.asList(2), jdbc.statements.get(0).outPositions);
         work.close();
+    }
+
+    @Test
+    @ResourceLock(Resources.SYSTEM_PROPERTIES)
+    void postgresAnonymousExecutionIsSelectedAtBuildTime() {
+        String property = "ru.inversion.datacall.pg_anonymous_direct";
+        String previous = System.getProperty(property);
+        TaskContext tc = taskContext(new JdbcScenario().connection());
+        CallStatement block = CallBuilder.NEW()
+                .sql("begin null; end;")
+                .lang(LangEnum.PL_pgSQL)
+                .build();
+        SQLCallBuilder builder = SQLCallBuilder.NEW(tc).callStatement(ignored -> block);
+
+        try {
+            System.clearProperty(property);
+            try (IDataCall call = builder.build()) {
+                assertTrue(call instanceof JsonSqlCall);
+            }
+
+            System.setProperty(property, "true");
+            try (IDataCall call = builder.build()) {
+                assertTrue(call instanceof PGAnonymousSqlCall);
+            }
+            CallStatement sql = CallBuilder.NEW().sql("select 1").lang(LangEnum.SQL).build();
+            try (IDataCall call = SQLCallBuilder.NEW(tc).callStatement(ignored -> sql).build()) {
+                assertTrue(call instanceof SQLCallBuilder.SQLDataCall);
+            }
+
+            System.setProperty(property, "false");
+            try (IDataCall call = builder.build()) {
+                assertTrue(call instanceof JsonSqlCall);
+            }
+        } finally {
+            if (previous == null)
+                System.clearProperty(property);
+            else
+                System.setProperty(property, previous);
+        }
+    }
+
+    @Test
+    void jsonInOutStartsWithDefaultAndReusesReturnedValuesIncludingNull() {
+        JdbcScenario jdbc = new JdbcScenario();
+        CallStatement statement = CallBuilder.NEW()
+                .sql("begin :counter := :counter + 1; end;")
+                .lang(LangEnum.PL_pgSQL)
+                .parameter(INOUT, "counter", Types.INTEGER, null, Integer.class, 7, true)
+                .build();
+
+        try (IDataCall call = new JsonSqlCall(taskContext(jdbc.connection()), statement, null, null)) {
+            List<Object> notifications = new ArrayList<>();
+            call.setValueListener("counter", (id, value) -> notifications.add(value));
+            jdbc.outValues.put(2, "{\"parameters\":[{\"name\":\"p_counter\",\"value\":8}]}");
+            call.execute();
+
+            JsonObject firstRequest = jsonRequest(jdbc.statements.get(0));
+            assertTrue(firstRequest.getString("script").matches("(?s).*:p_counter\\s*:=\\s*:p_counter.*"));
+            JsonObject firstParameter = firstRequest.getJsonArray("parameters").getJsonObject(0);
+            assertEquals("INOUT", firstParameter.getString("mode"));
+            assertEquals("7", firstParameter.getString("value", null));
+            assertEquals(Integer.valueOf(8), call.getParameter("counter"));
+
+            jdbc.outValues.put(2, "{\"parameters\":[{\"name\":\"p_counter\",\"value\":null}]}");
+            call.execute();
+            assertEquals("8", jsonRequest(jdbc.statements.get(1)).getJsonArray("parameters")
+                    .getJsonObject(0).getString("value"));
+            assertNull(call.getParameter("counter"));
+
+            call.execute();
+            assertTrue(jsonRequest(jdbc.statements.get(2)).getJsonArray("parameters")
+                    .getJsonObject(0).isNull("value"));
+            assertEquals(Arrays.asList(8, null, null), notifications);
+        }
+    }
+
+    private static JsonObject jsonRequest(StatementState statement) {
+        try (JsonReader reader = Json.createReader(new StringReader((String)statement.boundValues.get(1)))) {
+            return reader.readObject().getJsonObject("expression");
+        }
     }
 
     @Test
