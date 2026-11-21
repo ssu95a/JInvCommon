@@ -2,7 +2,6 @@ package ru.inversion.datacall;
 
 import ru.inversion.dataset.IParameters;
 import ru.inversion.meta.impl.work.IDBWork;
-import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.Checks;
 import ru.inversion.utils.ParametersValues;
@@ -87,50 +86,16 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         this.callBackParameters = callBackParameters;
         this.storedProcWork     = Checks.Require.object( storedProcWork, "storedProcWork" );
 
-        this.plSql = callStatement.prepareSql (
-
-                new AbstractCallMakerBase() {
-
-                    private final Map<Comparable<?>, String> bindNames = new TreeMap<>(ParametersValues.ParamIdComparator);
-
-                    @Override
-                    public void accept( Token token, CallPrepareContext context )
-                    {
-                        final Comparable<?> id;
-
-                        switch( token.getType() ) {
-                            case NAMED_PARAMETER:
-                                id = token.getValue().toString();
-                                break;
-                            case INDEXED_PARAMETER:
-                                id = nIndex++;
-                                break;
-                            default:
-                                context.append(token);
-                                return;
-                        }
-
-                        String bindName = bindNames.get(id);
-
-                        if( bindName == null )
-                        {
-                            bindName = "b" + ( vars.size() + 1);
-
-                            bindNames.put(id, bindName);
-                            vars.add(bindName);
-
-                            parameterIds.add(id);
-                        }
-
-                        context.append(" :").append(bindName).sp();
-
-                        if( context.isCommentParameters() )
-                            context.append("/* ").append(bindName.substring(1)).append(", :").append(token.getValue()).append(" */ ");
-                    }
-                },
-                (type, id, value) -> { }
-        );
-
+        Map<Comparable<?>, Integer> bindPositions = new TreeMap<>(ParametersValues.ParamIdComparator);
+        this.plSql = callStatement.rewriteBinds((id, context) -> {
+            int position = bindPositions.computeIfAbsent(id, key -> {
+                int next = vars.size() + 1;
+                vars.add("b" + next);
+                parameterIds.add(key);
+                return next;
+            });
+            context.appendBind(":" + vars.get(position - 1), position, id);
+        });
     }
 
     /** Готовит значения непосредственно перед очередным запуском. */

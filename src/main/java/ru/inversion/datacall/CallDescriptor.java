@@ -4,16 +4,11 @@ import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
 import ru.inversion.dataset.parser.lexer.PostgresSqlScanner;
 import ru.inversion.dataset.parser.lexer.SqlScanner;
 import ru.inversion.parser.statement.LangEnum;
-import ru.inversion.parser.token.Token;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
-import ru.inversion.utils.U;
 
-import java.util.Iterator;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Predicate;
 
 import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.*;
 
@@ -106,11 +101,6 @@ public class CallDescriptor {
         return tokenList;
     }
 
-    /** */
-    public Iterator<Token<?>> getTokenIterator( Predicate<Token<?>> predicate ) {
-        return U.mapIter( new CallTokenIterator(sourceSql, tokenList), Function.identity(), predicate );
-    }
-
     // Имена и позиции bind-параметров в порядке появления в SQL.
     void forEachParameterId( Consumer<Comparable<?>> consumer ) {
         int position = 0;
@@ -122,10 +112,6 @@ public class CallDescriptor {
         }
     }
 
-    /** */
-    public void preparePLSql( CallPrepareContext context ) {
-        new CallTokenIterator(sourceSql, tokenList).forEachRemaining(t -> context.sqlMaker().accept(t, context));
-    }
     /** */
     public boolean hasNamedParameter( String name ) {
 

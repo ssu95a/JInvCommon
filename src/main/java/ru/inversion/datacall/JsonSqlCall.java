@@ -8,7 +8,6 @@ import ru.inversion.dataset.ParametersByName;
 import ru.inversion.meta.impl.ArrayMetaData;
 import ru.inversion.meta.impl.StructMetaData;
 import ru.inversion.parser.statement.LangEnum;
-import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.*;
 import ru.inversion.utils.converter.TypeConverter;
@@ -31,7 +30,6 @@ import java.util.function.Supplier;
 import static javax.persistence.ParameterMode.IN;
 import static javax.persistence.ParameterMode.INOUT;
 import static javax.persistence.ParameterMode.OUT;
-import static ru.inversion.dataset.parser.SqlValueFormatter.format;
 
 /**
  * Выполнение скрипта на сервере PostgreSQL, через jf_exec_pkg
@@ -105,44 +103,6 @@ public class JsonSqlCall implements IDataCall {
         );
     }
 
-    public class CallMaker_Json extends AbstractCallMakerBase {
-
-        private int nCounter = 0;
-
-        public CallMaker_Json(  ) {
-        }
-
-        /** */
-        @Override
-        public void accept( Token t, CallPrepareContext c ) {
-
-            switch( t.getType() ) {
-                case INDEXED_PARAMETER:
-                    nIndex++;
-                    nCounter++;
-                    c.sp().append("? ");
-                    if( c.isCommentParameters() )
-                        c.append("/* ").append(nCounter).append(", :").append( t.getValue() ).append(" */ ");
-                    break;
-                case NAMED_PARAMETER:
-                {
-                    final String sourceName = t.getValue().toString();
-                    final String normalizedName = normalizeParameterName(sourceName);
-                    c.sp().append(':').append(normalizedName).sp();
-                    c.parameterHandler().accept(0, normalizedName, sourceName);
-                }
-                break;
-                case INTEGER:
-                case DECIMAL:
-                case STRING:
-                    c.append( format( t.getValue() ) ).sp();
-                break;
-                default :
-                    c.append( t );
-            }
-        }
-    }
-
     static final private Logger logger = LoggerFactory.getLogger("ru.inversion.sql");
     final private IListenerManEvent<IDataCallListener, DataCallEvent> dataCallListeners = ListenerManFactory.createListenerManEvent( IDataCallListener::dataCallChanged );
     /** */
@@ -203,14 +163,16 @@ public class JsonSqlCall implements IDataCall {
     {
         Objects.requireNonNull(substMap, "substMap");
 
-        final String plSql = callStatement.prepareSql(
-                new CallMaker_Json(),
-                (index, newName, oldName) -> registerNormalizedParameterName(
-                        substMap,
-                        newName.toString(),
-                        oldName.toString()
-                )
-        );
+        final String plSql = callStatement.rewriteBinds((id, context) -> {
+            if (id instanceof Integer) {
+                context.appendBind("?", (Integer)id + 1, id);
+                return;
+            }
+            String sourceName = (String)id;
+            String normalizedName = normalizeParameterName(sourceName);
+            registerNormalizedParameterName(substMap, normalizedName, sourceName);
+            context.appendBind(":" + normalizedName, 0, id);
+        });
 
         final TaskContext tc = storedProcWork.getTaskContext();
         final JsonArrayBuilder parameters = Json.createArrayBuilder();

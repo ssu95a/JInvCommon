@@ -1,194 +1,166 @@
 package ru.inversion.datacall;
 
-import ru.inversion.parser.token.Token;
-import ru.inversion.utils.TriConsumer;
+import ru.inversion.dataset.parser.lexer.SqlScanner.Token;
+import ru.inversion.utils.converter.TypeConverter;
 
+import java.math.BigDecimal;
+import java.util.List;
 import java.util.function.BiConsumer;
 
-/** Состояние одного прохода подготовки SQL. */
-public class CallPrepareContext {
+import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.*;
 
-    /** осуществлять вывод или прекратить */
-    private boolean enableOut = true;
+/** Подготовка SQL вызова заменой отдельных диапазонов исходного текста. */
+final class CallPrepareContext {
+    private final String source;
+    private final List<Token> tokens;
+    private final boolean removeAdditionalInfo;
+    private final StringBuilder sql;
 
-    private final StringBuilder sql = new StringBuilder();
-
-    /** режим замены констант на параметры */
-    private boolean replaceConstantMode = true;
-
-   /**  Обработчик параметров
-     *  - индекс параметра в выражении
-     *  - идентификатор параметра: String.class - named, Integer.class - indexed, Type.class - constant
-     *  - значение константы
-     */
-    final private TriConsumer< Integer, Comparable, Object> parameterHandler;
-
-    /** комментировать именные параметры */
-    private boolean commentParameters = true;
-
-    /** Пропускать комментарии */
-    private boolean skipComments = true;
-
-    /** Режим order by не заменяем константы */
-    private boolean orderByMode = false;
-
-    /** Глубина скобок, открытых после ORDER BY. */
-    private int orderByParentheses;
-
-    /** возможно ли замена констант на параметры */
-    private boolean enableReplaceConstants = true;
-
-    /** */
-    final private BiConsumer< Token, CallPrepareContext > sqlMaker;
-
-    /** */
-    public CallPrepareContext(
-            BiConsumer<Token, CallPrepareContext > sqlMaker,
-            TriConsumer< Integer,Comparable,Object > parameterHandler
-    )
-    {
-        this.sqlMaker           = sqlMaker;
-        this.parameterHandler   = parameterHandler;
+    CallPrepareContext(String source, List<Token> tokens, boolean removeAdditionalInfo) {
+        this.source = source;
+        this.tokens = tokens;
+        this.removeAdditionalInfo = removeAdditionalInfo;
+        sql = new StringBuilder(source.length());
     }
 
-    /** */
-    public void setEnableReplaceConstants( boolean v ) {
-        enableReplaceConstants = v;
-    }
-    /** */
-    public boolean isEnableReplaceConstants() {
-        return enableReplaceConstants;
-    }
+    String prepareJdbc(boolean replaceConstants, boolean textOnly,
+                       BiConsumer<Integer, Comparable<?>> onBind, BiConsumer<Integer, Object> onLiteral) {
+        int parameterPosition = 0;
+        int indexedBind = 0;
+        int depth = 0;
+        int orderByDepth = -1;
+        boolean replaceHere = replaceConstants;
 
-    /** */
-    public boolean isSkipComments() {
-        return skipComments;
-    }
-    public void setSkipComments( boolean skipComments ) {
-        this.skipComments = skipComments;
-    }
+        for (int index = 0; index < tokens.size(); index++) {
+            Token token = tokens.get(index);
+            if (isUnchangedMark(token)) {
+                replaceHere = replaceConstants && !replaceHere;
+                appendGap(token);
+                continue;
+            }
 
-    /** */
-    public boolean isOrderByMode() {
-        return orderByMode;
-    }
+            if (replaceConstants) {
+                if (isSymbol(token, '(')) {
+                    depth++;
+                } else if (isSymbol(token, ')')) {
+                    if (depth == orderByDepth)
+                        orderByDepth = -1;
+                    depth--;
+                } else if (isSymbol(token, ';')) {
+                    orderByDepth = -1;
+                } else if (orderByDepth < 0 && token.isWord(source, "ORDER") && isFollowedByBy(index)) {
+                    orderByDepth = depth;
+                }
+            }
 
-    /** */
-    public void setOrderByMode( boolean orderByMode ) {
-        this.orderByMode = orderByMode;
-    }
-
-    /** */
-    public boolean isCommentParameters() {
-        return commentParameters;
-    }
-
-    /** */
-    public void setCommentParameters( boolean commentParameters ) {
-        this.commentParameters = commentParameters;
-    }
-
-    /** */
-    public boolean isReplaceConstantMode() {
-        return isEnableReplaceConstants() && !orderByMode && replaceConstantMode;
-    }
-
-    /** */
-    public void setReplaceConstantMode( ) {
-        this.replaceConstantMode = !this.replaceConstantMode;
-    }
-
-    /** */
-    public BiConsumer< Token, CallPrepareContext > sqlMaker() { return sqlMaker; }
-
-    /** */
-    private char lastChar() {
-        return sql.length() == 0 ? 0 : sql.charAt(sql.length() - 1);
-    }
-
-    /** */
-    public CallPrepareContext append( char ch ) {
-
-        if( isEnableOut() )
-            sql.append(ch);
-
-        return this;
-    }
-
-    /** */
-    public CallPrepareContext append( Object o ) {
-
-        if( isEnableOut() )
-            sql.append(o);
-
-        return this;
-    }
-
-    /** */
-    public CallPrepareContext append( Token t ) {
-
-        switch( t.getType() ) {
-            case ORDER_BY:
-                setOrderByMode(true);
-                break;
-            case UNCHANGED_MARK:
-                setReplaceConstantMode();
-                break;
-            case SEMICOLON:
-                if( isOrderByMode() )
-                    setOrderByMode(false);
-                break;
-            case PARENTHESIS_LEFT:
-                if( isOrderByMode() )
-                    orderByParentheses++;
-                break;
-            case PARENTHESIS_RIGHT:
-                if( !isOrderByMode() )
-                    break;
-                if( orderByParentheses == 0 )
-                    setOrderByMode(false);
-                else
-                    orderByParentheses--;
-                break;
-            case COMMENT:
-                if( isSkipComments() )
-                    return this;
-                break;
+            if (isBind(token)) {
+                Comparable<?> id = bindId(token, indexedBind);
+                if (token.kind() == POSITIONAL_PARAMETER)
+                    indexedBind++;
+                parameterPosition++;
+                if (!textOnly)
+                    onBind.accept(parameterPosition, id);
+                appendBind("?", parameterPosition, id);
+            } else if (replaceHere && orderByDepth < 0 && isSimpleLiteral(token)) {
+                parameterPosition++;
+                String text = token.text(source);
+                if (!textOnly)
+                    onLiteral.accept(parameterPosition, literalValue(token, text));
+                sql.append('?');
+                if (!removeAdditionalInfo)
+                    appendAnnotation(parameterPosition, textOnly ? text : ":" + text);
+            } else {
+                appendSource(token);
+            }
         }
-
-        if( isEnableOut() )
-            t.accept(sql);
-
-        return this;
-    }
-
-    /** */
-    public CallPrepareContext nl( ) {
-        return lastChar() == '\n' ? this : append('\n');
-    }
-
-    /** */
-    public CallPrepareContext sp( ) {
-        return lastChar() == ' ' ? this : append(' ');
-    }
-
-    /** */
-    public boolean isEnableOut( ) {
-        return enableOut;
-    }
-
-    /** */
-    public void setEnableOut( boolean enableOut ) {
-        this.enableOut = enableOut;
-    }
-
-    /** */
-    public String getSQL() {
         return sql.toString();
     }
 
-    /** */
-    public TriConsumer< Integer,Comparable,Object > parameterHandler() {
-        return parameterHandler;
+    String rewriteBinds(BiConsumer<Comparable<?>, CallPrepareContext> rewrite) {
+        int indexedBind = 0;
+        for (Token token : tokens) {
+            if (rewrite != null && isBind(token)) {
+                Comparable<?> id = bindId(token, indexedBind);
+                if (token.kind() == POSITIONAL_PARAMETER)
+                    indexedBind++;
+                rewrite.accept(id, this);
+            } else {
+                appendSource(token);
+            }
+        }
+        return sql.toString();
+    }
+
+    void appendBind(String replacement, int annotationPosition, Comparable<?> id) {
+        sql.append(replacement);
+        if (!removeAdditionalInfo && annotationPosition > 0)
+            appendAnnotation(annotationPosition, id instanceof Integer ? ":?" : ":" + id);
+    }
+
+    private void appendAnnotation(int position, String text) {
+        // Разделители внутри литерала не должны закрывать или вкладывать комментарий.
+        sql.append(" /* ").append(position).append(", ")
+                .append(text.replace("/*", "/ *").replace("*/", "* /")).append(" */ ");
+    }
+
+    private boolean isFollowedByBy(int index) {
+        for (int next = index + 1; next < tokens.size(); next++) {
+            Token token = tokens.get(next);
+            if (token.kind() != WHITESPACE && token.kind() != HINT && !isComment(token))
+                return token.isWord(source, "BY");
+        }
+        return false;
+    }
+
+    private boolean isUnchangedMark(Token token) {
+        return (token.kind() == SYMBOL || token.kind() == OPERATOR)
+                && token.end() - token.start() == 1 && source.charAt(token.start()) == '~';
+    }
+
+    private boolean isSymbol(Token token, char symbol) {
+        return token.kind() == SYMBOL && token.end() - token.start() == 1 && source.charAt(token.start()) == symbol;
+    }
+
+    private static boolean isBind(Token token) {
+        return token.kind() == NAMED_PARAMETER || token.kind() == POSITIONAL_PARAMETER;
+    }
+
+    private Comparable<?> bindId(Token token, int indexedBind) {
+        return token.kind() == NAMED_PARAMETER ? source.substring(token.start() + 1, token.end()) : indexedBind;
+    }
+
+    private boolean isSimpleLiteral(Token token) {
+        return token.kind() == NUMBER || (token.kind() == STRING && source.charAt(token.start()) == '\'');
+    }
+
+    private static Object literalValue(Token token, String text) {
+        if (token.kind() == STRING)
+            return text.substring(1, text.length() - 1).replace("''", "'");
+        if (text.indexOf('.') >= 0 || text.indexOf('e') >= 0 || text.indexOf('E') >= 0)
+            return new BigDecimal(text);
+        return TypeConverter.convert(text, Number.class);
+    }
+
+    private static boolean isComment(Token token) {
+        return token.kind() == COMMENT || token.kind() == PARAMETERIZE_OFF || token.kind() == PARAMETERIZE_ON;
+    }
+
+    private void appendSource(Token token) {
+        if (isUnchangedMark(token) || (removeAdditionalInfo && isComment(token)))
+            appendGap(token);
+        else
+            sql.append(source, token.start(), token.end());
+    }
+
+    private void appendGap(Token token) {
+        // При удалении комментариев сохраняем разделение лексем и переводы строк.
+        int start = sql.length();
+        for (int at = token.start(); at < token.end(); at++) {
+            char ch = source.charAt(at);
+            if (ch == '\n' || ch == '\r')
+                sql.append(ch);
+        }
+        if (sql.length() == start)
+            sql.append(' ');
     }
 }

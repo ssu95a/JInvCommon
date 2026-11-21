@@ -4,11 +4,9 @@ import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.parser.lexer.SqlScanner;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.parser.statement.PrepareModeEnum;
-import ru.inversion.parser.token.Token;
 import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.ParametersValues;
 import ru.inversion.utils.Tags;
-import ru.inversion.utils.TriConsumer;
 import ru.inversion.utils.U;
 
 import javax.persistence.ParameterMode;
@@ -94,39 +92,31 @@ public class CallStatement {
     /** */
     public String prepareSql( PrepareModeEnum prepareMode, List<Object> parametersValue )
     {
-        return prepareSql( AbstractCallMakerBase.createPLSqlMaker(prepareMode), parametersValue );
+        switch( prepareMode ) {
+            case QUERY:
+            case QUERY_EX:
+                return prepareJdbcSql((position, id) -> parametersValue.add(null),
+                                      (position, value) -> parametersValue.add(value));
+            case QUERY_TEXT_ONLY:
+                return prepareContext().prepareJdbc(replaceConstants, true, null, null);
+            case QUERY_WITH_VALUES:
+                return prepareContext().rewriteBinds(null);
+            default:
+                throw new IllegalArgumentException(Tags.PRODUCT_LABEL + "Error 'prepareMode' value: " + prepareMode);
+        }
     }
 
-    /** */
-    public String prepareSql( BiConsumer<Token, CallPrepareContext > sqlMaker,  List<Object> parametersValue ) {
-
-        TriConsumer<Integer,Comparable,Object> handler = ( index, paramId, paramValue ) -> parametersValue.add( paramValue );
-
-        return prepareSql( sqlMaker, handler );
+    private CallPrepareContext prepareContext() {
+        return new CallPrepareContext(sourceSql(), sqlTokens(), removeAdditionalInfo);
     }
 
-    /** */
-    public String prepareSql( BiConsumer<Token, CallPrepareContext > sqlMaker, TriConsumer<Integer,Comparable,Object> handler )
-    {
-        CallPrepareContext context = new CallPrepareContext( sqlMaker, handler );
-
-        context.setSkipComments( removeAdditionalInfo );
-        context.setCommentParameters( !removeAdditionalInfo );
-        context.setEnableReplaceConstants( replaceConstants );
-
-        descriptor.preparePLSql( context );
-
-        return context.getSQL( );
+    String rewriteBinds(BiConsumer<Comparable<?>, CallPrepareContext> rewrite) {
+        return prepareContext().rewriteBinds(rewrite);
     }
 
     /** Передаёт bind-параметры и параметризованные литералы по их JDBC-позициям. */
     String prepareJdbcSql( BiConsumer<Integer, Comparable<?>> onBind, BiConsumer<Integer, Object> onLiteral ) {
-        return prepareSql( AbstractCallMakerBase.createPLSqlMaker(PrepareModeEnum.QUERY), ( position, id, value ) -> {
-            if( id instanceof Token.TypeEnum )
-                onLiteral.accept( position, value );
-            else
-                onBind.accept( position, id );
-        } );
+        return prepareContext().prepareJdbc(replaceConstants, false, onBind, onLiteral);
     }
 
     /** */

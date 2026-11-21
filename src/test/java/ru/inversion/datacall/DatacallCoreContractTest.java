@@ -172,7 +172,7 @@ class DatacallCoreContractTest {
     @Test
     void orderByOrdinalIsKeptWhenLiteralsAreReplaced() {
         CallStatement statement = CallBuilder.NEW()
-                .sql("select 7 from t order by 1")
+                .sql("select 7 from t ORDER BY 1")
                 .replaceConstants(true)
                 .build();
         List<Object> values = new ArrayList<>();
@@ -181,6 +181,39 @@ class DatacallCoreContractTest {
 
         assertEquals(Arrays.asList(7), values);
         assertTrue(sql.contains("ORDER BY 1"), sql);
+    }
+
+    @Test
+    void jdbcPreparationPreservesAdjacentOperatorsAndSkipsOrderByOrdinal() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("select :value - -2 from t ORDER /* ordinal */ BY 1")
+                .replaceConstants(true)
+                .build();
+        List<List<?>> parameters = new ArrayList<>();
+
+        String sql = statement.prepareJdbcSql(
+                (position, id) -> parameters.add(Arrays.asList(position, id)),
+                (position, value) -> parameters.add(Arrays.asList(position, value))
+        );
+
+        assertTrue(sql.startsWith("select ? - -?"), sql);
+        assertTrue(sql.matches(".*ORDER\\s+BY 1$"), sql);
+        assertEquals(Arrays.asList(Arrays.asList(1, "value"), Arrays.asList(2, 2)), parameters);
+    }
+
+    @Test
+    void legacyMarkersStillToggleLiteralReplacement() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("select 1, ~2~, 3 from t")
+                .replaceConstants(true)
+                .build();
+        List<Object> values = new ArrayList<>();
+
+        String sql = statement.prepareSql(PrepareModeEnum.QUERY, values);
+
+        assertFalse(sql.contains("~"), sql);
+        assertTrue(sql.contains("2"), sql);
+        assertEquals(Arrays.asList(1, 3), values);
     }
 
     @Test
