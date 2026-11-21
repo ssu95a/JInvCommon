@@ -11,9 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static ru.inversion.utils.parser.ITokenHandler.isAlpha;
-import static ru.inversion.utils.parser.ITokenHandler.isAlphaDigit;
-
 /** */
 public abstract class BaseDialect implements SqlDialect {
 
@@ -110,19 +107,28 @@ public abstract class BaseDialect implements SqlDialect {
         return dateObj == null ? null : dateObj.toString();
     }
 
+    private static boolean isAlpha(char ch) {
+        return ch == '_' || ch == '$' || ch == '#'
+                || ('A' <= ch && ch <= 'Z') || ('a' <= ch && ch <= 'z');
+    }
+
+    private static boolean isAlphaDigit(char ch) {
+        return isAlpha(ch) || ('0' <= ch && ch <= '9');
+    }
+
     /** */
     static boolean isNormalized( String name )
     {
         char ch = name.charAt(0);
 
-        if( !( isAlpha(ch) || ch == '_') )
+        if( !isAlpha(ch) )
             return false;
 
         for(int i = 1; i < name.length(); i++)
         {
             ch = name.charAt(i);
 
-            if( !(isAlphaDigit(ch) || ch == '_') )
+            if( !isAlphaDigit(ch) )
                 return false;
         }
 
@@ -139,7 +145,7 @@ public abstract class BaseDialect implements SqlDialect {
 
         char ch = raw.charAt(0);
 
-        if( isAlpha(ch) || ch == '_')
+        if( isAlpha(ch) )
             sb.append(ch);
         else
             sb.append('_');
@@ -148,7 +154,7 @@ public abstract class BaseDialect implements SqlDialect {
         {
             char c = raw.charAt(i);
 
-            if( isAlphaDigit(c) || c == '_')
+            if( isAlphaDigit(c) )
                 sb.append(c);
             else
             {
