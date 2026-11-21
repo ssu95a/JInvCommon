@@ -109,10 +109,13 @@ public class CallDescriptor {
         return U.mapIter( tokenList.iterator(), Function.identity(), predicate );
     }
 
-    // Имена и позиции bind-параметров в порядке появления в SQL.
+    /** Имена и позиции bind-параметров в порядке появления в SQL. */
     void forEachParameterId( Consumer<Comparable<?>> consumer ) {
+
         int position = 0;
-        for( Token<?> token : tokenList ) {
+
+        for( Token<?> token : tokenList )
+        {
             if( token.getType() == NAMED_PARAMETER )
                 consumer.accept( (String)token.getValue() );
             else if( token.getType() == INDEXED_PARAMETER )
