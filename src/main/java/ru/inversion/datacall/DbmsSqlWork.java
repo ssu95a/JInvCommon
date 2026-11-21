@@ -25,6 +25,8 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** Значения параметров из вне */
     private final IParameters callBackParameters;
 
+    private final CallStatement callStatement;
+
     /** */
     private final CallWork storedProcWork;
 
@@ -81,6 +83,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** Подмена только внутреннего вызова для теста контракта без Oracle. */
     DbmsSqlWork(CallStatement callStatement, IParameters callBackParameters, CallWork storedProcWork)
     {
+        this.callStatement      = callStatement;
         this.callBackParameters = callBackParameters;
         this.storedProcWork     = Checks.Require.object( storedProcWork, "storedProcWork" );
 
@@ -160,7 +163,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         return vals;
     }
 
-    /** Проверяет весь ответ до первой обратной записи. */
+    /** Проверяет и преобразует весь ответ до первой обратной записи. */
     void applyOutputs(List<String> outs) {
 
         if( outs == null || outs.size() != vars.size() )
@@ -169,16 +172,36 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         if( callBackParameters == null )
             return;
 
-        for( int i = 0; i < parameterIds.size(); i++ )
-        {
-            Comparable<?> id = parameterIds.get(i);
-            String value = outs.get(i);
+        Map<Comparable<?>, Object> converted = new LinkedHashMap<>();
+        for( int i = 0; i < parameterIds.size(); i++ ) {
+            final Comparable<?> id = parameterIds.get(i);
+            final ParameterMetadata<?> parameter = callStatement.getParameter(id);
+            // Для параметров, найденных только в тексте блока, сохраняем строковую обратную запись.
+            final boolean declared = parameter != null
+                    && (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared());
+            if( declared && parameter.getMode() == IN )
+                continue;
 
+            final Class<?> javaType = declared && parameter.isOut() ? parameter.getParameterType() : null;
+            Object value = outs.get(i);
+            if( javaType != null ) {
+                try {
+                    value = TypeConverter.convert(value, javaType);
+                }
+                catch( RuntimeException ex ) {
+                    throw new CallException(Tags.PRODUCT_LABEL + "Error converting DBMS_SQL output for parameter '"
+                            + id + "' to " + javaType.getTypeName(), ex);
+                }
+            }
+            converted.put(id, value);
+        }
+
+        converted.forEach((id, value) -> {
             if( id instanceof Integer )
                 callBackParameters.setParameter((Integer)id, value);
             else
                 callBackParameters.setParameter((String)id, value);
-        }
+        });
     }
 
     /** Выполнение запроса */

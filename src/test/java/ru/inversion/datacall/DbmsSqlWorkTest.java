@@ -4,12 +4,16 @@ import org.junit.jupiter.api.Test;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.utils.ParametersValues;
 
+import java.sql.Types;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.HashMap;
 import java.util.Map;
 
+import static javax.persistence.ParameterMode.IN;
+import static javax.persistence.ParameterMode.INOUT;
+import static javax.persistence.ParameterMode.OUT;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DbmsSqlWorkTest {
@@ -135,6 +139,71 @@ class DbmsSqlWorkTest {
         assertEquals("new-zero", values.get(0));
         assertEquals("new-a", values.get("a"));
         assertNull(values.get(1));
+    }
+
+    @Test
+    void dataCallPreservesInputAndReturnsTypedInOut() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("begin :counter := :amount + :counter; end;")
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("amount").mode(IN).sqlType(Types.INTEGER).build())
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("counter").mode(INOUT).sqlType(Types.INTEGER).build())
+                .build();
+        ParametersValues values = new ParametersValues();
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.resultCode = 0;
+        launcher.outs = Arrays.asList("12", "ignored");
+        DbmsSqlWork work = new DbmsSqlWork(statement, values, launcher);
+
+        try (IDataCall call = new SQLCallBuilder.DbmsSqlDataCall(work, statement, values, "oracle")) {
+            call.setParameter("amount", 7);
+            call.setParameter("counter", 5);
+            call.execute();
+
+            assertEquals(Arrays.asList("5", "7"), launcher.bound.get("vals"));
+            assertAll(
+                    () -> assertEquals(Integer.valueOf(7), call.getParameter("amount"), "IN"),
+                    () -> assertEquals(Integer.valueOf(12), call.getParameter("counter"), "INOUT")
+            );
+        }
+    }
+
+    @Test
+    void mixedOutputsAreConvertedBeforeAnyParameterIsUpdated() {
+        CallStatement statement = CallBuilder.NEW()
+                .sql("begin :total := ?; ? := :total; end;")
+                .putParameter(new ParameterMetadataBuilder()
+                        .name("total").mode(OUT).sqlType(Types.INTEGER).build())
+                .putParameter(new ParameterMetadataBuilder()
+                        .position(0).mode(IN).sqlType(Types.INTEGER).build())
+                .putParameter(new ParameterMetadataBuilder()
+                        .position(1).mode(INOUT).sqlType(Types.INTEGER).build())
+                .build();
+        ParametersValues values = new ParametersValues();
+        values.setParameter("total", 10);
+        values.setParameter(0, 7);
+        values.setParameter(1, 5);
+        FakeLauncher launcher = new FakeLauncher();
+        launcher.resultCode = 0;
+        launcher.outs = Arrays.asList("7", "ignored", "bad-number");
+        DbmsSqlWork work = new DbmsSqlWork(statement, values, launcher);
+
+        CallException error = assertThrows(CallException.class, () -> work.execute(null));
+        assertTrue(error.getMessage().contains("parameter '1'"));
+        assertEquals(Integer.valueOf(10), values.getParameter("total"));
+        assertEquals(Integer.valueOf(7), values.getParameter(0));
+        assertEquals(Integer.valueOf(5), values.getParameter(1));
+
+        launcher.outs = Arrays.asList("7", "ignored", "12");
+        work.execute(null);
+        assertEquals(Integer.valueOf(7), values.getParameter("total"));
+        assertEquals(Integer.valueOf(7), values.getParameter(0));
+        assertEquals(Integer.valueOf(12), values.getParameter(1));
+
+        launcher.outs = Arrays.asList("7", "ignored", null);
+        work.execute(null);
+        assertNull(values.getParameter(1));
     }
 
     @Test
