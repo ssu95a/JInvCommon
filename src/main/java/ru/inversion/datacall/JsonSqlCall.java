@@ -32,19 +32,17 @@ import static javax.persistence.ParameterMode.INOUT;
 import static javax.persistence.ParameterMode.OUT;
 
 /**
- * Выполнение скрипта на сервере PostgreSQL, через jf_exec_pkg
- * <p>
- * beta ver 0.5
+ * Выполнение скрипта PostgreSQL через {@code jf_exec.execute}.
+ *
+ * @deprecated Для прямого выполнения анонимных блоков используйте {@link PGAnonymousSqlCall}.
  */
+@Deprecated
 public class JsonSqlCall implements IDataCall {
 
     static public Function<Integer,String> g_pgTypesMap = jdbcType -> {
         switch( jdbcType ) {
             case Types.DECIMAL :
             case Types.NUMERIC :
-            //case Types.INTEGER :
-            //case Types.BIGINT  :
-            //case Types.SMALLINT:
                 return "numeric";
             case Types.VARCHAR:
                 return "varchar";
@@ -249,11 +247,9 @@ public class JsonSqlCall implements IDataCall {
                 : null;
         final Integer sqlType = parameter.getSQLType();
 
-        if( sqlType == null )
-            addUntypedParameter(result, parameter, value);
-        else if( sqlType == Types.STRUCT )
+        if( sqlType != null && sqlType == Types.STRUCT )
             addStructParameter(result, parameter, value, tc);
-        else if( sqlType == Types.ARRAY )
+        else if( sqlType != null && sqlType == Types.ARRAY )
             addArrayParameter(result, parameter, value, tc);
         else
             addScalarParameter(result, parameter, value, sqlType);
@@ -261,33 +257,28 @@ public class JsonSqlCall implements IDataCall {
         return result;
     }
 
-    private void addUntypedParameter(
+    private void addScalarParameter(
             JsonObjectBuilder result,
             ParameterMetadata<?> parameter,
-            Object value
+            Object value,
+            Integer sqlType
     ) {
-        if( !parameter.isIn() )
+        if( parameter.isIn() )
+            addStringValue(result, value);
+        else if( sqlType == null )
             throw new CallException(
                     Tags.PRODUCT_LABEL + "Не описан тип OUT параметра '"
                             + parameter.getName() + "' для PL/xxx выражения '"
                             + name + "'. Необходимо задать тип данных."
             );
 
-        addStringValue(result, value);
-        if( value == null )
-            result.addNull("sqlType");
-        else
-            result.add("sqlType", g_pgTypesMap.apply(Jt2St.get(value.getClass())));
-    }
-
-    private static void addScalarParameter(
-            JsonObjectBuilder result,
-            ParameterMetadata<?> parameter,
-            Object value,
-            int sqlType
-    ) {
-        if( parameter.isIn() )
-            addStringValue(result, value);
+        if( sqlType == null ) {
+            if( value == null )
+                result.addNull("sqlType");
+            else
+                result.add("sqlType", g_pgTypesMap.apply(Jt2St.get(value.getClass())));
+            return;
+        }
 
         result.add("sqlType", g_pgTypesMap.apply(sqlType));
         if( !S.isNullOrEmpty(parameter.getElementType()) )
@@ -356,16 +347,10 @@ public class JsonSqlCall implements IDataCall {
                 return;
             }
 
-            final Array array;
-            final boolean owned;
-            if( value instanceof Array ) {
-                array = (Array)value;
-                owned = false;
-            }
-            else {
-                array = createInputArray(metaData, (Collection<?>)value, tc);
-                owned = true;
-            }
+            final boolean owned = !(value instanceof Array);
+            final Array array = owned
+                    ? createInputArray(metaData, (Collection<?>)value, tc)
+                    : (Array)value;
 
             try {
                 result.add("value", metaData.toJson(tc, array));
