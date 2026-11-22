@@ -12,13 +12,13 @@ import ru.inversion.utils.converter.TypeConverter;
 import ru.inversion.utils.lstn.IListenerManEvent;
 import ru.inversion.utils.lstn.ListenerManFactory;
 
-import javax.json.Json;
 import javax.json.JsonArray;
 import javax.json.JsonNumber;
 import javax.json.JsonObjectBuilder;
 import javax.json.JsonReader;
 import javax.json.JsonString;
 import javax.json.JsonValue;
+import javax.json.spi.JsonProvider;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
@@ -51,6 +51,7 @@ import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.WORD;
 /** Выполняет анонимный блок PL/pgSQL через DO с параметрами в локальной настройке транзакции. */
 public class PGAnonymousSqlCall implements IDataCall {
 
+    private static final JsonProvider JSON = JsonProvider.provider();
     private static final String SETTING = "'jinv.anonymous_call'";
     private static final class Parameter {
         private final ParameterMetadata<?> metadata;
@@ -408,7 +409,7 @@ public class PGAnonymousSqlCall implements IDataCall {
             throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous block returned no OUT values");
 
         JsonArray json;
-        try (JsonReader reader = Json.createReader(new StringReader(result))) {
+        try (JsonReader reader = JSON.createReader(new StringReader(result))) {
             json = reader.readArray();
         }
         if (json.size() != outputCount)
@@ -460,7 +461,7 @@ public class PGAnonymousSqlCall implements IDataCall {
         String sql = null;
         try {
             Parameter[] bound = boundParameters();
-            JsonObjectBuilder input = Json.createObjectBuilder();
+            JsonObjectBuilder input = JSON.createObjectBuilder();
             StringBuilder declarations = new StringBuilder();
             for (Parameter parameter : bound) {
                 boolean isInput = parameter.metadata.isIn();
