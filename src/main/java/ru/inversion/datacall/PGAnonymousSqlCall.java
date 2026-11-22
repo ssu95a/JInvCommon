@@ -69,15 +69,15 @@ public class PGAnonymousSqlCall implements IDataCall {
     private final boolean requiresAutoCommit;
     private final IParameters callBackParameters;
     private final Map<Comparable, Parameter> parameters = new TreeMap<>(ParametersValues.ParamIdComparator);
-    private final String block;
     private final String outerLabel;
-    private final String delimiter;
     private final boolean hideValues;
     private final IListenerManEvent<IDataCallListener, DataCallEvent> listeners =
             ListenerManFactory.createListenerManEvent(IDataCallListener::dataCallChanged);
     private BiConsumer<Object, Object> outputListener;
     private Map<String, Object> properties;
-    private String preparedDeclarations;
+    // Границы деклараций внутри preparedSql. До первого execute() этот участок пуст.
+    private final int declarationsOffset;
+    private int declarationsLength;
     private String preparedSql;
     private int bindCount;
     private int outputCount;
@@ -105,7 +105,6 @@ public class PGAnonymousSqlCall implements IDataCall {
         String tag = "$jinv_do$";
         for (int i = 1; source.contains(tag); i++)
             tag = "$jinv_do_" + i + "$";
-        delimiter = tag;
 
         for (ParameterMetadata<?> parameter : callStatement.getParameterIter()) {
             if (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared())
@@ -122,13 +121,19 @@ public class PGAnonymousSqlCall implements IDataCall {
                 identifiers.add(quoted.substring(1, quoted.length() - 1).replace("\"\"", "\"").toLowerCase(Locale.ROOT));
             }
         }
-        block = replaceParameters(source, tokens, identifiers);
+        String block = replaceParameters(source, tokens, identifiers);
         for (Parameter parameter : parameters.values()) {
             if (parameter.metadata.isOut())
                 bind(parameter, identifiers);
         }
         hideValues = parameters.values().stream().anyMatch(parameter ->
                 parameter.bindPosition >= 0 && parameter.metadata.isIn() && !parameter.metadata.isLogValue());
+
+        Parameter[] bound = boundParameters();
+        StringBuilder sql = jdbcHeader(tag, bound);
+        declarationsOffset = sql.length();
+        appendJdbcBody(sql, block, tag, bound);
+        preparedSql = sql.toString();
     }
 
     private void bind(Parameter parameter, Set<String> identifiers) {
@@ -303,7 +308,7 @@ public class PGAnonymousSqlCall implements IDataCall {
                 + parameter.getIdentifier() + ". Use a stored procedure for complex parameters.");
     }
 
-    private String jdbcSql(String declarations, Parameter[] bound) {
+    private StringBuilder jdbcHeader(String delimiter, Parameter[] bound) {
         StringBuilder sql = new StringBuilder("SELECT 1 FROM pg_catalog.set_config(")
                 .append(SETTING).append(", ?, true);\nDO ").append(delimiter)
                 .append("\n<<").append(outerLabel).append(">>\n");
@@ -313,8 +318,11 @@ public class PGAnonymousSqlCall implements IDataCall {
                 sql.append(outerLabel).append("_input pg_catalog.jsonb := pg_catalog.current_setting(")
                         .append(SETTING).append(")::pg_catalog.jsonb;\n");
             }
-            sql.append(declarations);
         }
+        return sql;
+    }
+
+    private void appendJdbcBody(StringBuilder sql, String block, String delimiter, Parameter[] bound) {
         sql.append("BEGIN\n").append(block).append('\n');
 
         if (outputCount > 0) {
@@ -336,7 +344,6 @@ public class PGAnonymousSqlCall implements IDataCall {
         }
         if (hideValues)
             sql.append("--lhv:1\n");
-        return sql.toString();
     }
 
     private static Object fromJson(JsonValue value, Class<?> javaType) {
@@ -473,10 +480,16 @@ public class PGAnonymousSqlCall implements IDataCall {
                 }
                 declarations.append(";\n");
             }
-            String declare = declarations.toString();
-            if (!declare.equals(preparedDeclarations)) {
-                preparedSql = jdbcSql(declare, bound);
-                preparedDeclarations = declare;
+            String declarationSql = declarations.toString();
+            if (declarationsLength != declarationSql.length()
+                    || !preparedSql.regionMatches(declarationsOffset, declarationSql, 0, declarationsLength)) {
+                int declarationsEnd = declarationsOffset + declarationsLength;
+                preparedSql = new StringBuilder(preparedSql.length() - declarationsLength + declarationSql.length())
+                        .append(preparedSql, 0, declarationsOffset)
+                        .append(declarationSql)
+                        .append(preparedSql, declarationsEnd, preparedSql.length())
+                        .toString();
+                declarationsLength = declarationSql.length();
             }
             sql = preparedSql;
             applyOutputs(executeSql(sql, input.build().toString()), bound);

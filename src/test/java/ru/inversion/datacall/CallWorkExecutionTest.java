@@ -188,6 +188,44 @@ class CallWorkExecutionTest {
     }
 
     @Test
+    void postgresDirectCallReplacesOnlyDeclarationsWhenAnInferredTypeChanges() {
+        JdbcScenario jdbc = new JdbcScenario();
+        jdbc.autoCommit = false;
+        CallStatement statement = CallBuilder.NEW()
+                .sql("BEGIN PERFORM :value, 1::pg_catalog.int4; END;")
+                .lang(LangEnum.PL_pgSQL)
+                .build();
+        String declaration = "\"value\" %1$s := (jinv_outer_input ->> 'value')::%1$s;";
+        String intDeclaration = String.format(declaration, "pg_catalog.int4");
+
+        try (IDataCall call = new PGAnonymousSqlCall(taskContext(jdbc.connection()), statement, null, "sample")) {
+            call.setParameter("value", 7);
+            call.execute();
+            String intSql = jdbc.preparedSql;
+            assertTrue(intSql.contains(intDeclaration), intSql);
+
+            call.setParameter("value", 7L);
+            call.execute();
+            assertEquals(intSql.replace(intDeclaration, String.format(declaration, "pg_catalog.int8")),
+                    jdbc.preparedSql);
+
+            call.setParameter("value", "text");
+            call.execute();
+            String varcharSql = jdbc.preparedSql;
+            assertEquals(intSql.replace(intDeclaration, String.format(declaration, "pg_catalog.varchar")),
+                    varcharSql);
+
+            call.setParameter("value", null);
+            call.execute();
+            assertSame(varcharSql, jdbc.preparedSql);
+
+            call.setParameter("value", 7);
+            call.execute();
+            assertEquals(intSql, jdbc.preparedSql);
+        }
+    }
+
+    @Test
     void jsonInOutStartsWithDefaultAndReusesReturnedValuesIncludingNull() {
         JdbcScenario jdbc = new JdbcScenario();
         CallStatement statement = CallBuilder.NEW()
