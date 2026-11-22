@@ -153,13 +153,26 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
     @Override
     public String getDetailedMessage() {
-
+        String message = reason == Reason.INCORRECT_CONNECTION_STRING ? connectionDiagnostic() : getMessage();
         Object requestId = details == null ? null : details.get("requestId");
 
         if( requestId == null )
-            return getMessage();
+            return message;
 
-        return getMessage() + "\nRequest ID: " + requestId;
+        String requestInfo = "Request ID: " + requestId;
+        return S.isNullOrEmpty(message) ? requestInfo : message + "\n" + requestInfo;
+    }
+
+    private String connectionDiagnostic() {
+        if (sqlExceptionInfo != null && S.isNotNullOrEmpty(sqlExceptionInfo.getMessage()))
+            return sqlExceptionInfo.getMessage();
+
+        Object remoteMessage = details == null ? null : details.get("remoteMessage");
+        if (remoteMessage instanceof String)
+            return (String) remoteMessage;
+
+        Throwable cause = getCause();
+        return cause == null ? null : cause.getLocalizedMessage();
     }
     // Factories
 
@@ -228,8 +241,11 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
         String safeMessage = message;
 
-        if (reason == Reason.INTERNAL_ERROR)
+        if (reason == Reason.INCORRECT_CONNECTION_STRING) {
             safeMessage = reason.getDefaultMessage();
+            if (!safeMessage.equals(message))
+                details.put("remoteMessage", message);
+        }
 
         return new XXIConnectorException( reason, Origin.REMOTE, safeMessage, null, details );
     }
@@ -268,7 +284,7 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
                     case "target.db.technical.break":
                         return Reason.TECHNICAL_BREAK;
                     case "target.db.tns.alias.unresolved":
-                        return Reason.TNS_ALIAS_UNRESOLVED;
+                        return Reason.INCORRECT_CONNECTION_STRING;
                     case "target.db.tns.configuration.error":
                         return Reason.TNS_CONFIGURATION_ERROR;
                     // Crypto

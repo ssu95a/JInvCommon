@@ -36,11 +36,14 @@ public final class DatabaseLoginErrors {
         for (Throwable current : errors) {
             if (current instanceof XXIConnectorException) {
                 XXIConnectorException loginFailure = (XXIConnectorException) current;
-                String message = loginFailure.getReason().getDefaultMessage();
-                if (current == failure && message.equals(current.getMessage()))
+                Reason reason = loginFailure.getReason();
+                if (reason == DATABASE_NOT_FOUND || reason == TNS_ALIAS_UNRESOLVED)
+                    reason = INCORRECT_CONNECTION_STRING;
+                String message = reason.getDefaultMessage();
+                if (current == failure && reason == loginFailure.getReason() && message.equals(current.getMessage()))
                     return loginFailure;
 
-                return new XXIConnectorException(loginFailure.getReason(), loginFailure.getOrigin(),
+                return new XXIConnectorException(reason, loginFailure.getOrigin(),
                         message, failure, loginFailure.getDetails() == null ? details : loginFailure.getDetails(),
                         loginFailure.getSqlExceptionInfo());
             }
@@ -82,11 +85,9 @@ public final class DatabaseLoginErrors {
             case CONNECTION_FAILURE:
                 return DB_UNAVAILABLE;
             case DATABASE_NOT_FOUND:
-                return DATABASE_NOT_FOUND;
+            case CONNECTION_ALIAS_UNRESOLVED:
             case INVALID_CONNECTION_STRING:
                 return INCORRECT_CONNECTION_STRING;
-            case CONNECTION_ALIAS_UNRESOLVED:
-                return TNS_ALIAS_UNRESOLVED;
             case NAMING_CONFIGURATION_ERROR:
                 return TNS_CONFIGURATION_ERROR;
             default:

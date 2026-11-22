@@ -23,6 +23,7 @@ import java.util.Properties;
 import java.util.logging.Logger;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -64,13 +65,26 @@ public class DatabaseLoginErrorsTest {
     }
 
     @Test
-    public void preservesUnresolvedOracleAliasAsALoginReason() {
+    public void reportsUnresolvedOracleAliasAsIncorrectConnectionString() {
         SQLException driver = new SQLException("TNS could not resolve the connect identifier", "66000", 12154);
         XXIConnectorException failure = DatabaseLoginErrors.normalize(SqlDialectFactory.ORACLE, driver, null);
 
-        assertEquals(TNS_ALIAS_UNRESOLVED, failure.getReason());
+        assertEquals(INCORRECT_CONNECTION_STRING, failure.getReason());
+        assertEquals("Incorrect connection string", failure.getHeaderText());
+        assertEquals(driver.getMessage(), failure.getDetailedMessage());
+        assertEquals(SqlExceptionInfo.Kind.CONNECTION_ALIAS_UNRESOLVED, failure.getSqlExceptionInfo().getKind());
         assertEquals(Integer.valueOf(12154), failure.vendorCode());
         assertSame(driver, failure.getCause());
+    }
+
+    @Test
+    public void detailsForInvalidConnectionStringUseTheCauseWithoutRepeatingTheHeader() {
+        String message = INCORRECT_CONNECTION_STRING.getDefaultMessage();
+        XXIConnectorException failure = XXIConnectorException.of(INCORRECT_CONNECTION_STRING, message,
+                new IllegalArgumentException("Invalid JDBC target"));
+
+        assertEquals("Invalid JDBC target", failure.getDetailedMessage());
+        assertNull(XXIConnectorException.of(INCORRECT_CONNECTION_STRING, message).getDetailedMessage());
     }
 
     @Test
@@ -87,8 +101,20 @@ public class DatabaseLoginErrorsTest {
 
     @Test
     public void readsOracleNamingErrorsFromAuthenticationResponse() {
-        assertRemoteNamingReason("target.db.tns.alias.unresolved", TNS_ALIAS_UNRESOLVED);
+        assertRemoteNamingReason("target.db.tns.alias.unresolved", INCORRECT_CONNECTION_STRING);
         assertRemoteNamingReason("target.db.tns.configuration.error", TNS_CONFIGURATION_ERROR);
+    }
+
+    @Test
+    public void preservesRemoteOracleAliasExplanationUnderTheCommonHeader() {
+        String explanation = "Oracle connection alias could not be resolved";
+        XXIConnectorException failure = XXIConnectorException.fromRemote(503, "request-id",
+                "target.db.tns.alias.unresolved", explanation, null);
+
+        assertEquals(INCORRECT_CONNECTION_STRING, failure.getReason());
+        assertEquals("Incorrect connection string", failure.getHeaderText());
+        assertEquals(explanation + "\nRequest ID: request-id", failure.getDetailedMessage());
+        assertNull(failure.getCause());
     }
 
     private static void assertRemoteNamingReason(String code, XXIConnectorException.Reason reason) {
@@ -138,10 +164,13 @@ public class DatabaseLoginErrorsTest {
         try {
             XXIConnectorException pseudo = assertThrows(XXIConnectorException.class,
                     () -> PGPseudoConnector.login(url, "user", "password", new Properties(), null));
-            assertEquals(DATABASE_NOT_FOUND, direct.getReason());
+            assertEquals(INCORRECT_CONNECTION_STRING, direct.getReason());
             assertEquals(direct.getReason(), pseudo.getReason());
-            assertEquals("Database does not exist", direct.getMessage());
+            assertEquals(SqlExceptionInfo.Kind.DATABASE_NOT_FOUND, direct.getSqlExceptionInfo().getKind());
+            assertEquals("Incorrect connection string", direct.getHeaderText());
             assertEquals(direct.getMessage(), pseudo.getMessage());
+            assertEquals(rejected.getMessage(), direct.getDetailedMessage());
+            assertEquals(rejected.getMessage(), pseudo.getDetailedMessage());
             assertEquals("3D000", pseudo.sqlState());
             assertSame(rejected, pseudo.getCause());
         }
