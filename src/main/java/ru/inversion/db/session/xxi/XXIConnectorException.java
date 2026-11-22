@@ -30,7 +30,9 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
         LICENCE_ERROR,
         INTERNAL_ERROR,
         INCORRECT_CONNECTION_STRING,
-        PASSWORD_REQUIRED;
+        PASSWORD_REQUIRED,
+        TNS_ALIAS_UNRESOLVED,
+        TNS_CONFIGURATION_ERROR;
 
         public String getDefaultMessage() {
             switch (this) {
@@ -50,6 +52,10 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
                      return "Database unavailable";
                 case INCORRECT_CONNECTION_STRING:
                      return "Incorrect connection string";
+                case TNS_ALIAS_UNRESOLVED:
+                     return "Oracle connection alias could not be resolved";
+                case TNS_CONFIGURATION_ERROR:
+                     return "Oracle TNS configuration error. Check TNS_ADMIN and tnsnames.ora";
                 case PASSWORD_REQUIRED:
                      return "Password is required";
                 case TECHNICAL_BREAK:

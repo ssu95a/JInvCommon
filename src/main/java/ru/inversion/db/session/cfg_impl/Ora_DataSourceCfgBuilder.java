@@ -2,6 +2,7 @@ package ru.inversion.db.session.cfg_impl;
 
 import ru.inversion.db.session.DataSourceCfg;
 import ru.inversion.db.session.AbstractDataSourceCfgBuilder;
+import ru.inversion.db.session.xxi.XXIConnectorException;
 import ru.inversion.db.session.xxi.XxiConnector;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
@@ -10,12 +11,15 @@ import ru.inversion.utils.U;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.net.PasswordAuthentication;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.NotDirectoryException;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.function.Function;
 import java.util.prefs.Preferences;
+
+import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.TNS_CONFIGURATION_ERROR;
 
 public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
 
@@ -35,7 +39,7 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
     }
 
     /** */
-    private static void checkTnsPath( ) throws Exception {
+    private static void checkTnsPath() {
 
         if( System.getProperty( ORACLE_TNS_ADMIN ) == null )
         {
@@ -51,23 +55,30 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
         String s = System.getProperty( ORACLE_TNS_ADMIN );
 
         if( S.isNullOrEmpty(s) )
-            throw new IllegalStateException( Tags.PRODUCT_LABEL + "Property 'oracle.net.tns_admin' is not configured" );
+            throw tnsConfigurationError(new IllegalStateException("Property 'oracle.net.tns_admin' is not configured"));
 
         File dir = new File(s);
 
         if( !dir.exists() )
-            throw new FileNotFoundException( Tags.PRODUCT_LABEL + "Directory with the path '" + s + "' does not exist");
+            throw tnsConfigurationError(new FileNotFoundException("TNS_ADMIN directory does not exist: " + s));
 
         if( !dir.isDirectory() )
-            throw new NotDirectoryException( Tags.PRODUCT_LABEL + "'" + s + "' is not a directory");
+            throw tnsConfigurationError(new NotDirectoryException(s));
 
         final File tnsnames = new File( dir, TNSNAMES_ORA );
 
-        if( !tnsnames.exists() || !tnsnames.isFile() )
-            throw new NoSuchFileException( Tags.PRODUCT_LABEL + "In the directory '" + s + "' does not exist file 'tnsnames.ora'");
+        if (!tnsnames.isFile())
+            throw tnsConfigurationError(new NoSuchFileException(tnsnames.getPath()));
+
+        if (!tnsnames.canRead())
+            throw tnsConfigurationError(new AccessDeniedException(tnsnames.getPath()));
     }
 
-    private static String prepareJdbcUrl(String url) throws Exception {
+    private static XXIConnectorException tnsConfigurationError(Exception cause) {
+        return XXIConnectorException.of(TNS_CONFIGURATION_ERROR, TNS_CONFIGURATION_ERROR.getDefaultMessage(), cause);
+    }
+
+    private static String prepareJdbcUrl(String url) {
         String jdbcUrl = url.indexOf(':') == -1 ? THIN_PREFIX + url : url;
 
         if (jdbcUrl.startsWith(THIN_PREFIX)) {
@@ -155,6 +166,9 @@ public class Ora_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
                     }
 
                     return urlR;
+                }
+                catch (XXIConnectorException ex) {
+                    throw ex;
                 }
                 catch( Throwable th ) {
                     throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on make URL to database", th );

@@ -1,20 +1,30 @@
 package ru.inversion.login;
 
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import ru.inversion.db.session.AbstractDataSourceCfgBuilder;
 import ru.inversion.db.session.DataSourceCfg;
 import ru.inversion.db.session.cfg_impl.Ora_DataSourceCfgBuilder;
 import ru.inversion.db.session.cfg_impl.Pg_DataSourceCfgBuilder;
+import ru.inversion.db.session.xxi.XXIConnectorException;
+
+import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static ru.inversion.db.session.cfg_impl.Ora_DataSourceCfgBuilder.ORACLE_TNS_ADMIN;
+import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.TNS_CONFIGURATION_ERROR;
 
 public class LogonRoutingTest {
 
     private static final String ORACLE_URL = "jdbc:oracle:thin:@//postgres-dev:1521/service";
     private static final String POSTGRES_URL = "jdbc:postgresql://pg-dev:5432/db";
     private static final String DRIVER_PROPERTY = "ru.inversion.driver.class_name";
+
+    @Rule
+    public final TemporaryFolder tnsFiles = new TemporaryFolder();
 
     @Test
     public void separatesPasswordFromAliasOrJdbcUrl() {
@@ -44,15 +54,37 @@ public class LogonRoutingTest {
             assertEquals(ORACLE_URL, cfg.getConnectUrl());
             assertEquals(ORACLE_URL,
                     cfg.getConnectionProperties("user", "password", ORACLE_URL).getProperty("url"));
-            assertThrows(IllegalStateException.class, () -> builderFor("TEST_ALIAS").build());
-            assertThrows(IllegalStateException.class,
-                    () -> builderFor("jdbc:oracle:thin:@TEST_ALIAS").build());
-            RuntimeException overrideFailure = assertThrows(RuntimeException.class,
+            assertEquals(TNS_CONFIGURATION_ERROR,
+                    assertThrows(XXIConnectorException.class, () -> builderFor("TEST_ALIAS").build()).getReason());
+            assertEquals(TNS_CONFIGURATION_ERROR, assertThrows(XXIConnectorException.class,
+                    () -> builderFor("jdbc:oracle:thin:@TEST_ALIAS").build()).getReason());
+            XXIConnectorException overrideFailure = assertThrows(XXIConnectorException.class,
                     () -> cfg.getConnectionProperties("user", "password", "TEST_ALIAS"));
+            assertEquals(TNS_CONFIGURATION_ERROR, overrideFailure.getReason());
             assertEquals(IllegalStateException.class, overrideFailure.getCause().getClass());
         } finally {
             restoreProperty(ORACLE_TNS_ADMIN, tnsAdmin);
             restoreProperty(DRIVER_PROPERTY, driver);
+        }
+    }
+
+    @Test
+    public void reportsInvalidTnsDirectoryAndMissingTnsNamesFile() throws Exception {
+        String tnsAdmin = System.getProperty(ORACLE_TNS_ADMIN);
+        try {
+            System.setProperty(ORACLE_TNS_ADMIN, tnsFiles.newFile().getAbsolutePath());
+            XXIConnectorException invalidDirectory = assertThrows(XXIConnectorException.class,
+                    () -> builderFor("TEST_ALIAS").build());
+            assertEquals(TNS_CONFIGURATION_ERROR, invalidDirectory.getReason());
+            assertEquals(NotDirectoryException.class, invalidDirectory.getCause().getClass());
+
+            System.setProperty(ORACLE_TNS_ADMIN, tnsFiles.newFolder().getAbsolutePath());
+            XXIConnectorException missingFile = assertThrows(XXIConnectorException.class,
+                    () -> builderFor("TEST_ALIAS").build());
+            assertEquals(TNS_CONFIGURATION_ERROR, missingFile.getReason());
+            assertEquals(NoSuchFileException.class, missingFile.getCause().getClass());
+        } finally {
+            restoreProperty(ORACLE_TNS_ADMIN, tnsAdmin);
         }
     }
 

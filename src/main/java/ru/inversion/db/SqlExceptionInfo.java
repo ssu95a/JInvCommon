@@ -21,7 +21,9 @@ public final class SqlExceptionInfo implements Serializable {
         AUTH_METHOD_MISMATCH,
         CONNECTION_FAILURE,
         INVALID_CONNECTION_STRING,
-        UNKNOWN
+        UNKNOWN,
+        CONNECTION_ALIAS_UNRESOLVED,
+        NAMING_CONFIGURATION_ERROR
     }
 
     private final DialectId dialect;

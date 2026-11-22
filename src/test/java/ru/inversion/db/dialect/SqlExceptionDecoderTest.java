@@ -1,5 +1,6 @@
 package ru.inversion.db.dialect;
 
+import oracle.net.ns.NetException;
 import org.junit.Test;
 import org.postgresql.util.PSQLException;
 import org.postgresql.util.ServerErrorMessage;
@@ -7,6 +8,7 @@ import ru.inversion.db.SqlExceptionInfo;
 
 import java.sql.BatchUpdateException;
 import java.sql.SQLException;
+import java.sql.SQLRecoverableException;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -23,6 +25,20 @@ public class SqlExceptionDecoderTest {
         assertEquals(UNKNOWN, SqlDialectFactory.POSTGRES.decodeException(oracle).getKind());
         assertEquals(ACCOUNT_LOCKED, SqlDialectFactory.POSTGRES.decodeException(postgres).getKind());
         assertEquals(UNKNOWN, SqlDialectFactory.ORACLE.decodeException(postgres).getKind());
+    }
+
+    @Test
+    public void oracleDistinguishesNamingFailuresFromConnectionFailures() {
+        assertEquals(CONNECTION_ALIAS_UNRESOLVED,
+                SqlDialectFactory.ORACLE.decodeException(new SQLException("unknown alias", "66000", 12154)).getKind());
+        assertEquals(CONNECTION_ALIAS_UNRESOLVED,
+                SqlDialectFactory.ORACLE.decodeException(oracleNetworkError(NetException.NAMELOOKUP_FAILED)).getKind());
+        assertEquals(NAMING_CONFIGURATION_ERROR,
+                SqlDialectFactory.ORACLE.decodeException(new SQLException("bad connect descriptor", "66000", 12162)).getKind());
+        assertEquals(NAMING_CONFIGURATION_ERROR,
+                SqlDialectFactory.ORACLE.decodeException(oracleNetworkError(NetException.NAMELOOKUP_FILE_ERROR)).getKind());
+        assertEquals(CONNECTION_FAILURE,
+                SqlDialectFactory.ORACLE.decodeException(new SQLRecoverableException("network error", "08006", 17002)).getKind());
     }
 
     @Test
@@ -58,5 +74,9 @@ public class SqlExceptionDecoderTest {
     public void nonSqlFailuresHaveNoSqlDiagnostics() {
         assertNull(SqlDialectFactory.ORACLE.decodeException(new IllegalStateException("no JDBC cause")));
         assertNull(SqlDialectFactory.POSTGRES.decodeException(null));
+    }
+
+    private static SQLException oracleNetworkError(int code) {
+        return new SQLRecoverableException("IO Error", "08006", 17002, new NetException(code));
     }
 }

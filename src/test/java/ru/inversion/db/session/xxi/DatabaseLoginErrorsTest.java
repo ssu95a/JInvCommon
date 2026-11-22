@@ -60,6 +60,16 @@ public class DatabaseLoginErrorsTest {
     }
 
     @Test
+    public void preservesUnresolvedOracleAliasAsALoginReason() {
+        SQLException driver = new SQLException("TNS could not resolve the connect identifier", "66000", 12154);
+        XXIConnectorException failure = DatabaseLoginErrors.normalize(SqlDialectFactory.ORACLE, driver, null);
+
+        assertEquals(TNS_ALIAS_UNRESOLVED, failure.getReason());
+        assertEquals(Integer.valueOf(12154), failure.vendorCode());
+        assertSame(driver, failure.getCause());
+    }
+
+    @Test
     public void preservesExplicitRemoteMaintenanceSignalPastJdbcWrapper() {
         XXIConnectorException remote = XXIConnectorException.fromRemote(503, "request-id", "target.db.technical.break", "Maintenance scheduled", null);
         SQLException wrapper = new SQLException("connection failed", "08001", remote);

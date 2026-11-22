@@ -83,6 +83,10 @@ public final class DatabaseLoginErrors {
                 return DB_UNAVAILABLE;
             case INVALID_CONNECTION_STRING:
                 return INCORRECT_CONNECTION_STRING;
+            case CONNECTION_ALIAS_UNRESOLVED:
+                return TNS_ALIAS_UNRESOLVED;
+            case NAMING_CONFIGURATION_ERROR:
+                return TNS_CONFIGURATION_ERROR;
             default:
                 return INTERNAL_ERROR;
         }
