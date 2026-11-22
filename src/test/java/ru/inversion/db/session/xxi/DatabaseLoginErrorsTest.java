@@ -6,6 +6,8 @@ import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.db.session.DataSourceCfg;
 import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.db.session.SessionEnvironment;
+import ru.inversion.utils.dco.Dco;
+import ru.inversion.utils.dco.IDco;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -79,6 +81,22 @@ public class DatabaseLoginErrorsTest {
         assertEquals(XXIConnectorException.Origin.REMOTE, failure.getOrigin());
         assertEquals("request-id", failure.getDetails().get("requestId"));
         assertSame(wrapper, failure.getCause());
+    }
+
+    @Test
+    public void readsOracleNamingErrorsFromAuthenticationResponse() {
+        assertRemoteNamingReason("target.db.tns.alias.unresolved", TNS_ALIAS_UNRESOLVED);
+        assertRemoteNamingReason("target.db.tns.configuration.error", TNS_CONFIGURATION_ERROR);
+    }
+
+    private static void assertRemoteNamingReason(String code, XXIConnectorException.Reason reason) {
+        IDco response = Dco.parseXml("<authResponse><errorCode>" + code + "</errorCode></authResponse>");
+
+        XXIConnectorException failure = XXIConnectorException.fromRemote(503, "request-id", null, null, response);
+        assertEquals(reason, failure.getReason());
+        assertEquals(XXIConnectorException.Origin.REMOTE, failure.getOrigin());
+        assertEquals("request-id", failure.getDetails().get("requestId"));
+        assertEquals(code, failure.getDetails().get("remoteErrorCode"));
     }
 
     @Test

@@ -264,6 +264,10 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
                     case "target.db.technical.break":
                         return Reason.TECHNICAL_BREAK;
+                    case "target.db.tns.alias.unresolved":
+                        return Reason.TNS_ALIAS_UNRESOLVED;
+                    case "target.db.tns.configuration.error":
+                        return Reason.TNS_CONFIGURATION_ERROR;
                     // Crypto
                     case "crypto.encryption.error":
                         return Reason.ENCRYPTION_ERROR;

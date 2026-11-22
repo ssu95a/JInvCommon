@@ -59,6 +59,7 @@ class OracleDialect extends BaseDialect {
             case 12154:
                 return CONNECTION_ALIAS_UNRESOLVED;
             case 12162:
+            case 12263:
                 return NAMING_CONFIGURATION_ERROR;
             case 17002:
                 return classifyNetworkError(error);

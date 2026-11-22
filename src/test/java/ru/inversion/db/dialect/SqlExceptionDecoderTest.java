@@ -36,6 +36,8 @@ public class SqlExceptionDecoderTest {
         assertEquals(NAMING_CONFIGURATION_ERROR,
                 SqlDialectFactory.ORACLE.decodeException(new SQLException("bad connect descriptor", "66000", 12162)).getKind());
         assertEquals(NAMING_CONFIGURATION_ERROR,
+                SqlDialectFactory.ORACLE.decodeException(new SQLException("tnsnames.ora is missing", "66000", 12263)).getKind());
+        assertEquals(NAMING_CONFIGURATION_ERROR,
                 SqlDialectFactory.ORACLE.decodeException(oracleNetworkError(NetException.NAMELOOKUP_FILE_ERROR)).getKind());
         assertEquals(CONNECTION_FAILURE,
                 SqlDialectFactory.ORACLE.decodeException(new SQLRecoverableException("network error", "08006", 17002)).getKind());
