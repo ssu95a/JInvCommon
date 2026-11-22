@@ -1,5 +1,6 @@
 package ru.inversion.db.session.cfg_impl;
 
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.db.session.DataSourceCfg;
 import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.db.session.AbstractDataSourceCfgBuilder;
@@ -75,7 +76,7 @@ public class Mdl_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
 
         try( Connection c = DriverManager.getConnection( connectUrl, info ) ){ }
         catch (SQLException ex) {
-            throw DatabaseLoginErrors.normalize(ex);
+            throw DatabaseLoginErrors.normalize(SqlDialectFactory.fromJdbcUrl(dbUrl), ex, null);
         }
 
         if(usePseudoConnection) {

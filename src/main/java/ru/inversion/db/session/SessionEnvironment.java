@@ -1,6 +1,7 @@
 package ru.inversion.db.session;
 
 
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.utils.Tags;
 
 import javax.sql.DataSource;
@@ -51,7 +52,7 @@ public class SessionEnvironment {
             try ( Connection c = cp.getConnection() ) {
             }
             catch (Exception ex) {
-                throw DatabaseLoginErrors.normalize(ex);
+                throw DatabaseLoginErrors.normalize(SqlDialectFactory.fromJdbcUrl(dataSourceCfg.getConnectUrl()), ex, null);
             }
         }
 

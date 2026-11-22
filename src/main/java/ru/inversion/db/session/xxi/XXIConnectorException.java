@@ -1,5 +1,6 @@
 package ru.inversion.db.session.xxi;
 
+import ru.inversion.db.SqlExceptionInfo;
 import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.utils.IExceptionInfo;
 import ru.inversion.utils.S;
@@ -11,6 +12,8 @@ import java.util.Locale;
 import java.util.Map;
 
 public class XXIConnectorException extends RuntimeException implements IExceptionInfo {
+
+    private static final long serialVersionUID = 7628605587618228812L;
 
     public enum Reason {
         AUTH_FAILED,
@@ -78,6 +81,8 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
     /** Диагностические детали  */
     private final Map<String, Object> details;
 
+    private final SqlExceptionInfo sqlExceptionInfo;
+
     /** */
     public XXIConnectorException( Reason reason, String message) {
         this(reason, Origin.LOCAL, message, null, null);
@@ -91,10 +96,16 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
     /** */
     public XXIConnectorException( Reason reason,  Origin origin, String message, Throwable cause, Map<String, Object> details )
     {
+        this(reason, origin, message, cause, details, null);
+    }
+
+    public XXIConnectorException(Reason reason, Origin origin, String message, Throwable cause,
+                                 Map<String, Object> details, SqlExceptionInfo sqlExceptionInfo) {
         super(message, cause);
         this.reason = (reason == null) ? Reason.INTERNAL_ERROR : reason;
         this.origin = origin == null ? Origin.LOCAL : origin;
         this.details = details;
+        this.sqlExceptionInfo = sqlExceptionInfo;
     }
 
     public Reason getReason() { return reason; }
@@ -107,14 +118,20 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
     public Map<String, Object> getDetails() { return details; }
 
+    public SqlExceptionInfo getSqlExceptionInfo() { return sqlExceptionInfo; }
+
     /** */
     public String sqlState() {
+        if (sqlExceptionInfo != null)
+            return sqlExceptionInfo.getSqlState();
         Throwable c = getCause();
         if (c instanceof SQLException) return ((SQLException) c).getSQLState();
         return null;
     }
     /** */
     public Integer vendorCode() {
+        if (sqlExceptionInfo != null)
+            return sqlExceptionInfo.getVendorCode();
         Throwable c = getCause();
         if (c instanceof SQLException) return ((SQLException) c).getErrorCode();
         return null;

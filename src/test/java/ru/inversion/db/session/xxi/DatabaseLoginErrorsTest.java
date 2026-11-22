@@ -1,6 +1,8 @@
 package ru.inversion.db.session.xxi;
 
 import org.junit.Test;
+import ru.inversion.db.SqlExceptionInfo;
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.db.session.DataSourceCfg;
 import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.db.session.SessionEnvironment;
@@ -39,8 +41,12 @@ public class DatabaseLoginErrorsTest {
         driver.setNextException(new SQLException("expired password", "28P21"));
         IllegalStateException wrapper = new IllegalStateException("caller wrapper", driver);
 
-        XXIConnectorException failure = DatabaseLoginErrors.normalize(wrapper);
+        XXIConnectorException failure = DatabaseLoginErrors.normalize(SqlDialectFactory.POSTGRES, wrapper, null);
         assertEquals(PASSWORD_EXPIRED, failure.getReason());
+        assertEquals("28P21", failure.sqlState());
+        assertEquals(Integer.valueOf(0), failure.vendorCode());
+        assertEquals(SqlExceptionInfo.Kind.PASSWORD_EXPIRED, failure.getSqlExceptionInfo().getKind());
+        assertEquals("expired password", failure.getSqlExceptionInfo().getMessage());
         assertSame(wrapper, failure.getCause());
     }
 

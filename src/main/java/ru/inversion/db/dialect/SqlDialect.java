@@ -1,5 +1,6 @@
 package ru.inversion.db.dialect;
 
+import ru.inversion.db.SqlExceptionInfo;
 import ru.inversion.meta.IEntityMetaData;
 import ru.inversion.meta.IEntityProperty;
 import ru.inversion.meta.impl.ArrayMetaData;
@@ -131,5 +132,7 @@ public interface SqlDialect {
      *
      * @return информация об SQL-ошибке либо null, если SQLException в цепочке отсутствует.
      */
-    //SqlExceptionInfo decodeException(Throwable error);
+    default SqlExceptionInfo decodeException(Throwable error) {
+        return SqlExceptionDecoder.decodeCommon(type(), error);
+    }
 }

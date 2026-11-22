@@ -4,6 +4,8 @@ import oracle.jdbc.OracleConnection;
 import oracle.sql.StructDescriptor;
 import ru.inversion.dataset.IStructMapper;
 import ru.inversion.db.JInvDbException;
+import ru.inversion.db.SqlExceptionInfo;
+import ru.inversion.db.SqlExceptionInfo.Kind;
 import ru.inversion.db.entity.RegisterEnum;
 import ru.inversion.meta.EntityMetaDataException;
 import ru.inversion.meta.EntityMetadataFactory;
@@ -28,11 +30,46 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static ru.inversion.db.SqlExceptionInfo.Kind.*;
+
 class OracleDialect extends BaseDialect {
 
     private static final Pattern ORACLE_NAME_PATTERN = Pattern.compile("^[A-Za-z][A-Za-z0-9_#$ ()&=,]*$");
 
     @Override public DialectId type() { return DialectId.ORACLE; }
+
+    @Override
+    public SqlExceptionInfo decodeException(Throwable error) {
+        return SqlExceptionDecoder.decode(type(), error, OracleDialect::classifyException, sql -> null);
+    }
+
+    static Kind classifyException(SQLException error) {
+        switch (error.getErrorCode()) {
+            case 1005:
+                return PASSWORD_REQUIRED;
+            case 1017:
+                return AUTHENTICATION_FAILED;
+            case 28000:
+                return ACCOUNT_LOCKED;
+            case 28001:
+                return PASSWORD_EXPIRED;
+            case 17067:
+                return INVALID_CONNECTION_STRING;
+            case 1033:
+            case 1034:
+            case 1089:
+            case 1090:
+            case 12154:
+            case 12170:
+            case 12514:
+            case 12541:
+            case 17002:
+                return CONNECTION_FAILURE;
+            default:
+                return null;
+        }
+    }
+
 
     /** */
     protected final boolean checkIdentifier(String raw) {
