@@ -1,5 +1,6 @@
 package ru.inversion.db.session.xxi;
 
+import ru.inversion.db.SqlExceptionInfo;
 import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.utils.IExceptionInfo;
 import ru.inversion.utils.S;
@@ -11,6 +12,8 @@ import java.util.Locale;
 import java.util.Map;
 
 public class XXIConnectorException extends RuntimeException implements IExceptionInfo {
+
+    private static final long serialVersionUID = 7628605587618228812L;
 
     public enum Reason {
         AUTH_FAILED,
@@ -27,7 +30,10 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
         LICENCE_ERROR,
         INTERNAL_ERROR,
         INCORRECT_CONNECTION_STRING,
-        PASSWORD_REQUIRED;
+        PASSWORD_REQUIRED,
+        TNS_ALIAS_UNRESOLVED,
+        TNS_CONFIGURATION_ERROR,
+        DATABASE_NOT_FOUND;
 
         public String getDefaultMessage() {
             switch (this) {
@@ -45,8 +51,14 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
                      return "Authentication method mismatch";
                 case DB_UNAVAILABLE:
                      return "Database unavailable";
+                case DATABASE_NOT_FOUND:
+                     return "Database does not exist";
                 case INCORRECT_CONNECTION_STRING:
                      return "Incorrect connection string";
+                case TNS_ALIAS_UNRESOLVED:
+                     return "Oracle connection alias could not be resolved";
+                case TNS_CONFIGURATION_ERROR:
+                     return "Oracle TNS configuration error. Check TNS_ADMIN and tnsnames.ora";
                 case PASSWORD_REQUIRED:
                      return "Password is required";
                 case TECHNICAL_BREAK:
@@ -78,6 +90,8 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
     /** Диагностические детали  */
     private final Map<String, Object> details;
 
+    private final SqlExceptionInfo sqlExceptionInfo;
+
     /** */
     public XXIConnectorException( Reason reason, String message) {
         this(reason, Origin.LOCAL, message, null, null);
@@ -91,10 +105,16 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
     /** */
     public XXIConnectorException( Reason reason,  Origin origin, String message, Throwable cause, Map<String, Object> details )
     {
+        this(reason, origin, message, cause, details, null);
+    }
+
+    public XXIConnectorException(Reason reason, Origin origin, String message, Throwable cause,
+                                 Map<String, Object> details, SqlExceptionInfo sqlExceptionInfo) {
         super(message, cause);
         this.reason = (reason == null) ? Reason.INTERNAL_ERROR : reason;
         this.origin = origin == null ? Origin.LOCAL : origin;
         this.details = details;
+        this.sqlExceptionInfo = sqlExceptionInfo;
     }
 
     public Reason getReason() { return reason; }
@@ -107,14 +127,20 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
     public Map<String, Object> getDetails() { return details; }
 
+    public SqlExceptionInfo getSqlExceptionInfo() { return sqlExceptionInfo; }
+
     /** */
     public String sqlState() {
+        if (sqlExceptionInfo != null)
+            return sqlExceptionInfo.getSqlState();
         Throwable c = getCause();
         if (c instanceof SQLException) return ((SQLException) c).getSQLState();
         return null;
     }
     /** */
     public Integer vendorCode() {
+        if (sqlExceptionInfo != null)
+            return sqlExceptionInfo.getVendorCode();
         Throwable c = getCause();
         if (c instanceof SQLException) return ((SQLException) c).getErrorCode();
         return null;
@@ -127,13 +153,26 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
     @Override
     public String getDetailedMessage() {
-
+        String message = reason == Reason.INCORRECT_CONNECTION_STRING ? connectionDiagnostic() : getMessage();
         Object requestId = details == null ? null : details.get("requestId");
 
         if( requestId == null )
-            return getMessage();
+            return message;
 
-        return getMessage() + "\nRequest ID: " + requestId;
+        String requestInfo = "Request ID: " + requestId;
+        return S.isNullOrEmpty(message) ? requestInfo : message + "\n" + requestInfo;
+    }
+
+    private String connectionDiagnostic() {
+        if (sqlExceptionInfo != null && S.isNotNullOrEmpty(sqlExceptionInfo.getMessage()))
+            return sqlExceptionInfo.getMessage();
+
+        Object remoteMessage = details == null ? null : details.get("remoteMessage");
+        if (remoteMessage instanceof String)
+            return (String) remoteMessage;
+
+        Throwable cause = getCause();
+        return cause == null ? null : cause.getLocalizedMessage();
     }
     // Factories
 
@@ -202,8 +241,11 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
         String safeMessage = message;
 
-        if (reason == Reason.INTERNAL_ERROR)
+        if (reason == Reason.INCORRECT_CONNECTION_STRING) {
             safeMessage = reason.getDefaultMessage();
+            if (!safeMessage.equals(message))
+                details.put("remoteMessage", message);
+        }
 
         return new XXIConnectorException( reason, Origin.REMOTE, safeMessage, null, details );
     }
@@ -241,6 +283,10 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
                     case "target.db.technical.break":
                         return Reason.TECHNICAL_BREAK;
+                    case "target.db.tns.alias.unresolved":
+                        return Reason.INCORRECT_CONNECTION_STRING;
+                    case "target.db.tns.configuration.error":
+                        return Reason.TNS_CONFIGURATION_ERROR;
                     // Crypto
                     case "crypto.encryption.error":
                         return Reason.ENCRYPTION_ERROR;

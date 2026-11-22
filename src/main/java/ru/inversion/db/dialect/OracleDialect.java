@@ -1,9 +1,12 @@
 package ru.inversion.db.dialect;
 
 import oracle.jdbc.OracleConnection;
+import oracle.net.ns.NetException;
 import oracle.sql.StructDescriptor;
 import ru.inversion.dataset.IStructMapper;
 import ru.inversion.db.JInvDbException;
+import ru.inversion.db.SqlExceptionInfo;
+import ru.inversion.db.SqlExceptionInfo.Kind;
 import ru.inversion.db.entity.RegisterEnum;
 import ru.inversion.meta.EntityMetaDataException;
 import ru.inversion.meta.EntityMetadataFactory;
@@ -28,11 +31,71 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static ru.inversion.db.SqlExceptionInfo.Kind.*;
+
 class OracleDialect extends BaseDialect {
 
     private static final Pattern ORACLE_NAME_PATTERN = Pattern.compile("^[A-Za-z][A-Za-z0-9_#$ ()&=,]*$");
 
     @Override public DialectId type() { return DialectId.ORACLE; }
+
+    @Override
+    public SqlExceptionInfo decodeException(Throwable error) {
+        return SqlExceptionDecoder.decode(type(), error, OracleDialect::classifyException, sql -> null);
+    }
+
+    static Kind classifyException(SQLException error) {
+        switch (error.getErrorCode()) {
+            case 1005:
+                return PASSWORD_REQUIRED;
+            case 1017:
+                return AUTHENTICATION_FAILED;
+            case 28000:
+                return ACCOUNT_LOCKED;
+            case 28001:
+                return PASSWORD_EXPIRED;
+            case 17067:
+                return INVALID_CONNECTION_STRING;
+            case 12154:
+                return CONNECTION_ALIAS_UNRESOLVED;
+            case 12162:
+            case 12263:
+                return NAMING_CONFIGURATION_ERROR;
+            case 17002:
+                return classifyNetworkError(error);
+            case 1033:
+            case 1034:
+            case 1089:
+            case 1090:
+            case 12170:
+            case 12514:
+            case 12541:
+                return CONNECTION_FAILURE;
+            default:
+                return null;
+        }
+    }
+
+    private static Kind classifyNetworkError(SQLException error) {
+        // JDBC 17002 может оборачивать ошибки локального разрешения имени Oracle Net.
+        for (Throwable cause : SqlExceptionDecoder.chain(error.getCause())) {
+            if (!(cause instanceof NetException))
+                continue;
+
+            switch (((NetException) cause).getErrorNumber()) {
+                case NetException.NAMELOOKUP_FAILED:
+                    return CONNECTION_ALIAS_UNRESOLVED;
+                case NetException.TNS_ADMIN_EMPTY:
+                case NetException.INVALID_READ_PATH:
+                case NetException.NAMELOOKUP_FILE_ERROR:
+                    return NAMING_CONFIGURATION_ERROR;
+                default:
+                    break;
+            }
+        }
+        return CONNECTION_FAILURE;
+    }
+
 
     /** */
     protected final boolean checkIdentifier(String raw) {

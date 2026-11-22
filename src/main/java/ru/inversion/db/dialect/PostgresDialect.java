@@ -1,6 +1,10 @@
 package ru.inversion.db.dialect;
 
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
 import ru.inversion.db.JInvDbException;
+import ru.inversion.db.SqlExceptionInfo;
+import ru.inversion.db.SqlExceptionInfo.Kind;
 import ru.inversion.db.entity.RegisterEnum;
 import ru.inversion.jdbc.common.ItemDto;
 import ru.inversion.jdbc.common.meta.ResultSetMetaDataHandler;
@@ -26,6 +30,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static ru.inversion.db.SqlExceptionInfo.Kind.*;
+
 final class PostgresDialect extends BaseDialect {
 
     static final private Map<String,String> g_typeNameMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
@@ -41,6 +47,76 @@ final class PostgresDialect extends BaseDialect {
 
 
     @Override public DialectId type() { return DialectId.POSTGRES; }
+
+    @Override
+    public SqlExceptionInfo decodeException(Throwable error) {
+        return SqlExceptionDecoder.decode(type(), error, PostgresDialect::classifyException, PostgresDialect::dbObjectName);
+    }
+
+    static Kind classifyException(SQLException error) {
+        String state = error.getSQLState();
+        if (state == null)
+            return null;
+
+        switch (state) {
+            case "3D000":
+                return DATABASE_NOT_FOUND;
+            // Дополнительные коды PostgreSQL-входа в ЦАБС.
+            case "28P21":
+                return PASSWORD_EXPIRED;
+            case "28P22":
+                return ACCOUNT_LOCKED;
+            case "28P25":
+                return PASSWORD_CHANGE_REQUIRED;
+            case "28P01":
+                return classifyInvalidPassword(error.getMessage());
+            case "57P01":
+            case "57P02":
+            case "57P03":
+            case "53300":
+                return CONNECTION_FAILURE;
+            default:
+                return null;
+        }
+    }
+
+    private static Kind classifyInvalidPassword(String message) {
+        if (message == null)
+            return AUTHENTICATION_FAILED;
+
+        String lower = message.toLowerCase(Locale.ROOT);
+        if (lower.contains("password expired") || lower.contains("password validity"))
+            return PASSWORD_EXPIRED;
+        if (lower.contains("password change is required"))
+            return PASSWORD_CHANGE_REQUIRED;
+        if (lower.contains("authentication") && (lower.contains("scram-sha-256") || lower.contains("md5")))
+            return AUTH_METHOD_MISMATCH;
+        if (lower.contains("does not exist") || lower.contains("unknown user")
+                || (lower.contains("user") && lower.contains("not exist")))
+            return USER_NOT_FOUND;
+
+        return AUTHENTICATION_FAILED;
+    }
+
+    static String dbObjectName(SQLException error) {
+        ServerErrorMessage server = serverError(error);
+        if (server == null)
+            return null;
+
+        String object = server.getConstraint() != null ? server.getConstraint() : server.getColumn();
+        StringJoiner qualified = new StringJoiner(".");
+        for (String part : new String[] { server.getSchema(), server.getTable(), object }) {
+            if (part != null && !part.isEmpty())
+                qualified.add(part.indexOf('.') >= 0 || part.indexOf('"') >= 0
+                        ? '"' + part.replace("\"", "\"\"") + '"' : part);
+        }
+        return qualified.length() == 0 ? null : qualified.toString();
+    }
+
+    private static ServerErrorMessage serverError(SQLException error) {
+        return error instanceof PSQLException ? ((PSQLException) error).getServerErrorMessage() : null;
+    }
+
 
     @Override
     public String sqlName(String rawIdentifier )

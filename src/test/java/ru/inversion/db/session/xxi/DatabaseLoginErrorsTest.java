@@ -1,9 +1,15 @@
 package ru.inversion.db.session.xxi;
 
 import org.junit.Test;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
+import ru.inversion.db.SqlExceptionInfo;
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.db.session.DataSourceCfg;
 import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.db.session.SessionEnvironment;
+import ru.inversion.utils.dco.Dco;
+import ru.inversion.utils.dco.IDco;
 
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
@@ -17,6 +23,7 @@ import java.util.Properties;
 import java.util.logging.Logger;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -39,8 +46,12 @@ public class DatabaseLoginErrorsTest {
         driver.setNextException(new SQLException("expired password", "28P21"));
         IllegalStateException wrapper = new IllegalStateException("caller wrapper", driver);
 
-        XXIConnectorException failure = DatabaseLoginErrors.normalize(wrapper);
+        XXIConnectorException failure = DatabaseLoginErrors.normalize(SqlDialectFactory.POSTGRES, wrapper, null);
         assertEquals(PASSWORD_EXPIRED, failure.getReason());
+        assertEquals("28P21", failure.sqlState());
+        assertEquals(Integer.valueOf(0), failure.vendorCode());
+        assertEquals(SqlExceptionInfo.Kind.PASSWORD_EXPIRED, failure.getSqlExceptionInfo().getKind());
+        assertEquals("expired password", failure.getSqlExceptionInfo().getMessage());
         assertSame(wrapper, failure.getCause());
     }
 
@@ -54,6 +65,29 @@ public class DatabaseLoginErrorsTest {
     }
 
     @Test
+    public void reportsUnresolvedOracleAliasAsIncorrectConnectionString() {
+        SQLException driver = new SQLException("TNS could not resolve the connect identifier", "66000", 12154);
+        XXIConnectorException failure = DatabaseLoginErrors.normalize(SqlDialectFactory.ORACLE, driver, null);
+
+        assertEquals(INCORRECT_CONNECTION_STRING, failure.getReason());
+        assertEquals("Incorrect connection string", failure.getHeaderText());
+        assertEquals(driver.getMessage(), failure.getDetailedMessage());
+        assertEquals(SqlExceptionInfo.Kind.CONNECTION_ALIAS_UNRESOLVED, failure.getSqlExceptionInfo().getKind());
+        assertEquals(Integer.valueOf(12154), failure.vendorCode());
+        assertSame(driver, failure.getCause());
+    }
+
+    @Test
+    public void detailsForInvalidConnectionStringUseTheCauseWithoutRepeatingTheHeader() {
+        String message = INCORRECT_CONNECTION_STRING.getDefaultMessage();
+        XXIConnectorException failure = XXIConnectorException.of(INCORRECT_CONNECTION_STRING, message,
+                new IllegalArgumentException("Invalid JDBC target"));
+
+        assertEquals("Invalid JDBC target", failure.getDetailedMessage());
+        assertNull(XXIConnectorException.of(INCORRECT_CONNECTION_STRING, message).getDetailedMessage());
+    }
+
+    @Test
     public void preservesExplicitRemoteMaintenanceSignalPastJdbcWrapper() {
         XXIConnectorException remote = XXIConnectorException.fromRemote(503, "request-id", "target.db.technical.break", "Maintenance scheduled", null);
         SQLException wrapper = new SQLException("connection failed", "08001", remote);
@@ -63,6 +97,34 @@ public class DatabaseLoginErrorsTest {
         assertEquals(XXIConnectorException.Origin.REMOTE, failure.getOrigin());
         assertEquals("request-id", failure.getDetails().get("requestId"));
         assertSame(wrapper, failure.getCause());
+    }
+
+    @Test
+    public void readsOracleNamingErrorsFromAuthenticationResponse() {
+        assertRemoteNamingReason("target.db.tns.alias.unresolved", INCORRECT_CONNECTION_STRING);
+        assertRemoteNamingReason("target.db.tns.configuration.error", TNS_CONFIGURATION_ERROR);
+    }
+
+    @Test
+    public void preservesRemoteOracleAliasExplanationUnderTheCommonHeader() {
+        String explanation = "Oracle connection alias could not be resolved";
+        XXIConnectorException failure = XXIConnectorException.fromRemote(503, "request-id",
+                "target.db.tns.alias.unresolved", explanation, null);
+
+        assertEquals(INCORRECT_CONNECTION_STRING, failure.getReason());
+        assertEquals("Incorrect connection string", failure.getHeaderText());
+        assertEquals(explanation + "\nRequest ID: request-id", failure.getDetailedMessage());
+        assertNull(failure.getCause());
+    }
+
+    private static void assertRemoteNamingReason(String code, XXIConnectorException.Reason reason) {
+        IDco response = Dco.parseXml("<authResponse><errorCode>" + code + "</errorCode></authResponse>");
+
+        XXIConnectorException failure = XXIConnectorException.fromRemote(503, "request-id", null, null, response);
+        assertEquals(reason, failure.getReason());
+        assertEquals(XXIConnectorException.Origin.REMOTE, failure.getOrigin());
+        assertEquals("request-id", failure.getDetails().get("requestId"));
+        assertEquals(code, failure.getDetails().get("remoteErrorCode"));
     }
 
     @Test
@@ -86,8 +148,39 @@ public class DatabaseLoginErrorsTest {
 
     @Test
     public void classifiesFailureDuringSessionInitialization() throws Exception {
+        XXIConnectorException failure = rejectSessionInitialization(new SQLException("invalid password", "28P01"));
+        assertEquals(AUTH_FAILED, failure.getReason());
+    }
+
+    @Test
+    public void reportsMissingPostgresDatabaseDuringLogin() throws Exception {
+        SQLException rejected = new PSQLException(new ServerErrorMessage(
+                "SFATAL\000C3D000\000Mdatabase \"pgdev1\" does not exist\000"));
+        XXIConnectorException direct = rejectSessionInitialization(rejected);
+
+        String url = "jdbc:login-errors-missing-database";
+        Driver driver = new TestDriver(url, () -> { throw rejected; });
+        DriverManager.registerDriver(driver);
+        try {
+            XXIConnectorException pseudo = assertThrows(XXIConnectorException.class,
+                    () -> PGPseudoConnector.login(url, "user", "password", new Properties(), null));
+            assertEquals(INCORRECT_CONNECTION_STRING, direct.getReason());
+            assertEquals(direct.getReason(), pseudo.getReason());
+            assertEquals(SqlExceptionInfo.Kind.DATABASE_NOT_FOUND, direct.getSqlExceptionInfo().getKind());
+            assertEquals("Incorrect connection string", direct.getHeaderText());
+            assertEquals(direct.getMessage(), pseudo.getMessage());
+            assertEquals(rejected.getMessage(), direct.getDetailedMessage());
+            assertEquals(rejected.getMessage(), pseudo.getDetailedMessage());
+            assertEquals("3D000", pseudo.sqlState());
+            assertSame(rejected, pseudo.getCause());
+        }
+        finally {
+            DriverManager.deregisterDriver(driver);
+        }
+    }
+
+    private static XXIConnectorException rejectSessionInitialization(SQLException rejected) throws Exception {
         String url = "jdbc:login-errors-verification-test";
-        SQLException rejected = new SQLException("invalid password", "28P01");
         Driver driver = new TestDriver(url, () -> { throw rejected; });
         DriverManager.registerDriver(driver);
         try {
@@ -98,8 +191,8 @@ public class DatabaseLoginErrorsTest {
 
             XXIConnectorException failure = assertThrows(XXIConnectorException.class,
                     () -> SessionEnvironment.initialize(config));
-            assertEquals(AUTH_FAILED, failure.getReason());
             assertSame(rejected, failure.getCause());
+            return failure;
         }
         finally {
             DriverManager.deregisterDriver(driver);

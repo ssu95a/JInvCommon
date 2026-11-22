@@ -1,5 +1,6 @@
 package ru.inversion.db.session.xxi;
 
+import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 import ru.inversion.utils.U;
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
 import java.util.Properties;
 import java.util.function.BiFunction;
 
+import static ru.inversion.db.dialect.SqlDialectFactory.POSTGRES;
 import static ru.inversion.db.session.AbstractDataSourceCfgBuilder.V$SESSION_PROGRAM;
 import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.*;
 import static ru.inversion.utils.security.PasswordMaker.CaseMode.Mixed;
@@ -89,7 +91,7 @@ public class PGPseudoConnector extends ConnectorBase {
             }
         }
         catch (SQLException e) {
-            throw XXIConnectorException.fromSql( e, U.toMap( "login", userInfo.userName(), "op", "read_server_ip_time") );
+            throw DatabaseLoginErrors.normalize(POSTGRES, e, U.toMap( "login", userInfo.userName(), "op", "read_server_ip_time") );
         }
         catch (Throwable th) {
             throw XXIConnectorException.of( INTERNAL_ERROR, "Failed to read server ip/time", th, U.toMap("login", userInfo.userName(), "op", "read_server_ip_time"));
@@ -148,7 +150,7 @@ public class PGPseudoConnector extends ConnectorBase {
             return result;
         }
         catch( SQLException e ) {
-            throw XXIConnectorException.fromSql( e, U.toMap( "login", userInfo.userName(), "op", "xxi_pseudo.check_Login" ));
+            throw DatabaseLoginErrors.normalize(POSTGRES, e, U.toMap( "login", userInfo.userName(), "op", "xxi_pseudo.check_Login" ));
         }
     }
 
@@ -199,7 +201,7 @@ public class PGPseudoConnector extends ConnectorBase {
                 else if( "28P19".equals( e.getSQLState() ) )
                     l += 3;
                 else
-                    throw XXIConnectorException.fromSql(e, U.toMap( "login", userInfo.userName(), "op", "xxi_pseudo.change_Password" ));
+                    throw DatabaseLoginErrors.normalize(POSTGRES, e, U.toMap( "login", userInfo.userName(), "op", "xxi_pseudo.change_Password" ));
             }
         } while( pseudoPassword == null );
 
@@ -315,7 +317,7 @@ public class PGPseudoConnector extends ConnectorBase {
                         throw XXIConnectorException.of(AUTH_FAILED, "No PIN - no entry", null, U.toMap("login", login));
                 }
             } catch (SQLException ex) {
-                if (result == 1 && XXIConnectorException.fromSql(ex).getReason() == AUTH_FAILED)
+                if (result == 1 && DatabaseLoginErrors.normalize(POSTGRES, ex, null).getReason() == AUTH_FAILED)
                     throw XXIConnectorException.of(PASSWORD_CHANGE_REQUIRED, PASSWORD_CHANGE_REQUIRED.getDefaultMessage(), ex);
                 throw ex;
             }
@@ -323,7 +325,7 @@ public class PGPseudoConnector extends ConnectorBase {
             return authentication;
         }
         catch( SQLException e ) {
-            throw XXIConnectorException.fromSql(e, U.toMap( "login", login, "jdbcUrl", jdbcUrl, "op", "login" ));
+            throw DatabaseLoginErrors.normalize(POSTGRES, e, U.toMap( "login", login, "jdbcUrl", jdbcUrl, "op", "login" ));
         }
     }
 
@@ -383,7 +385,7 @@ public class PGPseudoConnector extends ConnectorBase {
             return auth;
 
         } catch (SQLException e) {
-            throw XXIConnectorException.fromSql( e, U.toMap("login", auth.getUserName(), "mode", "serverSide", "op", "serverLogin"));
+            throw DatabaseLoginErrors.normalize(POSTGRES, e, U.toMap("login", auth.getUserName(), "mode", "serverSide", "op", "serverLogin"));
         }
     }
 }

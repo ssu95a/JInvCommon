@@ -11,6 +11,17 @@ public final class SqlDialectFactory {
 
     private SqlDialectFactory() {}
 
+    /** Диалект прямого JDBC URL, либо null для неизвестного формата. */
+    public static SqlDialect fromJdbcUrl(String jdbcUrl) {
+        if (jdbcUrl == null)
+            return null;
+        if (jdbcUrl.startsWith("jdbc:oracle:"))
+            return ORACLE;
+        if (jdbcUrl.startsWith("jdbc:postgresql:"))
+            return POSTGRES;
+        return null;
+    }
+
     public static SqlDialect from(TaskContext tc) {
 
         if( tc.isOracle() ) {

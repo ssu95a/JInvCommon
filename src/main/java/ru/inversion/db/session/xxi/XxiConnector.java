@@ -2,6 +2,8 @@ package ru.inversion.db.session.xxi;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import ru.inversion.db.SqlExceptionInfo.Kind;
+import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.utils.Holder;
 import ru.inversion.utils.S;
 import ru.inversion.utils.U;
@@ -15,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Properties;
 import java.util.function.BiFunction;
 
+import static ru.inversion.db.dialect.SqlDialectFactory.ORACLE;
 import static ru.inversion.db.session.AbstractDataSourceCfgBuilder.V$SESSION_PROGRAM;
 import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.AUTH_FAILED;
 import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.INTERNAL_ERROR;
@@ -168,7 +171,7 @@ public class XxiConnector {
             }
         }
         catch( SQLException ex ) {
-            XXIConnectorException failure = XXIConnectorException.fromSql(ex);
+            XXIConnectorException failure = DatabaseLoginErrors.normalize(ORACLE, ex, null);
             if (resultCode == 1 && failure.getReason() == AUTH_FAILED)
                 throw XXIConnectorException.of(PASSWORD_CHANGE_REQUIRED, PASSWORD_CHANGE_REQUIRED.getDefaultMessage(), ex);
             throw failure;
@@ -271,7 +274,7 @@ public class XxiConnector {
             return retAuth;
 
         } catch (SQLException e) {
-            throw XXIConnectorException.fromSql(e, U.toMap("login", auth.getUserName(), "mode", "serverSide", "op", "serverLogin"));
+            throw DatabaseLoginErrors.normalize(ORACLE, e, U.toMap("login", auth.getUserName(), "mode", "serverSide", "op", "serverLogin"));
         }
     }
 
@@ -376,7 +379,7 @@ public class XxiConnector {
                                     ;
                                 }
                                 catch( SQLException ex ) {
-                                    if( ex.getErrorCode() == 28001 ) {
+                                    if( ORACLE.decodeException(ex).getKind() == Kind.PASSWORD_EXPIRED ) {
                                         // если пароль устарел, то не ошибка
                                         // просто меняем его
                                     }
@@ -432,10 +435,8 @@ public class XxiConnector {
             return resultCode;
         }
         catch( SQLException ex ) {
-            if (!loginXxiOk && ex.getErrorCode() == 1017)
-                ex = new SQLException("[Xxi-Connector] - Error on XXI_LOGON login", ex.getSQLState(), ex.getErrorCode(), ex);
-
-            throw XXIConnectorException.fromSql(ex);
+            throw DatabaseLoginErrors.normalize(ORACLE, ex,
+                    loginXxiOk ? null : U.toMap("op", "connect_logon_user"));
         }
     }
 
