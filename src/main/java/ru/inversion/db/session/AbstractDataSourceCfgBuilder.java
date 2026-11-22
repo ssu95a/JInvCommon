@@ -7,6 +7,7 @@ import ru.inversion.db.session.cfg_impl.Ora_DataSourceCfgBuilder;
 import ru.inversion.db.session.cfg_impl.Pg_DataSourceCfgBuilder;
 import ru.inversion.db.session.cfg_impl.Srv_DataSourceCfgBuilder;
 import ru.inversion.db.session.cfg_impl.srv.ClientParameter;
+import ru.inversion.db.session.xxi.XXIConnectorException;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 
@@ -15,6 +16,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+
+import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.AUTH_FAILED;
+import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.INCORRECT_CONNECTION_STRING;
+import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.PASSWORD_REQUIRED;
 
 
 /**
@@ -103,13 +108,13 @@ public abstract class AbstractDataSourceCfgBuilder {
     protected void preBuild( ) {
 
         if( S.isNullOrEmpty(login) )
-            throw new IllegalStateException( Tags.PRODUCT_LABEL + "login is empty" );
+            throw XXIConnectorException.of(AUTH_FAILED, AUTH_FAILED.getDefaultMessage());
 
         if( S.isNullOrEmpty(password) )
-            throw new IllegalStateException( Tags.PRODUCT_LABEL + "password is empty" );
+            throw XXIConnectorException.of(PASSWORD_REQUIRED, PASSWORD_REQUIRED.getDefaultMessage());
 
         if( S.isNullOrEmpty(dbUrl) )
-            throw new IllegalStateException( Tags.PRODUCT_LABEL + "dbUrl is empty" );
+            throw XXIConnectorException.of(INCORRECT_CONNECTION_STRING, INCORRECT_CONNECTION_STRING.getDefaultMessage());
     }
 
     /** */

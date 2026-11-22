@@ -46,10 +46,14 @@ public class SessionEnvironment {
 
         final ConnectionProvider cp = new ConnectionProvider(dataSourceCfg);
 
-        if( "true".equalsIgnoreCase( dataSourceCfg.getProperty("check_connection") ) )
-            //а точно ли логин успешный?
+        if( "true".equalsIgnoreCase( dataSourceCfg.getProperty("check_connection") ) ) {
+            // Проверяем вход до публикации окружения.
             try ( Connection c = cp.getConnection() ) {
             }
+            catch (Exception ex) {
+                throw DatabaseLoginErrors.normalize(ex);
+            }
+        }
 
         instance = new SessionEnvironment( cp );
     }

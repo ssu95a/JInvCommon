@@ -268,7 +268,7 @@ public class PGPseudoConnector extends ConnectorBase {
                 {
                     String newPassword = (String) resultHandler.apply(techConnection, 1);
 
-                    if( S.isNotNullOrEmpty(newPassword) )
+                    if( S.isNullOrEmpty(newPassword) )
                         throw XXIConnectorException.of( PASSWORD_CHANGE_REQUIRED, "Password change required", null, U.toMap("login", login) );
 
                     authentication = new PasswordAuthentication( login, newPassword.toCharArray() );
@@ -314,11 +314,9 @@ public class PGPseudoConnector extends ConnectorBase {
                     } else
                         throw XXIConnectorException.of(AUTH_FAILED, "No PIN - no entry", null, U.toMap("login", login));
                 }
-            } catch (Exception ex) {
-                // Признак, что была смена пароля
-                // Не можем соединиться т.к. скорее всего был вход через псевдосоединение
-                if (result == 1)
-                    throw XXIConnectorException.of( PASSWORD_CHANGE_REQUIRED, "To apply changes you must login again", null, U.toMap("login", login, "op", "relogin_required_after_password_change"));
+            } catch (SQLException ex) {
+                if (result == 1 && XXIConnectorException.fromSql(ex).getReason() == AUTH_FAILED)
+                    throw XXIConnectorException.of(PASSWORD_CHANGE_REQUIRED, PASSWORD_CHANGE_REQUIRED.getDefaultMessage(), ex);
                 throw ex;
             }
 

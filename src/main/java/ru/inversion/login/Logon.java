@@ -1,6 +1,7 @@
 package ru.inversion.login;
 
 import ru.inversion.db.session.DataSourceCfg;
+import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.db.session.AbstractDataSourceCfgBuilder;
 import ru.inversion.db.session.SessionEnvironment;
 import ru.inversion.utils.S;
@@ -181,8 +182,8 @@ public class Logon {
 
             SessionEnvironment.initialize( dsc );
 
-        } catch ( Throwable th ) {
-            throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on login in database.", th );
+        } catch (Exception ex) {
+            throw DatabaseLoginErrors.normalize(ex);
         }
     }
 

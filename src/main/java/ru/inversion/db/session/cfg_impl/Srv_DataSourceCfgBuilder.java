@@ -2,8 +2,11 @@ package ru.inversion.db.session.cfg_impl;
 
 import ru.inversion.db.session.AbstractDataSourceCfgBuilder;
 import ru.inversion.db.session.DataSourceCfg;
+import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.db.session.cfg_impl.srv.XXIConnectClient;
+import ru.inversion.db.session.xxi.XXIConnectorException;
 
+import java.io.IOException;
 import java.net.URI;
 
 public class Srv_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
@@ -41,6 +44,9 @@ public class Srv_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
                             .password(String.valueOf(auth.dbPassword()))
                     .usePseudoConnection(false)
                 .build();
+        }
+        catch (IOException | XXIConnectorException ex) {
+            throw DatabaseLoginErrors.normalize(ex);
         }
     }
 }

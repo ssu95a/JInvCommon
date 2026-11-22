@@ -146,14 +146,14 @@ public abstract class ConnectorBase extends XXIAuth {
         boolean upgradeEnable = false;
 
         try( final PreparedStatement ps = c.prepareStatement (
-                "select OBJECT_ID from all_objects where owner = 'PUBLIC' and object_name = 'XXI_UPGRADE' and OBJECT_TYPE = 'SYNONYM'") ) {
+                "select 1 from all_objects where owner = 'PUBLIC' and object_name = 'XXI_UPGRADE' and OBJECT_TYPE = 'SYNONYM'") ) {
 
             try( final ResultSet rs = ps.executeQuery() ) {
                 upgradeEnable = rs.next();
             }
         }
-        catch( Throwable th ) {
-            logger.error( Tags.PRODUCT_LABEL + "Error on check XII upgrade", th );
+        catch( SQLException ex ) {
+            logger.error( Tags.PRODUCT_LABEL + "Error on check XXI upgrade", ex );
         }
 
         if( upgradeEnable ) {

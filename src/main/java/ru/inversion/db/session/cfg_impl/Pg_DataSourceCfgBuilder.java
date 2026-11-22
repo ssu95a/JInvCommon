@@ -3,6 +3,7 @@ package ru.inversion.db.session.cfg_impl;
 import ru.inversion.db.session.DataSourceCfg;
 import ru.inversion.db.session.AbstractDataSourceCfgBuilder;
 import ru.inversion.db.session.xxi.PGPseudoConnector;
+import ru.inversion.db.session.xxi.XXIConnectorException;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 
@@ -11,6 +12,8 @@ import java.util.Properties;
 import java.util.function.Function;
 
 /** */
+import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.INCORRECT_CONNECTION_STRING;
+
 public class Pg_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
 
     /** */
@@ -62,6 +65,9 @@ public class Pg_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
             connectUrl = String.format("jdbc:postgresql://%s", dbUrl );
         else
             connectUrl = dbUrl;
+
+        if (connectUrl.startsWith("jdbc:postgresql:") && !new org.postgresql.Driver().acceptsURL(connectUrl))
+            throw XXIConnectorException.of(INCORRECT_CONNECTION_STRING, INCORRECT_CONNECTION_STRING.getDefaultMessage());
 
         String  pseudoPassword = null;
 

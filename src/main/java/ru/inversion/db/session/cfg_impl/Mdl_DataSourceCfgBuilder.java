@@ -1,6 +1,7 @@
 package ru.inversion.db.session.cfg_impl;
 
 import ru.inversion.db.session.DataSourceCfg;
+import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.db.session.AbstractDataSourceCfgBuilder;
 import ru.inversion.db.session.xxi.XxiConnector;
 import ru.inversion.utils.S;
@@ -9,6 +10,7 @@ import ru.inversion.utils.Tags;
 import java.net.PasswordAuthentication;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.Properties;
 
 public class Mdl_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
@@ -72,6 +74,9 @@ public class Mdl_DataSourceCfgBuilder extends AbstractDataSourceCfgBuilder {
         info.put( "ru.inversion.pseudo_connection", usePseudoConnection ? "true" : false );
 
         try( Connection c = DriverManager.getConnection( connectUrl, info ) ){ }
+        catch (SQLException ex) {
+            throw DatabaseLoginErrors.normalize(ex);
+        }
 
         if(usePseudoConnection) {
 

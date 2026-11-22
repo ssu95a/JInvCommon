@@ -1,5 +1,6 @@
 package ru.inversion.db.session.xxi;
 
+import ru.inversion.db.session.DatabaseLoginErrors;
 import ru.inversion.utils.IExceptionInfo;
 import ru.inversion.utils.S;
 import ru.inversion.utils.dco.IDco;
@@ -24,9 +25,11 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
         ENCRYPTION_ERROR,
         DECRYPTION_ERROR,
         LICENCE_ERROR,
-        INTERNAL_ERROR;
+        INTERNAL_ERROR,
+        INCORRECT_CONNECTION_STRING,
+        PASSWORD_REQUIRED;
 
-        private String defaultMessage( ) {
+        public String getDefaultMessage() {
             switch (this) {
                 case USER_NOT_FOUND:
                      return "User not found";
@@ -42,6 +45,10 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
                      return "Authentication method mismatch";
                 case DB_UNAVAILABLE:
                      return "Database unavailable";
+                case INCORRECT_CONNECTION_STRING:
+                     return "Incorrect connection string";
+                case PASSWORD_REQUIRED:
+                     return "Password is required";
                 case TECHNICAL_BREAK:
                      return "Technical break";
                 case ENCRYPTION_ERROR:
@@ -151,12 +158,7 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
     public static XXIConnectorException fromSql(SQLException ex, Map<String, Object> details) {
 
-        if( ex == null )
-            return new XXIConnectorException( Reason.INTERNAL_ERROR, Origin.LOCAL, "Internal error", null, details );
-
-        Reason rsn = SqlClassifier.classify(ex);
-        String msg = rsn.defaultMessage();
-        return new XXIConnectorException( rsn, Origin.LOCAL, msg, ex, details);
+        return DatabaseLoginErrors.normalize(ex, details);
     }
 
     /** Для совместимости со старым стилем вызова */
@@ -166,81 +168,8 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
     public static void throwOnSqlException( Reason code, SQLException ex ) {
         if (ex == null)
-            throw new XXIConnectorException(code, code.defaultMessage() );
-        throw new XXIConnectorException(code, Origin.LOCAL, code.defaultMessage(), ex, null );
-    }
-
-    /** Классификатор SQLException */
-    private static final class SqlClassifier {
-
-        static Reason classify( SQLException ex ) {
-
-            // Oracle ORA-01017
-            if( ex.getErrorCode() == 1017 )
-                return Reason.AUTH_FAILED;
-
-            String state = ex.getSQLState();
-            String msg   = ex.getMessage();
-
-            if (state != null) {
-                // точные состояния PostgreSQL:
-               switch( state ) {
-                  case "28P21":
-                     return Reason.PASSWORD_EXPIRED;
-                  case "28P25":
-                     return Reason.PASSWORD_CHANGE_REQUIRED;
-                  case "28P22":
-                     return Reason.ACCOUNT_LOCKED;
-                  case "28P01":
-                     return classify28P01(msg);
-                  case "28000":
-                     return Reason.AUTH_FAILED;
-               }
-
-               if( S.in( state, "08001", "08004", "08006", "57P01", "57P03" ) )
-                    return Reason.DB_UNAVAILABLE;
-            }
-
-            return fallbackByMessage(msg);
-        }
-
-        private static Reason classify28P01(String msg) {
-
-            if (msg == null) return Reason.AUTH_FAILED;
-
-            String m = msg.toLowerCase(Locale.ROOT);
-
-            if( m.contains("password expired") || m.contains("password validity") )
-                return Reason.PASSWORD_EXPIRED;
-
-            if( m.contains("password change is required") )
-                return Reason.PASSWORD_CHANGE_REQUIRED;
-
-            if( m.contains("scram-sha-256") || m.contains("md5") )
-                return Reason.AUTH_METHOD_MISMATCH;
-
-            if( m.contains("does not exist") || m.contains("unknown user") || (m.contains("user") && m.contains("not exist")))
-                return Reason.USER_NOT_FOUND;
-
-            return Reason.AUTH_FAILED;
-        }
-
-        private static Reason fallbackByMessage(String msg) {
-            if( msg == null )
-                return Reason.AUTH_FAILED;
-
-            String m = msg.toLowerCase(Locale.ROOT);
-
-            if (m.contains("password expired") || m.contains("password validity")) return Reason.PASSWORD_EXPIRED;
-            if (m.contains("account is locked")) return Reason.ACCOUNT_LOCKED;
-
-            if( m.contains("could not connect") || m.contains("connection refused") || m.contains("timeout")) {
-                return Reason.DB_UNAVAILABLE;
-            }
-
-            return Reason.AUTH_FAILED;
-        }
-
+            throw new XXIConnectorException(code, code.getDefaultMessage() );
+        throw new XXIConnectorException(code, Origin.LOCAL, code.getDefaultMessage(), ex, null );
     }
 
     /** Создание из удаленного сообщения об ошибке */
@@ -260,7 +189,7 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
 
         final Reason reason = RemoteClassifier.classify(errorCode, httpStatus);
         if( S.isNullOrEmpty(message) || reason == Reason.INTERNAL_ERROR)
-            message = reason.defaultMessage();
+            message = reason.getDefaultMessage();
 
         final Map<String, Object> details = new LinkedHashMap<>();
         details.put("httpStatus", httpStatus);
@@ -274,7 +203,7 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
         String safeMessage = message;
 
         if (reason == Reason.INTERNAL_ERROR)
-            safeMessage = reason.defaultMessage();
+            safeMessage = reason.getDefaultMessage();
 
         return new XXIConnectorException( reason, Origin.REMOTE, safeMessage, null, details );
     }

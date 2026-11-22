@@ -16,6 +16,7 @@ import java.util.Properties;
 import java.util.function.BiFunction;
 
 import static ru.inversion.db.session.AbstractDataSourceCfgBuilder.V$SESSION_PROGRAM;
+import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.AUTH_FAILED;
 import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.INTERNAL_ERROR;
 import static ru.inversion.db.session.xxi.XXIConnectorException.Reason.PASSWORD_CHANGE_REQUIRED;
 
@@ -144,7 +145,7 @@ public class XxiConnector {
                 //throw new SQLException("[Xxi-Connector] - " + info.get() );
                throw XXIConnectorException.of( XXIConnectorException.Reason.AUTH_FAILED, info.get(), null, U.toMap("resultCode",resultCode) );
             default:
-               throw XXIConnectorException.of( XXIConnectorException.Reason.AUTH_FAILED, Integer.toString(resultCode), null, U.toMap("resultCode",resultCode) );
+               throw XXIConnectorException.of( INTERNAL_ERROR, Integer.toString(resultCode), null, U.toMap("resultCode",resultCode) );
                // throw new SQLException("[Xxi-Connector] - Unknown return value from 'XXI_LOGON': " + resultCode );
         }
 
@@ -163,17 +164,14 @@ public class XxiConnector {
                     ;//return String.valueOf( realAuthentication.getPassword() );
                 }
                 else
-                    throw new SQLException("[Xxi-Connector] - No PIN - no entry in cABS!" );
+                    throw XXIConnectorException.of(AUTH_FAILED, "No PIN - no entry in cABS");
             }
         }
         catch( SQLException ex ) {
-            // Признак, что была смена пароля
-            // Не можем соединиться т.к. скорее всего был вход через псевдосоединение
-            if( resultCode == 1 ) {
-                throw new SQLException("[Xxi-Connector] - Для сохранения изменений необходимо осуществить повторный вход в систему!" );
-            }
-
-            throw ex;
+            XXIConnectorException failure = XXIConnectorException.fromSql(ex);
+            if (resultCode == 1 && failure.getReason() == AUTH_FAILED)
+                throw XXIConnectorException.of(PASSWORD_CHANGE_REQUIRED, PASSWORD_CHANGE_REQUIRED.getDefaultMessage(), ex);
+            throw failure;
         }
 
         return realAuthentication.get();
@@ -182,26 +180,7 @@ public class XxiConnector {
     /** */
     static void check4XxiUpgrade( Connection c, Properties p ) throws SQLException {
 
-        if( "true".equals( p.getProperty("ru.inversion.check_xxi_upgrade_disable", "false") ) )
-            return;
-
-        boolean enableUpgrade = false;
-
-        try( final PreparedStatement ps = c.prepareStatement(
-                "select OBJECT_ID from all_objects where owner = 'PUBLIC' and object_name = 'XXI_UPGRADE' and OBJECT_TYPE = 'SYNONYM'") ) {
-
-            try( final ResultSet rs = ps.executeQuery() ) {
-                  enableUpgrade = rs.next();
-            }
-        }
-        catch( Throwable th ) {
-            System.err.println("Error on check4XxiUpgrade:");
-            th.printStackTrace();
-        }
-
-        if( enableUpgrade ) {
-            throw new SQLException("[Xxi-Connector] - Технический перерыв. В ЦАБС ведутся системные работы!");
-        }
+        ConnectorBase.check4XxiUpgrade(c, p);
     }
 
 
@@ -281,15 +260,11 @@ public class XxiConnector {
                     break;
                     case 1:
                         throw XXIConnectorException.of( PASSWORD_CHANGE_REQUIRED, "Password change required", null, U.toMap("login", auth.getUserName(), "op", "serverSideLogin"));
-                    default:
-                        throw new SQLException("Error value resultCode = " + resultCode + " from 'XXI.XXI_LOGON.XXI_LOGON2'");
-                    /*
                     case -1:
                     case -20566:
-                    {
-                        resultCode = -1;
-                    }
-                     */
+                        throw XXIConnectorException.of(AUTH_FAILED, out_c, null, U.toMap("resultCode", resultCode));
+                    default:
+                        throw new SQLException("Error value resultCode = " + resultCode + " from 'XXI.XXI_LOGON.XXI_LOGON2'");
                 }//end switch
             }
 
@@ -415,7 +390,7 @@ public class XxiConnector {
                                 String newPassword = (String)resultHandler.apply( connection, 1 );
 
                                 if( newPassword == null || newPassword.isEmpty() )
-                                    throw new SQLException("[Xxi-Connector] - To log on you must to change the password.");
+                                    throw XXIConnectorException.of(PASSWORD_CHANGE_REQUIRED, PASSWORD_CHANGE_REQUIRED.getDefaultMessage());
 
 //                                info[0] = newPassword;
 
@@ -431,7 +406,7 @@ public class XxiConnector {
                                 resultCode = 1; // признак, что было выполнено смена пароля
                             }
                             else
-                                throw new SQLException("[Xxi-Connector]- To log on you must to change the password.");
+                                throw XXIConnectorException.of(PASSWORD_CHANGE_REQUIRED, PASSWORD_CHANGE_REQUIRED.getDefaultMessage());
 
                         }
                         break;
@@ -457,14 +432,10 @@ public class XxiConnector {
             return resultCode;
         }
         catch( SQLException ex ) {
+            if (!loginXxiOk && ex.getErrorCode() == 1017)
+                ex = new SQLException("[Xxi-Connector] - Error on XXI_LOGON login", ex.getSQLState(), ex.getErrorCode(), ex);
 
-            if( !loginXxiOk && ex.getErrorCode() == 1017 )
-                throw new SQLException( "[Xxi-Connector] - Error on XXI_LOGON login", ex.getSQLState(), ex.getErrorCode() );
-
-            throw ex;
-        }
-        catch( Throwable th ) {
-            throw new SQLException( "[Zxi-Connector] - error on connect to DB", th );
+            throw XXIConnectorException.fromSql(ex);
         }
     }
 
