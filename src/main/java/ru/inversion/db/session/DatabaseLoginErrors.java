@@ -81,6 +81,8 @@ public final class DatabaseLoginErrors {
                 return AUTH_METHOD_MISMATCH;
             case CONNECTION_FAILURE:
                 return DB_UNAVAILABLE;
+            case DATABASE_NOT_FOUND:
+                return DATABASE_NOT_FOUND;
             case INVALID_CONNECTION_STRING:
                 return INCORRECT_CONNECTION_STRING;
             case CONNECTION_ALIAS_UNRESOLVED:

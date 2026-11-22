@@ -1,6 +1,8 @@
 package ru.inversion.db.session.xxi;
 
 import org.junit.Test;
+import org.postgresql.util.PSQLException;
+import org.postgresql.util.ServerErrorMessage;
 import ru.inversion.db.SqlExceptionInfo;
 import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.db.session.DataSourceCfg;
@@ -120,8 +122,36 @@ public class DatabaseLoginErrorsTest {
 
     @Test
     public void classifiesFailureDuringSessionInitialization() throws Exception {
+        XXIConnectorException failure = rejectSessionInitialization(new SQLException("invalid password", "28P01"));
+        assertEquals(AUTH_FAILED, failure.getReason());
+    }
+
+    @Test
+    public void reportsMissingPostgresDatabaseDuringLogin() throws Exception {
+        SQLException rejected = new PSQLException(new ServerErrorMessage(
+                "SFATAL\000C3D000\000Mdatabase \"pgdev1\" does not exist\000"));
+        XXIConnectorException direct = rejectSessionInitialization(rejected);
+
+        String url = "jdbc:login-errors-missing-database";
+        Driver driver = new TestDriver(url, () -> { throw rejected; });
+        DriverManager.registerDriver(driver);
+        try {
+            XXIConnectorException pseudo = assertThrows(XXIConnectorException.class,
+                    () -> PGPseudoConnector.login(url, "user", "password", new Properties(), null));
+            assertEquals(DATABASE_NOT_FOUND, direct.getReason());
+            assertEquals(direct.getReason(), pseudo.getReason());
+            assertEquals("Database does not exist", direct.getMessage());
+            assertEquals(direct.getMessage(), pseudo.getMessage());
+            assertEquals("3D000", pseudo.sqlState());
+            assertSame(rejected, pseudo.getCause());
+        }
+        finally {
+            DriverManager.deregisterDriver(driver);
+        }
+    }
+
+    private static XXIConnectorException rejectSessionInitialization(SQLException rejected) throws Exception {
         String url = "jdbc:login-errors-verification-test";
-        SQLException rejected = new SQLException("invalid password", "28P01");
         Driver driver = new TestDriver(url, () -> { throw rejected; });
         DriverManager.registerDriver(driver);
         try {
@@ -132,8 +162,8 @@ public class DatabaseLoginErrorsTest {
 
             XXIConnectorException failure = assertThrows(XXIConnectorException.class,
                     () -> SessionEnvironment.initialize(config));
-            assertEquals(AUTH_FAILED, failure.getReason());
             assertSame(rejected, failure.getCause());
+            return failure;
         }
         finally {
             DriverManager.deregisterDriver(driver);

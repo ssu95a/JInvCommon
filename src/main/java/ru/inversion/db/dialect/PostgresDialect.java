@@ -59,6 +59,8 @@ final class PostgresDialect extends BaseDialect {
             return null;
 
         switch (state) {
+            case "3D000":
+                return DATABASE_NOT_FOUND;
             // Дополнительные коды PostgreSQL-входа в ЦАБС.
             case "28P21":
                 return PASSWORD_EXPIRED;

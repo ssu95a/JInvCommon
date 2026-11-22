@@ -32,7 +32,8 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
         INCORRECT_CONNECTION_STRING,
         PASSWORD_REQUIRED,
         TNS_ALIAS_UNRESOLVED,
-        TNS_CONFIGURATION_ERROR;
+        TNS_CONFIGURATION_ERROR,
+        DATABASE_NOT_FOUND;
 
         public String getDefaultMessage() {
             switch (this) {
@@ -50,6 +51,8 @@ public class XXIConnectorException extends RuntimeException implements IExceptio
                      return "Authentication method mismatch";
                 case DB_UNAVAILABLE:
                      return "Database unavailable";
+                case DATABASE_NOT_FOUND:
+                     return "Database does not exist";
                 case INCORRECT_CONNECTION_STRING:
                      return "Incorrect connection string";
                 case TNS_ALIAS_UNRESOLVED:

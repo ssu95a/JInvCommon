@@ -23,7 +23,8 @@ public final class SqlExceptionInfo implements Serializable {
         INVALID_CONNECTION_STRING,
         UNKNOWN,
         CONNECTION_ALIAS_UNRESOLVED,
-        NAMING_CONFIGURATION_ERROR
+        NAMING_CONFIGURATION_ERROR,
+        DATABASE_NOT_FOUND
     }
 
     private final DialectId dialect;
