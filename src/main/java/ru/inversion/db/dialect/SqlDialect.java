@@ -7,9 +7,7 @@ import ru.inversion.meta.impl.ArrayMetaData;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.tc.TaskContext;
 
-import java.sql.Array;
-import java.sql.ResultSetMetaData;
-import java.sql.Struct;
+import java.sql.*;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -134,5 +132,10 @@ public interface SqlDialect {
      */
     default SqlExceptionInfo decodeException(Throwable error) {
         return SqlExceptionDecoder.decodeCommon(type(), error);
+    }
+
+    // SqlDialect.java — метод интерфейса
+    default boolean requiresTransactionForAnonymousBlock(Connection connection) throws SQLException {
+        return false;
     }
 }

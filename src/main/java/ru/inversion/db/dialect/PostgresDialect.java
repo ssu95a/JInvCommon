@@ -1,5 +1,7 @@
 package ru.inversion.db.dialect;
 
+import org.postgresql.PGConnection;
+import org.postgresql.jdbc.PreferQueryMode;
 import org.postgresql.util.PSQLException;
 import org.postgresql.util.ServerErrorMessage;
 import ru.inversion.db.JInvDbException;
@@ -541,4 +543,9 @@ final class PostgresDialect extends BaseDialect {
         }
     }
 
+    // PostgresDialect.java — реализация
+    @Override
+    public boolean requiresTransactionForAnonymousBlock(Connection connection) throws SQLException {
+        return connection.unwrap(PGConnection.class).getPreferQueryMode() == PreferQueryMode.SIMPLE;
+    }
 }

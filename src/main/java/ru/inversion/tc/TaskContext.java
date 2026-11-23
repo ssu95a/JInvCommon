@@ -70,7 +70,7 @@ public class TaskContext implements AutoCloseable {
             logger.debug( "TaskContext successfully created. session ID: {}", sessionId );
         }
 		  catch( Throwable ex ) {
-            
+
             try {
 
                 if( c != null && !c.isClosed() )
@@ -79,7 +79,7 @@ public class TaskContext implements AutoCloseable {
 
             catch( SQLException ignored ) {
             }
-            
+
             throw new RuntimeException( Tags.PRODUCT_LABEL + "Error on create TaskContext", ex );
         }
     }
@@ -140,8 +140,8 @@ public class TaskContext implements AutoCloseable {
             throw new RuntimeException( Tags.PRODUCT_LABEL + "Error getting session ID", th );
         }
     }
-    
-    /** 
+
+    /**
      */
     private void checkForClose( ) {
 
@@ -160,7 +160,7 @@ public class TaskContext implements AutoCloseable {
         checkForClose( );
         return connection;
 	}
-        
+
 
     /** */
     @Override
@@ -213,7 +213,7 @@ public class TaskContext implements AutoCloseable {
 
     /** */
     public Long getSessionID( ) { return sessionId; }
-    
+
     /** */
     public String getUserName( ) {
         try {
@@ -222,7 +222,7 @@ public class TaskContext implements AutoCloseable {
             throw new RuntimeException( Tags.PRODUCT_LABEL + "Error getting UserName session", ex );
         }
     }
-    
+
     /** */
     public String getConnectionString( ConnectionStringFormatEnum format ) {
 
@@ -233,17 +233,17 @@ public class TaskContext implements AutoCloseable {
                         getConnection().getMetaData().getURL()
                         :
                         SessionEnvironment.getInstance().getConnectionProvider().getConnectionString(format);
-            
+
             if( format == ConnectionStringFormatEnum.SQL_INFO )
                 s += ( " : " + getSessionID() );
 
             return s;
-            
+
         } catch (SQLException ex) {
             throw new RuntimeException( Tags.PRODUCT_LABEL + "Error getting connectionString session", ex );
         }
     }
-    
+
     /** */
     public void commit( ) {
         try {
@@ -297,14 +297,18 @@ public class TaskContext implements AutoCloseable {
     }
 
     public static final class AutoCommitScope implements AutoCloseable {
+
         private final Connection connection;
         private final boolean previousAutoCommit;
         private boolean restore;
 
-        private AutoCommitScope(Connection connection, boolean newAutoCommit) throws SQLException {
-            this.connection = connection;
+        private AutoCommitScope(Connection connection, boolean newAutoCommit) throws SQLException
+        {
+            this.connection         = connection;
             this.previousAutoCommit = connection.getAutoCommit();
-            if (previousAutoCommit != newAutoCommit) {
+
+            if( previousAutoCommit != newAutoCommit )
+            {
                 connection.setAutoCommit(newAutoCommit);
                 restore = true;
             }
@@ -316,7 +320,7 @@ public class TaskContext implements AutoCloseable {
 
         @Override
         public void close() throws SQLException {
-            if (restore) {
+            if( restore ) {
                 connection.setAutoCommit(previousAutoCommit);
                 restore = false;
             }

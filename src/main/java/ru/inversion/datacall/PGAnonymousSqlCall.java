@@ -1,7 +1,5 @@
 package ru.inversion.datacall;
 
-import org.postgresql.PGConnection;
-import org.postgresql.jdbc.PreferQueryMode;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.parser.lexer.SqlScanner.Token;
 import ru.inversion.tc.TaskContext;
@@ -28,15 +26,12 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
-import java.time.OffsetDateTime;
-import java.time.OffsetTime;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.StringJoiner;
 import java.util.TreeMap;
@@ -472,12 +467,13 @@ public class PGAnonymousSqlCall implements IDataCall {
         boolean autoCommit = connection.getAutoCommit();
         boolean switchAutoCommit = requiresAutoCommit && !autoCommit;
 
-        if ((autoCommit || switchAutoCommit)
-                && connection.unwrap(PGConnection.class).getPreferQueryMode() == PreferQueryMode.SIMPLE)
-            throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous calls in simple query mode require a transaction");
+        if( (autoCommit || switchAutoCommit) &&  tc.dialect().requiresTransactionForAnonymousBlock(connection) )
+             throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous calls in simple query mode require a transaction");
 
-        try( TaskContext.AutoCommitScope ignored = switchAutoCommit ? tc.autoCommitScope(true) : null;
-             PreparedStatement statement = connection.prepareStatement(sql) )
+        try (
+            TaskContext.AutoCommitScope ignored = switchAutoCommit ? tc.autoCommitScope(true) : null;
+            PreparedStatement statement = connection.prepareStatement(sql)
+        )
         {
             statement.setString(1, input);
 
@@ -488,27 +484,34 @@ public class PGAnonymousSqlCall implements IDataCall {
 
             while (hasResult || statement.getUpdateCount() != -1)
             {
-                if (hasResult) {
-                    try (ResultSet rows = statement.getResultSet()) {
+                if( hasResult )
+                {
+                    try (ResultSet rows = statement.getResultSet())
+                    {
                         if (++resultSets == 2 && rows.next())
                             result = rows.getString(1);
                     }
                 }
+
                 hasResult = statement.getMoreResults();
+
             }
             return result;
         }
     }
 
     /** */
-    private void applyOutputs(String result, Parameter[] bound) {
+    private void applyOutputs( String result, Parameter[] bound )
+    {
         if( outputCount == 0)
             return;
+
         if( result == null)
             throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous block returned no OUT values");
 
         JsonArray json;
-        try (JsonReader reader = JSON.createReader(new StringReader(result)))
+
+        try( JsonReader reader = JSON.createReader(new StringReader(result)) )
         {
             json = reader.readArray();
         }
@@ -522,7 +525,7 @@ public class PGAnonymousSqlCall implements IDataCall {
         int index = 0;
         for (Parameter parameter : bound)
         {
-            if (parameter.metadata.isOut()) {
+            if( parameter.metadata.isOut() ) {
                 converted[index] = fromJson(json.get(index), parameter.metadata.getParameterType());
                 index++;
             }
@@ -530,22 +533,23 @@ public class PGAnonymousSqlCall implements IDataCall {
 
         index = 0;
 
-        for (Parameter parameter : bound)
+        for( Parameter parameter : bound )
         {
-            if (parameter.metadata.isOut())
+            if( parameter.metadata.isOut() )
                 parameter.value = converted[index++];
         }
+
         index = 0;
 
-        for (Parameter parameter : bound)
+        for( Parameter parameter : bound )
         {
-            if (!parameter.metadata.isOut())
+            if( !parameter.metadata.isOut() )
                 continue;
 
             Comparable<?> id = parameter.metadata.getIdentifier();
             Object value = converted[index++];
 
-            if (outputListener != null)
+            if( outputListener != null)
                 outputListener.accept(id, value);
 
             if( parameter.outputListener != null )
@@ -644,13 +648,16 @@ public class PGAnonymousSqlCall implements IDataCall {
         } catch (Error error) {
             failure = error;
             throw error;
-        } finally {
+        }
+        finally {
             try {
-                listeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false, failure == null));
+                if( fireListeners )
+                    listeners.fire (new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false, failure == null));
             } catch (RuntimeException | Error listenerFailure) {
-                if (failure == null)
+                if( failure == null )
                     throw listenerFailure;
-                if (listenerFailure != failure)
+
+                if( listenerFailure != failure )
                     failure.addSuppressed(listenerFailure);
             }
         }
