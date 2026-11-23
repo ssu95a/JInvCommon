@@ -360,9 +360,9 @@ public class SQLCallBuilder {
         return build(callStatement, null);
     }
 
+    /** */
     private IDataCall build(CallStatement callStatement, UnaryOperator<ParameterMetadata<?>> prepare)
     {
-        /** */
         if( !runByDbmsSql )
         {
 
@@ -380,7 +380,7 @@ public class SQLCallBuilder {
             );
         }
 
-        return new DbmsSqlDataCall(tc, callStatement, callBackParameters, name);
+        return new DbmsSqlDataCall( tc, callStatement, callBackParameters, name );
     }
 
     /** */
@@ -614,7 +614,8 @@ public class SQLCallBuilder {
         }
 
         @Override
-        public void close() {
+        public void close()
+        {
             if( work == null )
                 return;
 

@@ -1,9 +1,6 @@
 package ru.inversion.db.expr;
 
-import ru.inversion.datacall.CallException;
-import ru.inversion.datacall.IDataCall;
-import ru.inversion.datacall.ParameterMetadataBuilder;
-import ru.inversion.datacall.SQLCallBuilder;
+import ru.inversion.datacall.*;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.ParametersByName;
 import ru.inversion.db.work.DBParametersWork;
@@ -30,6 +27,7 @@ import java.time.OffsetDateTime;
 import java.time.OffsetTime;
 import java.util.*;
 import java.util.function.BiConsumer;
+import java.util.function.UnaryOperator;
 
 /**
  *
@@ -485,9 +483,9 @@ import java.util.function.BiConsumer;
                 .callBackParameters(parameters)
                 .url(url)
                 .name(CUSTOM_FPZ_EXPR)
-                .runByDbmsSql( tc.isOracle() );
+            .runByDbmsSql( tc.isOracle() );
 
-            if (tc.isPostgreSql())
+            if( tc.isPostgreSql() )
                 executePostgresText(builder, parameters);
             else
                 builder.build().execute();
@@ -497,41 +495,52 @@ import java.util.function.BiConsumer;
         }
     }
 
-    /** Для текстового блока PostgreSQL все bind-параметры, кроме o1, работают как INOUT. */
-    private static void executePostgresText(SQLCallBuilder builder, IParameters parameters) {
-        Map<Comparable<?>, Object> bindings = new LinkedHashMap<>();
-        try (IDataCall call = builder.buildWithAnonymousPostgresParameters(parameter -> {
-            String name = parameter.getName();
-            boolean outputOnly = "o1".equalsIgnoreCase(name);
-            Object value = null;
-            if (!outputOnly && parameters != null)
-                value = parameter.isIndexed() ? parameters.getParameter(parameter.getPosition()) : parameters.getParameter(name);
-            bindings.put(parameter.getIdentifier(), value);
 
-            // Исходный текст не объявляет SQL-типы bind-параметров. Для NULL используем VARCHAR.
-            int sqlType = value == null ? Types.VARCHAR : Jt2St.get(value.getClass(), Types.BOOLEAN);
-            ParameterMetadataBuilder metadata = new ParameterMetadataBuilder()
-                    .mode(outputOnly ? ParameterMode.OUT : ParameterMode.INOUT)
-                    .sqlType(sqlType)
-                    .javaType(Object.class);
-            if (parameter.isIndexed())
-                metadata.position(parameter.getPosition());
-            else
-                metadata.name(name);
-            return metadata.build();
-        })) {
+    /** Для текстового блока PostgreSQL все bind-параметры, кроме o1, работают как INOUT. */
+    private static void executePostgresText( SQLCallBuilder builder, IParameters parameters) {
+
+        final Map<Comparable<?>, Object> bindings = new LinkedHashMap<>();
+
+        try( IDataCall call = builder.buildWithAnonymousPostgresParameters (
+             new UnaryOperator<ParameterMetadata<?>>() {
+                @Override
+                public ParameterMetadata<?> apply( ParameterMetadata<?> parameter)
+                {
+                    final String name = parameter.getName();
+                    final boolean outputOnly = "o1".equalsIgnoreCase(name);
+
+                    Object value = null;
+
+                    if( !outputOnly && parameters != null )
+                        value = parameter.isIndexed() ? parameters.getParameter( parameter.getPosition()) : parameters.getParameter(name);
+
+                    bindings.put( parameter.getIdentifier(), TypeConverter.convert(value, String.class ) );
+
+                    ParameterMetadataBuilder metadata = new ParameterMetadataBuilder()
+                        .mode( outputOnly ? ParameterMode.OUT : ParameterMode.INOUT )
+                            .sqlType(Types.VARCHAR);
+
+                    if (parameter.isIndexed())
+                        metadata.position( parameter.getPosition() );
+                    else
+                        metadata.name(name);
+
+                    return metadata.build();
+               }
+            })
+        )
+        {
             bindings.forEach((id, value) -> {
                 if (id instanceof Integer)
                     call.setParameter((Integer)id, value);
                 else
                     call.setParameter((String)id, value);
             });
+
             call.execute();
 
-            if (parameters != null && parameters != IParameters.EMPTY) {
-                // Сначала преобразуем все OUT, затем записываем их во внешний набор параметров.
-                bindings.replaceAll((id, input) -> restorePostgresTextType(input,
-                        id instanceof Integer ? call.getParameter((Integer)id) : call.getParameter((String)id)));
+            if (parameters != null && parameters != IParameters.EMPTY )
+            {
                 bindings.forEach((id, value) -> {
                     if (id instanceof Integer)
                         parameters.setParameter((Integer)id, value);
@@ -540,39 +549,6 @@ import java.util.function.BiConsumer;
                 });
             }
         }
-    }
-
-    /** Возвращает INOUT в Java-типе входного значения. */
-    private static Object restorePostgresTextType(Object input, Object output) {
-        if (input == null || output == null || input.getClass() == output.getClass())
-            return output;
-        if (input instanceof Byte)
-            return ((BigDecimal)output).byteValueExact();
-        if (input instanceof Short)
-            return ((BigDecimal)output).shortValueExact();
-        if (input instanceof Float)
-            return Float.valueOf(output.toString());
-        if (input instanceof Double)
-            return Double.valueOf(output.toString());
-        if (input instanceof LocalDate)
-            return LocalDate.parse((String)output);
-        if (input instanceof LocalDateTime)
-            return LocalDateTime.parse((String)output);
-        if (input instanceof LocalTime)
-            return LocalTime.parse((String)output);
-        if (input instanceof OffsetDateTime)
-            return OffsetDateTime.parse((String)output);
-        if (input instanceof OffsetTime)
-            return OffsetTime.parse((String)output);
-        if (input instanceof UUID)
-            return UUID.fromString((String)output);
-        if (input instanceof Timestamp)
-            return Timestamp.valueOf(LocalDateTime.parse((String)output));
-        if (input instanceof Time)
-            return Time.valueOf(LocalTime.parse((String)output));
-        if (input instanceof Date)
-            return TypeConverter.convert(java.sql.Date.valueOf((String)output), input.getClass());
-        return TypeConverter.convert(output, input.getClass());
     }
 
 
