@@ -29,9 +29,6 @@ public class CallStatement {
     /** Метаданные параметров */
     final private Map<Comparable<?>, ParameterMetadata<?>> parametersMetaData;
 
-    /** */
-    //private final List<Comparable<?>> outParameterOrder;
-
     /** Флаг удалять ли добавочную информацию из текста
      *  - комментарии в коде
      *  - комментарии вокруг параметров
@@ -46,40 +43,44 @@ public class CallStatement {
 
     /** */
     CallStatement(CallDescriptor descriptor,
-                  Map<Comparable<?>, ParameterMetadata<?>> parametersMetaData, List<Comparable<?>> outParameterOrder, boolean removeAdditionalInfo, boolean replaceConstants, boolean autoCommit ) {
+                  Map<Comparable<?>, ParameterMetadata<?>> parametersMetaData, List<Comparable<?>> outParameterOrder, boolean removeAdditionalInfo, boolean replaceConstants, boolean autoCommit )
+    {
         this.descriptor           = descriptor;
-        //this.outParameterOrder    = outParameterOrder;
         this.removeAdditionalInfo = removeAdditionalInfo;
         this.replaceConstants     = replaceConstants;
+
         if( parametersMetaData == null || parametersMetaData.isEmpty() )
             this.parametersMetaData = Collections.emptyMap();
         else {
-            final Map<Comparable<?>,ParameterMetadata<?>> copy =
-                    new TreeMap<>((java.util.Comparator)ParametersValues.ParamIdComparator);
+            final Map<Comparable<?>,ParameterMetadata<?>> copy = new TreeMap<>((java.util.Comparator)ParametersValues.ParamIdComparator);
             copy.putAll(parametersMetaData);
             this.parametersMetaData = Collections.unmodifiableMap(copy);
         }
-        this.autoCommit           = autoCommit;
 
-//        isPrepared = isAnonymousBlock() && getLang() == LangEnum.SQL;// && !hasOutParameters();
+        this.autoCommit           = autoCommit;
     }
 
+    /** */
     public boolean isPrepared() {
         return getLang() == LangEnum.SQL;
     }
+
     /** */
     public LangEnum getLang() {
         return descriptor.getLang( );
     }
+
     /** */
     public boolean isAnonymousBlock() {
         return descriptor.isAnonymousBlock();
     }
 
+    /** */
     String sourceSql() {
         return descriptor.sourceSql();
     }
 
+    /** */
     List<SqlScanner.Token> sqlTokens() {
         return descriptor.sqlTokens();
     }
@@ -106,16 +107,21 @@ public class CallStatement {
         }
     }
 
-    private CallPrepareContext prepareContext() {
+    /** */
+    private CallPrepareContext prepareContext()
+    {
         return new CallPrepareContext(sourceSql(), sqlTokens(), removeAdditionalInfo);
     }
 
-    String rewriteBinds(BiConsumer<Comparable<?>, CallPrepareContext> rewrite) {
+    /** */
+    String rewriteBinds( BiConsumer<Comparable<?>, CallPrepareContext> rewrite)
+    {
         return prepareContext().rewriteBinds(rewrite);
     }
 
     /** Передаёт bind-параметры и параметризованные литералы по их JDBC-позициям. */
-    String prepareJdbcSql( BiConsumer<Integer, Comparable<?>> onBind, BiConsumer<Integer, Object> onLiteral ) {
+    String prepareJdbcSql( BiConsumer<Integer, Comparable<?>> onBind, BiConsumer<Integer, Object> onLiteral )
+    {
         return prepareContext().prepareJdbc(replaceConstants, false, onBind, onLiteral);
     }
 
@@ -138,7 +144,7 @@ public class CallStatement {
     }
 
     /** */
-    public ParameterMetadata<?> getParameter( Comparable parameter ) {
+    public ParameterMetadata<?> getParameter( Comparable<?> parameter ) {
         return parametersMetaData == null ? null : parametersMetaData.get(parameter);
     }
 

@@ -1,6 +1,7 @@
 package ru.inversion.datacall;
 
 import ru.inversion.parser.statement.LangEnum;
+import ru.inversion.utils.Checks;
 import ru.inversion.utils.S;
 import ru.inversion.utils.Tags;
 
@@ -142,24 +143,24 @@ public class CallBuilder {
 
         try {
 
-            if( S.isNullOrEmpty(sql) )
-                throw new IllegalStateException( "'sql' is null or empty");
+            Checks.Require.text( sql, "sql" );
 
             CallDescriptor descriptor = CallDescriptor.create( sql, lang );
 
             descriptor.forEachParameterId( id -> {
+
                 if( parameters().get( id ) != null )
                     return;
 
-                if( id instanceof String ) {
+                if( id instanceof String )
+                {
                     String name = (String)id;
                     ParameterMode mode = parameterModeStrategy.apply( name );
-                    putParameter( new RawParameterMetadata( name, mode == OUT ? Types.VARCHAR : null,
-                                                           null, mode, null, false, null, true, false ) );
+                    putParameter( new RawParameterMetadata( name, mode == OUT ? Types.VARCHAR : null, null, mode, null, false, null, true, false ) );
                 }
-                else {
-                    putParameter( new RawParameterMetadata( (Integer)id, null, null, ParameterMode.IN,
-                                                           null, false, null, true, false ) );
+                else
+                {
+                    putParameter( new RawParameterMetadata( (Integer)id, null, null, ParameterMode.IN, null, false, null, true, false ) );
                 }
             } );
 

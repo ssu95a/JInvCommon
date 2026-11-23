@@ -1,6 +1,7 @@
 package ru.inversion.db;
 
 import ru.inversion.db.dialect.SqlDialect.DialectId;
+import ru.inversion.utils.Checks;
 
 import java.io.Serializable;
 import java.sql.SQLException;
@@ -35,14 +36,19 @@ public final class SqlExceptionInfo implements Serializable {
     private final String dbObjectName;
 
     private SqlExceptionInfo(DialectId dialect, Kind kind, SQLException matched, String dbObjectName) {
-        this.dialect = dialect;
-        this.kind = Objects.requireNonNull(kind, "kind");
-        this.sqlState = matched.getSQLState();
-        this.vendorCode = matched.getErrorCode();
-        this.message = matched.getMessage();
+
+        this.dialect   = dialect;
+
+        this.kind      = Checks.Require.object(kind, "kind");
+
+        this.sqlState  = matched.getSQLState();
+        this.vendorCode= matched.getErrorCode();
+        this.message   = matched.getMessage();
+
         this.dbObjectName = dbObjectName;
     }
 
+    /** */
     public static SqlExceptionInfo of(DialectId dialect, Kind kind, SQLException matched, String dbObjectName) {
         return new SqlExceptionInfo(dialect, kind, matched, dbObjectName);
     }

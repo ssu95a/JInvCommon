@@ -4,7 +4,7 @@ import java.util.EventObject;
 
 /**
  * События связанные с объектом DataCall
- * */
+ */
 public class DataCallEvent extends EventObject {
 
     public enum Type {
@@ -46,12 +46,14 @@ public class DataCallEvent extends EventObject {
 
     /**
      * @return true, если этапы execute завершились без ошибки (это не означает commit);
-     *         false после ошибки; null для событий без подтверждённого результата,
-     *         включая старые реализации IDataCall.
+     *         false после ошибки;
+     *         null для событий без подтверждённого результата, включая старые реализации IDataCall.
      */
     public Boolean getExecutionSuccess() {
         return executionSuccess;
     }
+
+
     /**
      * @return тип события
      *
@@ -63,7 +65,7 @@ public class DataCallEvent extends EventObject {
 
     /**
      * @return
-     *      Признак что событие сформировано до действия
+     *      Признак, что событие сформировано до действия
      */
     public boolean isBefore() {
         return before;
@@ -71,7 +73,7 @@ public class DataCallEvent extends EventObject {
 
     /**
      * @return
-     *      Признак что событие сформировано после действия
+     *      Признак, что событие сформировано после действия
      */
     public boolean isAfter() {
         return !before;

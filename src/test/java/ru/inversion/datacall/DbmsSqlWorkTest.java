@@ -260,7 +260,7 @@ class DbmsSqlWorkTest {
         FakeLauncher() { super(null, null, null, true); }
 
         @Override
-        public <T> CallWork set(Comparable parameter, T value) {
+        public <T> CallWork set(Comparable<?> parameter, T value) {
             bound.put(parameter.toString(), value);
             return this;
         }
@@ -275,7 +275,7 @@ class DbmsSqlWorkTest {
 
         @Override
         @SuppressWarnings("unchecked")
-        public <T> T get(Comparable parameter) {
+        public <T> T get(Comparable<?> parameter) {
             switch( parameter.toString() ) {
                 case "outs": return (T)outs;
                 case "ret": return (T)resultCode;

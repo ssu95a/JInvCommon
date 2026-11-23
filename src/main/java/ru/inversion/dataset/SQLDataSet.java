@@ -825,22 +825,10 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /**
     * Canonical SELECT builder hook.
-    *
-    * The default implementation delegates to the former protected hook so
-    * subclasses overriding createNextSelectBuilder(...) keep working.
     */
    protected DataSetSelectBuilder createDataSetSelectBuilder( boolean ignoreFilters ) {
-      return createNextSelectBuilder(ignoreFilters);
-   }
-
-   /**
-    * @deprecated compatibility hook; override createDataSetSelectBuilder(...)
-    * in new code.
-    */
-   @Deprecated
-   protected NextSelectBuilder createNextSelectBuilder( boolean ignoreFilters ) {
       SqlDialect dialect = getTaskContextForUse().dialect();
-      NextSelectBuilder builder = new NextSelectBuilder(internalGetSQL(), dialect);
+       DataSetSelectBuilder builder = new DataSetSelectBuilder(internalGetSQL(), dialect);
       builder.queryAlias(getQueryAlias());
       builder.optimizerHint(getOptimizerHint());
       addPredicates(builder, ignoreFilters);
@@ -874,10 +862,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /**
     * Подготовить PreparedSql обычного data-query.
-    *
-    * Default path uses DataSetSelectBuilder. Method remains protected for
-    * legacy subclasses; an override may return its own PreparedSql without
-    * creating preparedSelectBuilder.
     */
    protected PreparedSql prepareDataQuery() throws DataSetException {
       DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
@@ -965,11 +949,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /**
     * Execute the current data-query through the resolved-value JDBC boundary.
-    *
-    * preparedDataQuery == null is reserved for compatibility with an external
-    * ISQLDataReader installed directly by a subclass. Such a reader has no
-    * PreparedSql owned by SQLDataSet, so only the legacy IParameters entry
-    * point is available.
     */
    private void executePreparedDataQuery() throws DataSetException {
 
@@ -980,13 +959,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       List<Object> jdbcValues;
 
-      /*
-       * Standard path: preserve ISQLExpression fallback resolution only when
-       * the builder is the owner of this exact PreparedSql plan.
-       *
-       * A legacy prepareDataQuery() override may return another PreparedSql;
-       * in that case use the plan itself with the DataSet parameter space.
-       */
       if( preparedSelectBuilder != null
               && preparedSelectBuilder.prepare() == preparedDataQuery )
          jdbcValues = preparedSelectBuilder.jdbcValues(mainSqlParameters);

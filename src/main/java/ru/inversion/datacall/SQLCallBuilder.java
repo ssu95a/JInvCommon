@@ -165,7 +165,7 @@ public class SQLCallBuilder {
 
     /** */
     private String cacheKey( String base ) {
-        SqlDialect d = Objects.requireNonNull( tc.dialect(), "'tc.dialect()' is null");
+        SqlDialect d = Checks.Require.object( tc.dialect(), "'tc.dialect()' is null");
         return base + "::" + d.type().name();
     }
 
@@ -214,10 +214,7 @@ public class SQLCallBuilder {
             if( st == null )
                 throw new IllegalStateException(Tags.PRODUCT_LABEL + "SQL выражение '" + name + "' не найдено в " + runClass.toString() );
 
-            return new SQLDataCall (
-                st.createCallWork( tc, this.callBackParameters, closeAfterExecute ),
-                name
-            );
+            return new SQLDataCall( st.createCallWork( tc, this.callBackParameters, closeAfterExecute ), name );
 
         } catch( Throwable th ) {
             throw new CallException( Tags.PRODUCT_LABEL + "Error on create CallStatement by class: " + S.nvl( U.callIfNotNull( runClass, Class::getName ) ), th );
@@ -353,14 +350,14 @@ public class SQLCallBuilder {
     private IDataCall build( CallStatement callStatement )
     {
         /** */
-        if( !runByDbmsSql ) {
+        if( !runByDbmsSql )
+        {
 
-            if( tc.dialect().type() == SqlDialect.DialectId.POSTGRES
-                    && U.in( callStatement.getLang(), PL_pgSQL, PL )
-                    && callStatement.isAnonymousBlock() ) {
-                if( Boolean.parseBoolean(System.getProperty("ru.inversion.datacall.pg_anonymous_direct")) )
-                    return new PGAnonymousSqlCall( tc, callStatement, callBackParameters, name );
-                return new JsonSqlCall( tc, callStatement, callBackParameters, name );
+            if( tc.dialect().type() == SqlDialect.DialectId.POSTGRES && U.in( callStatement.getLang(), PL_pgSQL, PL ) && callStatement.isAnonymousBlock() )
+            {
+                //if( Boolean.parseBoolean(System.getProperty("ru.inversion.datacall.pg_anonymous_direct")) )
+                return new PGAnonymousSqlCall( tc, callStatement, callBackParameters, name );
+                //return new JsonSqlCall( tc, callStatement, callBackParameters, name );
             }
 
             return new SQLDataCall(
@@ -385,23 +382,20 @@ public class SQLCallBuilder {
         private final CallStatement callStatement;
         private final ParametersValues values;
 
-        private final Map<Comparable,Supplier<?>> valueCallbacks =
-                new TreeMap<>(ParametersValues.ParamIdComparator);
-        private final Map<Comparable,BiConsumer<Object,Object>> valueListeners =
-                new TreeMap<>(ParametersValues.ParamIdComparator);
+        private final Map<Comparable,Supplier<?>> valueCallbacks = new TreeMap<>(ParametersValues.ParamIdComparator);
+        private final Map<Comparable,BiConsumer<Object,Object>> valueListeners = new TreeMap<>(ParametersValues.ParamIdComparator);
 
-        private final IListenerManEvent<IDataCallListener, DataCallEvent> dataCallListeners =
-                ListenerManFactory.createListenerManEvent(IDataCallListener::dataCallChanged);
+        private final IListenerManEvent<IDataCallListener, DataCallEvent> dataCallListeners = ListenerManFactory.createListenerManEvent(IDataCallListener::dataCallChanged);
 
         private BiConsumer<Object,Object> valueListener;
         private String name;
         private Map<String,Object> properties;
 
         private DbmsSqlDataCall(
-                TaskContext tc,
-                CallStatement callStatement,
-                IParameters callBackParameters,
-                String name
+            TaskContext tc,
+            CallStatement callStatement,
+            IParameters callBackParameters,
+            String name
         ) throws CallException {
             this.callStatement = callStatement;
             this.values = new ParametersValues(callBackParameters);
@@ -411,29 +405,33 @@ public class SQLCallBuilder {
 
         /** Позволяет проверять контракт адаптера без подключения к Oracle. */
         DbmsSqlDataCall(
-                DbmsSqlWork work,
-                CallStatement callStatement,
-                ParametersValues values,
-                String name
+            DbmsSqlWork work,
+            CallStatement callStatement,
+            ParametersValues values,
+            String name
         ) {
-            this.work = Objects.requireNonNull(work, "work");
+            this.work = Checks.Require.object(work, "work");
             this.callStatement = callStatement;
             this.values = values;
             this.name = name;
         }
 
+        /** */
         private static Comparable normalizeParameterId( Object id ) {
             if( id == null )
                 throw new IllegalArgumentException("'id' param is null");
+
             return id instanceof Number ? ((Number)id).intValue() : id.toString();
         }
 
+        /** */
         private Object value( ParameterMetadata<?> parameter ) {
             return parameter.isIndexed()
                     ? values.get(parameter.getPosition())
                     : values.get(parameter.getName());
         }
 
+        /** */
         private void setValue( Comparable id, Object value ) {
             if( id instanceof Number )
                 values.setParameter(((Number)id).intValue(), value);
@@ -443,6 +441,7 @@ public class SQLCallBuilder {
 
         @Override
         public IDataCall execute() throws CallException {
+
             if( work == null )
                 throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
 
@@ -450,6 +449,7 @@ public class SQLCallBuilder {
 
             Throwable failure = null;
             try {
+
                 for( Map.Entry<Comparable,Supplier<?>> entry : valueCallbacks.entrySet() ) {
                     final Supplier<?> supplier = entry.getValue();
                     setValue(entry.getKey(), supplier == null ? null : supplier.get());
@@ -457,7 +457,8 @@ public class SQLCallBuilder {
 
                 work.execute(null);
 
-                for( ParameterMetadata<?> parameter : callStatement.getParameterIter(true) ) {
+                for( ParameterMetadata<?> parameter : callStatement.getParameterIter(true) )
+                {
                     final Comparable id = parameter.getIdentifier();
                     final Object outValue = value(parameter);
 
@@ -465,6 +466,7 @@ public class SQLCallBuilder {
                         valueListener.accept(id, outValue);
 
                     final BiConsumer<Object,Object> listener = valueListeners.get(id);
+
                     if( listener != null )
                         listener.accept(id, outValue);
                 }
@@ -472,8 +474,7 @@ public class SQLCallBuilder {
                 return this;
             }
             catch( RuntimeException ex ) {
-                failure = ex instanceof CallException ? ex
-                        : new CallException(Tags.PRODUCT_LABEL + "Error on call " + DbmsSqlWork.class.getName(), ex);
+                failure = ex instanceof CallException ? ex : new CallException(Tags.PRODUCT_LABEL + "Error on call " + DbmsSqlWork.class.getName(), ex);
                 throw (RuntimeException)failure;
             }
             catch( Error error ) {
@@ -651,7 +652,7 @@ public class SQLCallBuilder {
 
         /** */
         SQLDataCall( CallWork work, String name ) {
-            this.work = Objects.requireNonNull( work, "'work' is null" );
+            this.work = Checks.Require.object( work, "'work' is null" );
             this.name = name;
         }
 

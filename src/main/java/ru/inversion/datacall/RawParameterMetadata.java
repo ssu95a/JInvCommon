@@ -1,5 +1,7 @@
 package ru.inversion.datacall;
 
+import ru.inversion.utils.Checks;
+
 import javax.persistence.ParameterMode;
 import java.math.BigDecimal;
 import java.sql.Types;
@@ -29,7 +31,7 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
 
     /** */
     RawParameterMetadata( String name, Integer sqlType, Class<Object> javaType, ParameterMode mode, Object defaultValue, boolean isDefInParameterList, String rawElementType, boolean logValue, boolean isReturnValue ) {
-        this.identifier     = Objects.requireNonNull( name, "'name' is null");
+        this.identifier     = Checks.Require.text( name, "name");
         this.isReturnValue  = isReturnValue;
         this.declared       = isDefInParameterList;
         this.sqlType        = sqlType;
@@ -44,10 +46,10 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
 
         this.logValue     = logValue;
     }
-    
+
     /** */
     RawParameterMetadata(Integer position, Integer sqlType, Class<Object> javaType, ParameterMode mode, Object defaultValue, boolean isDefInParameterList, String rawElementType, boolean logValue, boolean isReturnValue ) {
-        this.identifier     = Objects.requireNonNull(position, "'position' is null");
+        this.identifier     = Checks.Require.object(position, "position");
         this.sqlType        = sqlType;
         this.mode           = mode;
         this.defaultValue   = defaultValue;
@@ -55,7 +57,7 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
         this.isReturnValue  = isReturnValue;
         this.declared       = isDefInParameterList;
 
-        if( javaType == null && sqlType != null ) 
+        if( javaType == null && sqlType != null )
             this.javaType = getJavaType(sqlType);
         else
             this.javaType = javaType;
@@ -65,7 +67,7 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
 
     /** */
     static private Class getJavaType( int sqlType ) {
-        
+
         switch( sqlType ) {
             case Types.CHAR:
             case Types.VARCHAR:
@@ -100,9 +102,9 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
             case Types.TIMESTAMP:
                 return LocalDateTime.class;
         }
-        return null;    
+        return null;
     }
-    
+
     /** */
     public boolean isIndexed( ) {
         return identifier instanceof Integer;
@@ -111,7 +113,7 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
     boolean isDeclared() {
         return declared;
     }
-    
+
     /** */
     @Override
     public String getName() {
@@ -133,12 +135,12 @@ class RawParameterMetadata implements ParameterMetadata<Object>{
     public ParameterMode getMode() {
         return mode;
     }
-    
+
     /** */
     public Object getDefaultValue() {
         return defaultValue;
     }
-    
+
     /** */
     @Override
     public Class<Object> getParameterType() {

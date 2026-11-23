@@ -24,6 +24,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
     /** Значения параметров из вне */
     private final IParameters callBackParameters;
 
+    /** */
     private final CallStatement callStatement;
 
     /** */
@@ -40,7 +41,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
     /** Результат последнего вызова серверной функции. */
     private Integer resultCode;
-    private String resultInfo;
+    private String  resultInfo;
 
     /**
     Выполнение SQL выражения через пакет DBMS_SQL.
@@ -87,6 +88,7 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         this.storedProcWork     = Checks.Require.object( storedProcWork, "storedProcWork" );
 
         Map<Comparable<?>, Integer> bindPositions = new TreeMap<>(ParametersValues.ParamIdComparator);
+
         this.plSql = callStatement.rewriteBinds((id, context) -> {
             int position = bindPositions.computeIfAbsent(id, key -> {
                 int next = vars.size() + 1;
@@ -144,20 +146,23 @@ public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
         {
             final Comparable<?> id = parameterIds.get(i);
             final ParameterMetadata<?> parameter = callStatement.getParameter(id);
+
             // Для параметров, найденных только в тексте блока, сохраняем строковую обратную запись.
             final boolean declared = parameter != null && (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared());
+
             if( declared && parameter.getMode() == IN )
                 continue;
 
             final Class<?> javaType = declared && parameter.isOut() ? parameter.getParameterType() : null;
+
             Object value = outs.get(i);
-            if( javaType != null ) {
+            if( javaType != null )
+            {
                 try {
                     value = TypeConverter.convert(value, javaType);
                 }
                 catch( RuntimeException ex ) {
-                    throw new CallException(Tags.PRODUCT_LABEL + "Error converting DBMS_SQL output for parameter '"
-                            + id + "' to " + javaType.getTypeName(), ex);
+                    throw new CallException(Tags.PRODUCT_LABEL + "Error converting DBMS_SQL output for parameter '" + id + "' to " + javaType.getTypeName(), ex);
                 }
             }
             converted.put(id, value);

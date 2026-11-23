@@ -78,8 +78,8 @@ public class CallWork implements AutoCloseable {
                 return (V)pm.getDefaultValue();
             }
 
-            if( value != null ) {
-
+            if( value != null )
+            {
                 if( value instanceof Supplier )
                     return ((Supplier<V>)value).get();
             }
@@ -88,7 +88,8 @@ public class CallWork implements AutoCloseable {
         }
 
         /** */
-        public void value( V v ) {
+        public void value( V v )
+        {
             final Object previous = this.value;
 
             if( previous instanceof Consumer)
@@ -201,7 +202,7 @@ public class CallWork implements AutoCloseable {
 
             if( pv == null ) {
 
-                final ParameterMetadata pm = getStatementParameter(parameter); // callStatement.getParameter(parameter);
+                final ParameterMetadata<?> pm = getStatementParameter(parameter); // callStatement.getParameter(parameter);
 
                 if( pm != null ) {
                     pv = new PV( pm );
@@ -234,18 +235,25 @@ public class CallWork implements AutoCloseable {
             return Optional.of(pv);
 
         final ParameterMetadata<?> pm = getStatementParameter(parameter);
-        if( pm != null ) {
+
+        if( pm != null )
+        {
             pv = new PV(pm);
             pvMap.put(parameter, pv);
+
             return Optional.of(pv);
         }
+
         return Optional.empty();
     }
 
     /** Установка значения параметра */
     private CallWork put( Comparable<?> parameter, Object value ) throws CallException {
+
         final Optional<PV> result = getOrCreateParameter(parameter);
-        if( result.isPresent() ) {
+
+        if( result.isPresent() )
+        {
             result.get().value(value);
             return this;
         }
@@ -254,17 +262,17 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
-    public <T> CallWork set( Comparable parameter, Supplier<T> supplier ) throws CallException {
+    public <T> CallWork set( Comparable<?> parameter, Supplier<T> supplier ) throws CallException {
         return put( parameter, supplier );
     }
 
     /** */
-    public <T> CallWork set( Comparable parameter, T value ) throws CallException {
+    public <T> CallWork set( Comparable<?> parameter, T value ) throws CallException {
         return put( parameter, value );
     }
 
     /** Получение значения параметра */
-    public <T> T get( Comparable parameter ) throws CallException {
+    public <T> T get( Comparable<?> parameter ) throws CallException {
 
         PV pv = pvMap.get( parameter );
 
@@ -302,12 +310,12 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
-    private Array getArrayValue( ParameterMetadata pm, Collection col ) throws CallException {
+    private Array getArrayValue( ParameterMetadata<?> pm, Collection<?> col ) throws CallException {
         return ArrayMetaData.createArray( getTaskContext(), pm.getElementType(), col );
     }
 
     /** */
-    private Struct getStructValue( ParameterMetadata pm, Object value ) throws CallException {
+    private Struct getStructValue( ParameterMetadata<?> pm, Object value ) throws CallException {
 
         try {
 
@@ -323,7 +331,8 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
-    private SQLXML getSqlXmlValue( ParameterMetadata pm, Object value ) throws CallException {
+    private SQLXML getSqlXmlValue( ParameterMetadata<?> pm, Object value ) throws CallException
+    {
 
         SQLXML sqlXml = null;
 
@@ -337,9 +346,11 @@ public class CallWork implements AutoCloseable {
             if( value instanceof Reader )
             {
                 Reader reader = (Reader)value;
+
                 try( Writer w = sqlXml.setCharacterStream() ) {
                     char[] buffer = new char[4096];
                     int charsRead;
+
                     while((charsRead = reader.read(buffer)) != -1) {
                         w.write(buffer, 0, charsRead);
                     }
@@ -388,8 +399,8 @@ public class CallWork implements AutoCloseable {
     /**
      * pre: value is not null
      */
-    private <T> Object getJsonStructValue( ParameterMetadata pm, T value ) throws CallException {
-
+    private <T> Object getJsonStructValue( ParameterMetadata<?> pm, T value ) throws CallException
+    {
         if( pm.getElementType() != null )
         {
             final JsonObject jo = StructMetaData
@@ -397,9 +408,11 @@ public class CallWork implements AutoCloseable {
                     .toJson( getStructValue(pm, value) );
 
             StringWriter sw = new StringWriter();
+
             try( JsonWriter writer = Json.createWriter(sw) ) {
                   writer.writeObject(jo);
             }
+
             return sw.toString();
         }
         else
@@ -414,7 +427,7 @@ public class CallWork implements AutoCloseable {
     /**
      * pre: value is not null
      */
-    private Object getJsonArrayValue( ParameterMetadata pm, Object value )
+    private Object getJsonArrayValue( ParameterMetadata<?> pm, Object value )
     {
         try {
 
@@ -462,7 +475,7 @@ public class CallWork implements AutoCloseable {
                     array = ArrayMetaData.createArray( getTaskContext(), pm.getElementType(), col );
                 }
 
-                return arrayToJsonAndFree(arrayMetaData, array);
+                return arrayToJsonAndFree( arrayMetaData, array );
             }
             else
             {
@@ -492,7 +505,7 @@ public class CallWork implements AutoCloseable {
         Throwable failure = null;
 
         try {
-            return metaData.toJson(getTaskContext(), array);
+            return metaData.toJson( getTaskContext(), array);
         }
         catch( RuntimeException | Error th ) {
             failure = th;
@@ -655,6 +668,7 @@ public class CallWork implements AutoCloseable {
 
             final Object converted = convertOutParameterValue(value, pv);
             pv.value(converted);
+
             return converted;
 
         } catch( Throwable th ) {
@@ -695,6 +709,7 @@ public class CallWork implements AutoCloseable {
         return pv.pm().getParameterType() == null ? Jt2St.r_convert(value) : TypeConverter.convert( value, pv.pm().getParameterType() );
     }
 
+
     /** Читает SQL ARRAY и гарантированно освобождает объект драйвера. */
     private Object convertOutArray( Array array, PV pv ) throws SQLException {
 
@@ -723,8 +738,11 @@ public class CallWork implements AutoCloseable {
 
                     converted.add( TypeConverter.convert(item, targetType) );
                 }
+
                 values = converted;
+
             }
+
             return values;
         }
         catch( SQLException | RuntimeException | Error th )
@@ -818,6 +836,7 @@ public class CallWork implements AutoCloseable {
         }
     }
 
+
     /** Один раз готовит SQL, позиции параметров и констант. */
     private void prepareExecutionPlan()
     {
@@ -830,8 +849,8 @@ public class CallWork implements AutoCloseable {
         pvMap.values().forEach(pv -> pv.posList.clear());
 
         String sql = callStatement.prepareJdbcSql(
-                this::registerParameterPosition,
-                ( position, value ) -> constantList.add(Pair.makePair(position, value))
+            this::registerParameterPosition,
+            ( position, value ) -> constantList.add(Pair.makePair(position, value))
         );
 
         final List<Integer> hiddenPositions = U.toList( pvMap.values().stream().filter(PV::isBound).filter(pv -> !pv.pm.isLogValue()).flatMap(pv -> pv.posList.stream()).iterator() );
@@ -841,6 +860,7 @@ public class CallWork implements AutoCloseable {
             final StringBuilder builder = new StringBuilder(sql);
             if( S.lastChar(sql) != '\n' )
                 builder.append('\n');
+
             builder.append("--lhv:").append( hiddenPositions.stream().map(String::valueOf).collect(Collectors.joining(",")) );
 
             sql = builder.toString();
@@ -866,16 +886,14 @@ public class CallWork implements AutoCloseable {
 
         if( parameter == null )
         {
-            final ParameterMetadata<?> metadata =
-                    getStatementParameter(identifier);
+            final ParameterMetadata<?> metadata = getStatementParameter(identifier);
             if( metadata == null )
-                throw new CallException(
-                        Tags.PRODUCT_LABEL + "No parameter with Id "
-                                + identifier
-                );
+                throw new CallException( Tags.PRODUCT_LABEL + "No parameter with Id " + identifier );
+
             parameter = new PV(metadata);
             pvMap.put((Comparable<?>)parameter.id(), parameter);
         }
+
         parameter.add(position);
     }
 
@@ -898,7 +916,8 @@ public class CallWork implements AutoCloseable {
 
             registerOutParameters();
         }
-        catch( Throwable th ) {
+        catch( Throwable th )
+        {
             final PreparedStatement statement = jdbcStatement;
             jdbcStatement = null;
             if( statement != null ) {
@@ -986,6 +1005,7 @@ public class CallWork implements AutoCloseable {
             {
                 final String outPrmName  = tc.dialect().outName( U.nvl( md.getColumnLabel(i), md.getColumnName(i) ) );
                 final Object outColValue = rs.getObject(i);
+
                 getOrCreateParameter( outPrmName ).ifPresent (
                     (pv)->{
 
@@ -1068,9 +1088,10 @@ public class CallWork implements AutoCloseable {
 
     /** Отмечает результат, из-за которого statement должен закрыться позднее. */
     private void registerDeferredResult( Object value ) {
-        if(!hasResultSet && closeAfterExecute && value != null && (value instanceof ResultSet || value instanceof Iterator) )
+        if(!hasResultSet && closeAfterExecute && (value instanceof ResultSet || value instanceof Iterator))
             hasResultSet = true;
     }
+
 
     /** Выполнение запроса. */
     public CallWork execute( ) throws CallException
@@ -1124,13 +1145,16 @@ public class CallWork implements AutoCloseable {
             {
                 if( failure == null )
                     throw new CallException( Tags.PRODUCT_LABEL + "Error on cleanup stored work", cleanupFailure );
+
                 failure.addSuppressed(cleanupFailure);
             }
         }
     }
 
+
     /** Закрывает statement или передаёт его под управление ResultSet. */
     private void closeJdbcStatement() throws SQLException {
+
         final PreparedStatement statement = jdbcStatement;
         jdbcStatement = null;
 

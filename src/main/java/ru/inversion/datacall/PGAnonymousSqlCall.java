@@ -5,6 +5,7 @@ import org.postgresql.jdbc.PreferQueryMode;
 import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.parser.lexer.SqlScanner.Token;
 import ru.inversion.tc.TaskContext;
+import ru.inversion.utils.Checks;
 import ru.inversion.utils.Jt2St;
 import ru.inversion.utils.ParametersValues;
 import ru.inversion.utils.Tags;
@@ -48,11 +49,23 @@ import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.NAMED_PARAMETER;
 import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.QUOTED_IDENTIFIER;
 import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.WORD;
 
-/** Выполняет анонимный блок PL/pgSQL через DO с параметрами в локальной настройке транзакции. */
+/**
+ * Выполняет анонимный блок PL/pgSQL через DO с параметрами в локальной настройке транзакции.
+ * <p>
+ * Для обёртки зарезервированы идентификаторы {@code jinv_outer} и {@code jinv_outer_*}
+ * без учёта регистра.
+ * <p>
+ * Тег {@code $jinv_do$} зарезервирован во всём исходном тексте,
+ * включая строки и комментарии. При создании вызова проверяются токены
+ * идентификаторов и вхождение тега в исходный текст.
+ */
 public class PGAnonymousSqlCall implements IDataCall {
 
     private static final JsonProvider JSON = JsonProvider.provider();
     private static final String SETTING = "'jinv.anonymous_call'";
+    private static final String OUTER_LABEL = "jinv_outer";
+    private static final String DO_TAG = "$jinv_do$";
+
     private static final class Parameter {
         private final ParameterMetadata<?> metadata;
         private String variable;
@@ -68,14 +81,16 @@ public class PGAnonymousSqlCall implements IDataCall {
 
     private final TaskContext tc;
     private final boolean requiresAutoCommit;
+
     private final IParameters callBackParameters;
-    private final Map<Comparable, Parameter> parameters = new TreeMap<>(ParametersValues.ParamIdComparator);
-    private final String outerLabel;
+    private final Map<Comparable<?>, Parameter> parameters = new TreeMap<>(ParametersValues.ParamIdComparator);
+
     private final boolean hideValues;
-    private final IListenerManEvent<IDataCallListener, DataCallEvent> listeners =
-            ListenerManFactory.createListenerManEvent(IDataCallListener::dataCallChanged);
+
+    private final IListenerManEvent<IDataCallListener, DataCallEvent> listeners = ListenerManFactory.createListenerManEvent(IDataCallListener::dataCallChanged);
     private BiConsumer<Object, Object> outputListener;
     private Map<String, Object> properties;
+
     // Границы деклараций внутри preparedSql. До первого execute() этот участок пуст.
     private final int declarationsOffset;
     private int declarationsLength;
@@ -85,88 +100,107 @@ public class PGAnonymousSqlCall implements IDataCall {
     private String name;
     private boolean closed;
 
-    public PGAnonymousSqlCall(
-            TaskContext tc,
-            CallStatement callStatement,
-            IParameters callBackParameters,
-            String name
+    /** */
+    public PGAnonymousSqlCall (
+        TaskContext tc,
+        CallStatement callStatement,
+        IParameters callBackParameters,
+        String name
     ) {
-        this.tc = Objects.requireNonNull(tc, "tc");
-        this.requiresAutoCommit = Objects.requireNonNull(callStatement, "callStatement").isAutoCommit();
+        this.tc = Checks.Require.object(tc, "tc");
+        this.requiresAutoCommit = Checks.Require.object(callStatement, "callStatement").isAutoCommit();
         this.name = name;
         this.callBackParameters = callBackParameters == null ? IParameters.EMPTY : callBackParameters;
 
         String source = callStatement.sourceSql();
-        String sourceLower = source.toLowerCase(Locale.ROOT);
-        String label = "jinv_outer";
-        for (int i = 1; sourceLower.contains(label); i++)
-            label = "jinv_outer_" + i;
-        outerLabel = label;
+        if( source.contains(DO_TAG) )
+            throw new CallException(Tags.PRODUCT_LABEL + "Reserved PL/pgSQL delimiter: " + DO_TAG);
 
-        String tag = "$jinv_do$";
-        for (int i = 1; source.contains(tag); i++)
-            tag = "$jinv_do_" + i + "$";
-
-        for (ParameterMetadata<?> parameter : callStatement.getParameterIter()) {
+        for (ParameterMetadata<?> parameter : callStatement.getParameterIter())
+        {
             if (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared())
                 parameters.put(parameter.getIdentifier(), new Parameter(parameter));
         }
+
         List<Token> tokens = callStatement.sqlTokens();
         Set<String> identifiers = new HashSet<>();
         identifiers.add("found");
-        for (Token token : tokens) {
+        for (Token token : tokens)
+        {
+            String identifier;
             if (token.kind() == WORD)
-                identifiers.add(token.text(source).toLowerCase(Locale.ROOT));
-            else if (token.kind() == QUOTED_IDENTIFIER) {
-                String quoted = token.text(source);
-                identifiers.add(quoted.substring(1, quoted.length() - 1).replace("\"\"", "\"").toLowerCase(Locale.ROOT));
-            }
+                identifier = token.text(source).toLowerCase(Locale.ROOT);
+            else
+                if (token.kind() == QUOTED_IDENTIFIER)
+                {
+                    String quoted = token.text(source);
+                    identifier = quoted.substring(1, quoted.length() - 1).replace("\"\"", "\"").toLowerCase(Locale.ROOT);
+                }
+                else
+                    continue;
+
+            if( identifier.equals(OUTER_LABEL) || identifier.startsWith(OUTER_LABEL + "_") )
+                throw new CallException(Tags.PRODUCT_LABEL + "Reserved PL/pgSQL identifier: " + identifier);
+
+            identifiers.add(identifier);
         }
-        String block = replaceParameters(source, tokens, identifiers);
-        for (Parameter parameter : parameters.values()) {
+
+        String block = replaceParameters( source, tokens, identifiers );
+        for (Parameter parameter : parameters.values())
+        {
             if (parameter.metadata.isOut())
                 bind(parameter, identifiers);
         }
-        hideValues = parameters.values().stream().anyMatch(parameter ->
-                parameter.bindPosition >= 0 && parameter.metadata.isIn() && !parameter.metadata.isLogValue());
+
+        hideValues = parameters.values().stream().anyMatch(parameter -> parameter.bindPosition >= 0 && parameter.metadata.isIn() && !parameter.metadata.isLogValue());
 
         Parameter[] bound = boundParameters();
-        StringBuilder sql = jdbcHeader(tag, bound);
+
+        StringBuilder sql = jdbcHeader(bound);
+
         declarationsOffset = sql.length();
-        appendJdbcBody(sql, block, tag, bound);
+        appendJdbcBody(sql, block, bound);
         preparedSql = sql.toString();
     }
 
-    private void bind(Parameter parameter, Set<String> identifiers) {
+    /** */
+    private void bind(Parameter parameter, Set<String> identifiers)
+    {
         if (parameter.bindPosition >= 0)
             return;
+
         String variable = parameter.metadata.getName();
         // Позиционному параметру или имени, уже встречающемуся в блоке, даём отдельное имя.
-        if (variable == null || !variable.matches("[\\p{L}_][\\p{L}\\p{N}_.]*")
-                || variable.getBytes(StandardCharsets.UTF_8).length > 63
-                || variable.toLowerCase(Locale.ROOT).startsWith(outerLabel)
-                || !identifiers.add(variable.toLowerCase(Locale.ROOT))) {
-            variable = outerLabel + "_p" + bindCount;
+        if( variable == null
+            || !variable.matches("[\\p{L}_][\\p{L}\\p{N}_.]*")
+            || variable.getBytes(StandardCharsets.UTF_8).length > 63
+            || variable.toLowerCase(Locale.ROOT).startsWith(OUTER_LABEL)
+            || !identifiers.add(variable.toLowerCase(Locale.ROOT)))
+        {
+            variable = OUTER_LABEL + "_p" + bindCount;
         }
-        parameter.variable = variable;
+        parameter.variable     = variable;
         parameter.bindPosition = bindCount++;
-        if (parameter.metadata.isOut())
+
+        if( parameter.metadata.isOut() )
             outputCount++;
     }
 
-    private String replaceParameters(String source, List<Token> tokens, Set<String> identifiers) {
+    /** */
+    private String replaceParameters(String source, List<Token> tokens, Set<String> identifiers)
+    {
         StringBuilder result = new StringBuilder(source.length());
         Token last = null;
         int position = 0;
-        for (Token token : tokens) {
+        for (Token token : tokens)
+        {
             switch (token.kind()) {
                 case NAMED_PARAMETER:
                 case POSITIONAL_PARAMETER:
-                    Comparable<?> id = token.kind() == NAMED_PARAMETER
-                            ? source.substring(token.start() + 1, token.end()) : position++;
+                    Comparable<?> id = token.kind() == NAMED_PARAMETER ? source.substring(token.start() + 1, token.end()) : position++;
                     Parameter parameter = parameters.computeIfAbsent(id, key -> new Parameter(inferredInput(key)));
                     bind(parameter, identifiers);
-                    result.append(outerLabel).append(".\"").append(parameter.variable).append('"');
+                    result.append(OUTER_LABEL).append(".\"").append(parameter.variable).append('"');
                     break;
                 case NUMBERED_PARAMETER:
                     throw new CallException(Tags.PRODUCT_LABEL + "Use :name or ? for anonymous block parameters");
@@ -186,71 +220,95 @@ public class PGAnonymousSqlCall implements IDataCall {
             }
             last = token;
         }
+
         if (last == null)
             throw new CallException(Tags.PRODUCT_LABEL + "Empty PostgreSQL anonymous block");
-        if (last.end() - last.start() != 1 || source.charAt(last.start()) != ';')
+
+        if( last.end() - last.start() != 1 || source.charAt(last.start()) != ';')
             result.append("\n;");
+
         return result.toString();
     }
 
-    private static ParameterMetadata<?> inferredInput(Comparable<?> id) {
+    /** */
+    private static ParameterMetadata<?> inferredInput(Comparable<?> id)
+    {
         return id instanceof String
-                ? new RawParameterMetadata((String)id, null, null, IN, null, false, null, true, false)
+                ? new RawParameterMetadata((String )id, null, null, IN, null, false, null, true, false)
                 : new RawParameterMetadata((Integer)id, null, null, IN, null, false, null, true, false);
     }
 
-    private Parameter requireParameter(Comparable<?> id) {
+    /** */
+    private Parameter requireParameter(Comparable<?> id)
+    {
         Parameter parameter = parameters.get(id);
         if (parameter == null || parameter.metadata == null)
             throw new CallException(Tags.PRODUCT_LABEL + "No parameter with Id " + id);
+
         return parameter;
     }
 
-    private Object value(Comparable<?> id, Parameter parameter) {
-        if (parameter != null && parameter.value != IParameters.NO_PARAMETER_VALUE)
+    /** */
+    private Object value(Comparable<?> id, Parameter parameter)
+    {
+        if( parameter != null && parameter.value != IParameters.NO_PARAMETER_VALUE )
             return parameter.value;
-        return id instanceof String ? callBackParameters.getParameter((String)id)
-                : callBackParameters.getParameter((Integer)id);
+
+        return id instanceof String ? callBackParameters.getParameter((String)id) : callBackParameters.getParameter((Integer)id);
     }
 
-    private Object inputValue(Parameter parameter) {
-        if (parameter.inputCallback != null)
+    /** */
+    private Object inputValue(Parameter parameter)
+    {
+        if( parameter.inputCallback != null )
             return parameter.inputCallback.get();
+
         ParameterMetadata<?> metadata = parameter.metadata;
         Object value = value(metadata.getIdentifier(), parameter);
-        if (value != null || parameter.value != IParameters.NO_PARAMETER_VALUE || metadata.getDefaultValue() == null)
+        if( value != null || parameter.value != IParameters.NO_PARAMETER_VALUE || metadata.getDefaultValue() == null )
             return value;
-        boolean supplied = metadata.isIndexed() ? callBackParameters.hasParameter(metadata.getPosition())
-                : callBackParameters.hasParameter(metadata.getName());
+
+        boolean supplied = metadata.isIndexed() ? callBackParameters.hasParameter(metadata.getPosition()) : callBackParameters.hasParameter(metadata.getName());
+
         return supplied ? null : metadata.getDefaultValue();
     }
 
-    private static String pgType(ParameterMetadata<?> parameter, Object value) {
+    /** */
+    private static String pgType( ParameterMetadata<?> parameter, Object value )
+    {
         Integer declared = parameter.getSQLType();
         Class<?> javaType = value == null ? parameter.getParameterType() : value.getClass();
+
         int inferred = Types.NULL;
-        if (javaType != null && (value != null || declared == null)) {
+
+        if (javaType != null && (value != null || declared == null))
+        {
             try {
                 inferred = Jt2St.get(javaType, Types.BOOLEAN);
             } catch (IllegalArgumentException ex) {
                 throw new CallException("Parameter " + parameter.getIdentifier() + " requires a scalar value", ex);
             }
+
             pgScalarType(inferred, parameter);
         }
 
         if (declared == null && parameter.isOut())
             throw new CallException(Tags.PRODUCT_LABEL + "No SQL type for OUT parameter " + parameter.getIdentifier());
+
         int type = declared == null ? inferred : declared;
-        if (type == Types.OTHER) {
+        if (type == Types.OTHER)
+        {
             String element = parameter.getElementType();
             boolean uuid = element == null ? javaType == UUID.class || parameter.getParameterType() == UUID.class
                     : "uuid".equalsIgnoreCase(element) || "pg_catalog.uuid".equalsIgnoreCase(element);
             if (!uuid)
                 throw unsupportedType(parameter, element == null ? "OTHER" : element);
         }
+
         return pgScalarType(type, parameter);
     }
 
+    /** */
     private static String pgScalarType(int sqlType, ParameterMetadata<?> parameter) {
         switch (sqlType) {
             case Types.BIT:
@@ -304,50 +362,62 @@ public class PGAnonymousSqlCall implements IDataCall {
         }
     }
 
-    private static CallException unsupportedType(ParameterMetadata<?> parameter, String type) {
+    /** */
+    private static CallException unsupportedType(ParameterMetadata<?> parameter, String type)
+    {
         return new CallException(Tags.PRODUCT_LABEL + "Unsupported type " + type + " for parameter "
                 + parameter.getIdentifier() + ". Use a stored procedure for complex parameters.");
     }
 
-    private StringBuilder jdbcHeader(String delimiter, Parameter[] bound) {
-        StringBuilder sql = new StringBuilder("SELECT 1 FROM pg_catalog.set_config(")
-                .append(SETTING).append(", ?, true);\nDO ").append(delimiter)
-                .append("\n<<").append(outerLabel).append(">>\n");
-        if (bound.length > 0) {
+    /** */
+    private StringBuilder jdbcHeader( Parameter[] bound )
+    {
+        final StringBuilder sql =
+            new StringBuilder("SELECT 1 FROM pg_catalog.set_config(")
+                .append(SETTING).append(", ?, true);\nDO ").append(DO_TAG).append("\n<<").append(OUTER_LABEL).append(">>\n");
+
+        if( bound.length > 0)
+        {
             sql.append("DECLARE\n");
-            if (Arrays.stream(bound).anyMatch(parameter -> parameter.metadata.isIn())) {
-                sql.append(outerLabel).append("_input pg_catalog.jsonb := pg_catalog.current_setting(")
-                        .append(SETTING).append(")::pg_catalog.jsonb;\n");
-            }
+
+            if( Arrays.stream(bound).anyMatch(parameter -> parameter.metadata.isIn()) )
+                sql.append(OUTER_LABEL).append("_input pg_catalog.jsonb := pg_catalog.current_setting(").append(SETTING).append(")::pg_catalog.jsonb;\n");
         }
+
         return sql;
     }
 
-    private void appendJdbcBody(StringBuilder sql, String block, String delimiter, Parameter[] bound) {
+    /** */
+    private void appendJdbcBody(StringBuilder sql, String block, Parameter[] bound)
+    {
         sql.append("BEGIN\n").append(block).append('\n');
 
-        if (outputCount > 0) {
+        if (outputCount > 0)
+        {
             StringJoiner result = new StringJoiner(", ", "ARRAY[", "]");
             for (Parameter parameter : bound) {
                 if (parameter.metadata.isOut())
                     result.add("pg_catalog.to_jsonb(\"" + parameter.variable + "\")");
             }
-            sql.append("PERFORM pg_catalog.set_config(").append(SETTING).append(", pg_catalog.to_jsonb(")
-                    .append(result).append(")::pg_catalog.text, true);\n");
+            sql.append("PERFORM pg_catalog.set_config(").append(SETTING).append(", pg_catalog.to_jsonb(").append(result).append(")::pg_catalog.text, true);\n");
         }
-        sql.append("END ").append(outerLabel).append(";\n").append(delimiter).append(";\n");
+        sql.append("END ").append(OUTER_LABEL).append(";\n").append(DO_TAG).append(";\n");
 
         if (outputCount > 0) {
             // OUT записывается JSON-массивом. Если остался входной объект, ошибка SELECT откатит и DO.
-            sql.append("SELECT data FROM (SELECT pg_catalog.current_setting(").append(SETTING)
+            sql.append("SELECT data FROM (SELECT pg_catalog.current_setting(")
+                .append(SETTING)
                     .append(") AS data) AS result WHERE pg_catalog.jsonb_array_length(data::pg_catalog.jsonb) = ")
-                    .append(outputCount).append(";\n");
+                        .append(outputCount).append(";\n");
         }
+
         if (hideValues)
             sql.append("--lhv:1\n");
     }
 
-    private static Object fromJson(JsonValue value, Class<?> javaType) {
+    /** */
+    private static Object fromJson(JsonValue value, Class<?> javaType)
+    {
         switch (value.getValueType()) {
             case NULL:
                 return null;
@@ -376,20 +446,28 @@ public class PGAnonymousSqlCall implements IDataCall {
         }
     }
 
-    private String executeSql(String sql, String input) throws SQLException {
+    /** */
+    private String executeSql(String sql, String input) throws SQLException
+    {
         Connection connection = tc.getConnection();
         boolean autoCommit = connection.getAutoCommit();
+
         if (requiresAutoCommit && !autoCommit)
             throw new CallException(Tags.PRODUCT_LABEL + "This anonymous block requires an auto-commit connection");
         if (autoCommit && connection.unwrap(PGConnection.class).getPreferQueryMode() == PreferQueryMode.SIMPLE)
             throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous calls in simple query mode require a transaction");
 
-        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+        try( PreparedStatement statement = connection.prepareStatement(sql) )
+        {
             statement.setString(1, input);
+
             String result = null;
             int resultSets = 0;
+
             boolean hasResult = statement.execute();
-            while (hasResult || statement.getUpdateCount() != -1) {
+
+            while (hasResult || statement.getUpdateCount() != -1)
+            {
                 if (hasResult) {
                     try (ResultSet rows = statement.getResultSet()) {
                         if (++resultSets == 2 && rows.next())
@@ -402,102 +480,145 @@ public class PGAnonymousSqlCall implements IDataCall {
         }
     }
 
+    /** */
     private void applyOutputs(String result, Parameter[] bound) {
-        if (outputCount == 0)
+        if( outputCount == 0)
             return;
-        if (result == null)
+        if( result == null)
             throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous block returned no OUT values");
 
         JsonArray json;
-        try (JsonReader reader = JSON.createReader(new StringReader(result))) {
+        try (JsonReader reader = JSON.createReader(new StringReader(result)))
+        {
             json = reader.readArray();
         }
-        if (json.size() != outputCount)
-            throw new CallException(Tags.PRODUCT_LABEL + "Unexpected number of OUT values");
+
+        if( json.size() != outputCount )
+            throw new CallException( Tags.PRODUCT_LABEL + "Unexpected number of OUT values.");
 
         // Сначала конвертируем все OUT, чтобы ошибка не оставила частично обновлённые значения.
         Object[] converted = new Object[outputCount];
+
         int index = 0;
-        for (Parameter parameter : bound) {
+        for (Parameter parameter : bound)
+        {
             if (parameter.metadata.isOut()) {
                 converted[index] = fromJson(json.get(index), parameter.metadata.getParameterType());
                 index++;
             }
         }
+
         index = 0;
-        for (Parameter parameter : bound) {
+
+        for (Parameter parameter : bound)
+        {
             if (parameter.metadata.isOut())
                 parameter.value = converted[index++];
         }
         index = 0;
-        for (Parameter parameter : bound) {
+
+        for (Parameter parameter : bound)
+        {
             if (!parameter.metadata.isOut())
                 continue;
+
             Comparable<?> id = parameter.metadata.getIdentifier();
             Object value = converted[index++];
+
             if (outputListener != null)
                 outputListener.accept(id, value);
-            if (parameter.outputListener != null)
+
+            if( parameter.outputListener != null )
                 parameter.outputListener.accept(id, value);
         }
     }
 
-    private Parameter[] boundParameters() {
+    /** */
+    private Parameter[] boundParameters()
+    {
         Parameter[] bound = new Parameter[bindCount];
-        for (Parameter parameter : parameters.values()) {
+
+        for (Parameter parameter : parameters.values())
+        {
             if (parameter.bindPosition >= 0)
                 bound[parameter.bindPosition] = parameter;
         }
+
         return bound;
     }
 
+    /** */
     @Override
     public PGAnonymousSqlCall execute() {
-        if (closed)
+
+        if( closed )
             throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
-        listeners.fire(new DataCallEvent(this, DataCallEvent.Type.EXECUTE, true));
+
+        final boolean fireListeners = !listeners.isEmpty();
+
+        if( fireListeners )
+            listeners.fire( new DataCallEvent(this, DataCallEvent.Type.EXECUTE, true ) );
 
         Throwable failure = null;
         String sql = null;
+
         try {
+
             Parameter[] bound = boundParameters();
+
             JsonObjectBuilder input = JSON.createObjectBuilder();
+
             StringBuilder declarations = new StringBuilder();
-            for (Parameter parameter : bound) {
+
+            for (Parameter parameter : bound)
+            {
                 boolean isInput = parameter.metadata.isIn();
+
                 Object value = isInput ? inputValue(parameter) : null;
-                String type = pgType(parameter.metadata, value);
+                String type  = pgType(parameter.metadata, value);
+
                 declarations.append('"').append(parameter.variable).append("\" ").append(type);
-                if (isInput) {
-                    declarations.append(" := (").append(outerLabel).append("_input ->> '")
-                            .append(parameter.variable).append("')::").append(type);
-                    if (value == null) {
+
+                if( isInput )
+                {
+                    declarations.append(" := (").append(OUTER_LABEL).append("_input ->> '").append(parameter.variable).append("')::").append(type);
+
+                    if( value == null )
                         input.addNull(parameter.variable);
-                    } else {
+                    else
+                    {
                         if (value.getClass() == java.util.Date.class)
                             value = new java.sql.Date(((java.util.Date)value).getTime());
+
                         input.add(parameter.variable, value.toString());
                     }
                 }
+
                 declarations.append(";\n");
-            }
+
+            }//end for
+
             String declarationSql = declarations.toString();
-            if (declarationsLength != declarationSql.length()
-                    || !preparedSql.regionMatches(declarationsOffset, declarationSql, 0, declarationsLength)) {
+
+            if( declarationsLength != declarationSql.length() || !preparedSql.regionMatches(declarationsOffset, declarationSql, 0, declarationsLength) )
+            {
                 int declarationsEnd = declarationsOffset + declarationsLength;
+
                 preparedSql = new StringBuilder(preparedSql.length() - declarationsLength + declarationSql.length())
                         .append(preparedSql, 0, declarationsOffset)
                         .append(declarationSql)
                         .append(preparedSql, declarationsEnd, preparedSql.length())
                         .toString();
+
                 declarationsLength = declarationSql.length();
             }
             sql = preparedSql;
+
             applyOutputs(executeSql(sql, input.build().toString()), bound);
+
             return this;
         } catch (SQLException | RuntimeException ex) {
-            CallException error = new CallException(Tags.PRODUCT_LABEL + "Error on execute PostgreSQL anonymous block",
-                    name, sql, ex);
+            CallException error = new CallException(Tags.PRODUCT_LABEL + "Error on execute PostgreSQL anonymous block", name, sql, ex);
             failure = error;
             throw error;
         } catch (Error error) {
@@ -538,7 +659,7 @@ public class PGAnonymousSqlCall implements IDataCall {
     }
 
     private static Comparable<?> parameterId(Object id) {
-        Objects.requireNonNull(id, "id");
+        Checks.Require.object(id, "id");
         return id instanceof Number ? ((Number)id).intValue() : id.toString();
     }
 
