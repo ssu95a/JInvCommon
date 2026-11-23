@@ -12,10 +12,12 @@ import ru.inversion.utils.U;
 import javax.persistence.ParameterMode;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.BiConsumer;
+import java.util.function.UnaryOperator;
 import java.util.stream.StreamSupport;
 
 /**
@@ -146,6 +148,16 @@ public class CallStatement {
     /** */
     public ParameterMetadata<?> getParameter( Comparable<?> parameter ) {
         return parametersMetaData == null ? null : parametersMetaData.get(parameter);
+    }
+
+    /** Метаданные конкретного запуска с тем же разобранным SQL. */
+    CallStatement mapParameters(UnaryOperator<ParameterMetadata<?>> prepare) {
+        if (parametersMetaData.isEmpty())
+            return this;
+
+        Map<Comparable<?>, ParameterMetadata<?>> mapped = new HashMap<>();
+        parametersMetaData.forEach((id, parameter) -> mapped.put(id, prepare.apply(parameter)));
+        return new CallStatement(descriptor, mapped, Collections.emptyList(), removeAdditionalInfo, replaceConstants, autoCommit);
     }
 
     /** Имеются ли OUT параметры в выражении */

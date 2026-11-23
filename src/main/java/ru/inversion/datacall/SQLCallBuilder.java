@@ -24,6 +24,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 
 import static javax.persistence.ParameterMode.OUT;
 import static ru.inversion.parser.statement.LangEnum.*;
@@ -178,7 +179,14 @@ public class SQLCallBuilder {
         if( fcs != null )
             return buildByFcs();
 
-        return url == null ? buildByRunClass( ) : (IDataCall)buildByUrl(true);
+        return url == null ? buildByRunClass( ) : buildByUrl(this::build);
+    }
+
+    /** Подготавливает метаданные анонимного блока PostgreSQL из URL для одного запуска. */
+    public IDataCall buildWithAnonymousPostgresParameters(UnaryOperator<ParameterMetadata<?>> prepare) {
+        Objects.requireNonNull(prepare, "prepare");
+        registerCall();
+        return buildByUrl(statement -> build(statement, prepare));
     }
 
     /** */
@@ -314,7 +322,7 @@ public class SQLCallBuilder {
     }
 
     /** */
-    private Object buildByUrl( boolean call  ) throws CallException {
+    private <T> T buildByUrl( Function<CallStatement, T> finish ) throws CallException {
 
         try {
 
@@ -334,7 +342,7 @@ public class SQLCallBuilder {
             if( callStatement == null )
                 throw new IllegalStateException(Tags.PRODUCT_LABEL + "SQL выражение '" + name + "' не найдено в " + url.toString() );
 
-            return call ? build( callStatement ) : callStatement;
+            return finish.apply(callStatement);
 
         } catch( Throwable th ) {
             throw new CallException( Tags.PRODUCT_LABEL + "Error on create CallStatement by Url: " + ( url == null ? "<null>" : url.toString() ), th );
@@ -343,11 +351,16 @@ public class SQLCallBuilder {
 
     /** */
     CallStatement buildStatement() {
-        return (CallStatement)buildByUrl(false);
+        return buildByUrl(Function.identity());
     }
 
     /** */
     private IDataCall build( CallStatement callStatement )
+    {
+        return build(callStatement, null);
+    }
+
+    private IDataCall build(CallStatement callStatement, UnaryOperator<ParameterMetadata<?>> prepare)
     {
         /** */
         if( !runByDbmsSql )
@@ -356,7 +369,8 @@ public class SQLCallBuilder {
             if( tc.dialect().type() == SqlDialect.DialectId.POSTGRES && U.in( callStatement.getLang(), PL_pgSQL, PL ) && callStatement.isAnonymousBlock() )
             {
                 //if( Boolean.parseBoolean(System.getProperty("ru.inversion.datacall.pg_anonymous_direct")) )
-                return new PGAnonymousSqlCall( tc, callStatement, callBackParameters, name );
+                CallStatement prepared = prepare == null ? callStatement : callStatement.mapParameters(prepare);
+                return new PGAnonymousSqlCall( tc, prepared, callBackParameters, name );
                 //return new JsonSqlCall( tc, callStatement, callBackParameters, name );
             }
 
