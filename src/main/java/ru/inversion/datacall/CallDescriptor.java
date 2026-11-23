@@ -156,17 +156,20 @@ public class CallDescriptor {
         if( S.isNullOrEmpty(name) )
             throw new IllegalArgumentException( "'name' is null" );
 
-        for (SqlScanner.Token token : tokenList) {
+        for (SqlScanner.Token token : tokenList)
+        {
             if (token.kind() != NAMED_PARAMETER)
                 continue;
             int start = namedParameterStart(sourceSql, token);
-            if (token.end() - start == name.length() && sourceSql.regionMatches(true, start, name, 0, name.length()))
+
+            if( token.end() - start == name.length() && sourceSql.regionMatches(true, start, name, 0, name.length()) )
                 return true;
         }
         return false;
     }
 
-    static String namedParameterId(String source, SqlScanner.Token token) {
+    /** */
+    static String namedParameterId( String source, SqlScanner.Token token ) {
         return source.substring(namedParameterStart(source, token), token.end());
     }
 

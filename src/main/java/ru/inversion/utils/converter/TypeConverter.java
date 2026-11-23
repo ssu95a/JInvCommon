@@ -18,10 +18,7 @@ import java.sql.*;
 import java.text.DecimalFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.ZoneId;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.Date;
@@ -86,7 +83,7 @@ public class TypeConverter {
 
     }
 
-    // Boolean 
+    // Boolean
     private static final IConverter Long_to_Bool = new IConverter<Long, Boolean>() {
         @Override
         public Long from(Boolean value) {
@@ -481,7 +478,7 @@ public class TypeConverter {
             return Timestamp.valueOf(value.atDate(LocalDate.now()));
         }
     };
-    
+
     /** */
     private static final IConverter Timestamp_to_Long = new IConverter<Timestamp, Long>() {
         @Override
@@ -835,6 +832,7 @@ public class TypeConverter {
         }
     };
 
+    /** */
     private static final IConverter<byte[],String> Bytea_to_String = new IConverter<byte[],String>() {
 
         @Override
@@ -857,9 +855,55 @@ public class TypeConverter {
         }
     };
 
+
+    /** */
+    private static final IConverter<UUID,String> Uuid_to_String = new IConverter<UUID,String>() {
+
+        @Override
+        public String to(UUID value) {
+            return value == null ? null : value.toString();
+        }
+
+        @Override
+        public UUID from(String value) {
+            return S.isNullOrEmpty(value) ? null : UUID.fromString(value);
+        }
+    };
+
+
+    /** */
+    private static final IConverter<OffsetDateTime,String> OffsetDateTime_to_String = new IConverter<OffsetDateTime,String>() {
+
+        @Override
+        public String to(OffsetDateTime value) {
+            return value == null ? null : value.toString();
+        }
+
+        @Override
+        public OffsetDateTime from(String value) {
+            return S.isNullOrEmpty(value) ? null : OffsetDateTime.parse(value);
+        }
+    };
+
+
+    /** */
+    private static final IConverter<OffsetTime,String> OffsetTime_to_String = new IConverter<OffsetTime,String>() {
+
+        @Override
+        public String to(OffsetTime value) {
+            return value == null ? null : value.toString();
+        }
+
+        @Override
+        public OffsetTime from(String value) {
+            return S.isNullOrEmpty(value) ? null : OffsetTime.parse(value);
+        }
+    };
+
+
     /** */
     private static final IFormatConverter BigDecimal_to_String = new IFormatConverter<BigDecimal>() {
-    
+
         @Override
         public String to( BigDecimal value, String formatMask ) {
             return new DecimalFormat(formatMask).format(value);
@@ -932,8 +976,8 @@ public class TypeConverter {
                 {
                     Timestamp ts = Timestamp.valueOf(s);
                     return new java.sql.Date(ts.getTime());
-                } 
-                else 
+                }
+                else
                 {
                     return java.sql.Date.valueOf(s);
                     //return new java.sql.Date(g_formatSQLDate.parse(s).getTime());
@@ -986,8 +1030,8 @@ public class TypeConverter {
             throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
         }
     };
-    
-    
+
+
     /** */
     private static final IFormatConverter LocalDate_to_String = new IFormatConverter<LocalDate>() {
 
@@ -1003,9 +1047,9 @@ public class TypeConverter {
         /** */
         @Override
         public LocalDate from( String value ) {
-            
+
             try {
-                
+
                 if( !S.isNullOrEmpty(value) ) {
 
                     return LocalDate.parse( value,
@@ -1018,7 +1062,7 @@ public class TypeConverter {
                         )
                     );
                 }
-                
+
             } catch( Exception ex ) {
                 TypeConverterException.fromValueToClass( value, LocalDate.class, ex, "LocalDate_to_String" );
             }
@@ -1134,7 +1178,7 @@ public class TypeConverter {
             return null;
         }
     };
-    
+
     private static final IFormatConverter Timestamp_to_String = new IFormatConverter<Timestamp>() {
 
         //final private SimpleDateFormat f = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss");
@@ -1193,9 +1237,9 @@ public class TypeConverter {
     static {
 
         g_converterMap = new HashMap<>();
-//+----------------------------------------------------------------------------------------------------+        
-//|                       |  class from            |        class to     |             impl            | 
-//+----------------------------------------------------------------------------------------------------+          
+//+----------------------------------------------------------------------------------------------------+
+//|                       |  class from            |        class to     |             impl            |
+//+----------------------------------------------------------------------------------------------------+
         registerConverter( Long.class,              Boolean.class,         Long_to_Bool              );
         registerConverter( Integer.class,           Boolean.class,         Int_to_Bool               );
         registerConverter( BigDecimal.class,        Boolean.class,         Dec_to_Bool               );
@@ -1241,6 +1285,10 @@ public class TypeConverter {
         registerConverter( char[].class,            byte[].class,          Chara_to_Bytea            );
         registerConverter( char[].class,            String.class,          Chara_to_String           );
         registerConverter( byte[].class,            String.class,          Bytea_to_String           );
+        registerConverter( UUID.class,              String.class,          Uuid_to_String            );
+        registerConverter( OffsetDateTime.class,    String.class,          OffsetDateTime_to_String  );
+        registerConverter( OffsetTime.class,        String.class,          OffsetTime_to_String  );
+
 
         g_formatConverterMap = new HashMap<>();
         g_formatConverterMap.put( java.sql.Date.class,  SqlDate_to_String       );
@@ -1266,7 +1314,7 @@ public class TypeConverter {
         }
 
         @Override
-        public S to(T value) {    
+        public S to(T value) {
             return converter.from(value);
         }
 
@@ -1440,17 +1488,17 @@ public class TypeConverter {
     public static <T> IConverter<Object,T> getConverter( Class fromClass, Class toClass ) {
 
         IConverter<Object,T> c = g_converterMap.get( new PairClass(fromClass, toClass) );
-        
+
         if( c != null )
             return c;
 
         c = g_converterMap.get( new PairClass(toClass, fromClass) );
-        
+
         if( c != null ) {
 
             registerConverter( fromClass, toClass, new ReverseConverter<>(c) );
 
-            c = g_converterMap.get( new PairClass(fromClass, toClass) );    
+            c = g_converterMap.get( new PairClass(fromClass, toClass) );
         }
 
         if( c == null ) {
@@ -1489,12 +1537,12 @@ public class TypeConverter {
      *  Получить класс форматирования
      */
     public static <K> IConverter<K, String> getFormatConverter( Class fromClass, String mask ) {
-        
-        if( fromClass == java.sql.Date.class ) 
+
+        if( fromClass == java.sql.Date.class )
         {
             if( S.isNullOrEmpty(mask) )
                 return (IConverter< K, String >)SqlDate_to_String;
-            
+
             return (IConverter<K, String>) new IConverter<java.sql.Date, String>() {
                 private final SimpleDateFormat format = new SimpleDateFormat( mask );
                 @Override
@@ -1512,12 +1560,12 @@ public class TypeConverter {
                 }
             };
         }
-        
+
         if( fromClass == LocalDate.class )
         {
             if( S.isNullOrEmpty(mask) )
                 return LocalDate_to_String;
-            
+
             return (IConverter<K, String>) new IConverter<LocalDate, String>() {
                 private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern( mask.replaceAll("[H:m:s]", "") );
                 @Override
@@ -1535,7 +1583,7 @@ public class TypeConverter {
         {
             if( S.isNullOrEmpty(mask) )
                 return LocalTime_to_String;
-            
+
             return (IConverter<K, String>) new IConverter<LocalTime, String>() {
                 private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern( mask );
                 @Override
@@ -1547,15 +1595,15 @@ public class TypeConverter {
                     return  value == null ? null : LocalTime.parse( value, formatter );
                 }
             };
-            
+
         }
-        
-        
+
+
         if( fromClass == LocalDateTime.class )
         {
             if( S.isNullOrEmpty(mask) )
                 return LocalDateTime_to_String;
-            
+
             return (IConverter<K, String>) new IConverter<LocalDateTime, String>() {
                 private final DateTimeFormatter formatter = DateTimeFormatter.ofPattern( mask );
                 @Override
@@ -1567,14 +1615,14 @@ public class TypeConverter {
                     return  value == null ? null : LocalDateTime.parse( value, formatter );
                 }
             };
-            
+
         }
-        
+
         if( fromClass == java.util.Date.class )
         {
             if( S.isNullOrEmpty(mask) )
                 return (IConverter< K, String >)UtilDate_to_String;
-            
+
             return (IConverter<K, String>) new IConverter<java.util.Date, String>() {
                 private final SimpleDateFormat format = new SimpleDateFormat( mask );
                 @Override
@@ -1621,7 +1669,7 @@ public class TypeConverter {
 
     /** */
     public static void main(String[] args) {
-    
+
         try {
 
             String ds = "2023-12-21 10:11:03";
@@ -1658,7 +1706,7 @@ public class TypeConverter {
         catch( Throwable th ) {
             th.printStackTrace();
         }
-        
+
     }
-    
+
 }

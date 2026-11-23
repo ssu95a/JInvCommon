@@ -541,11 +541,11 @@ import java.util.function.UnaryOperator;
 
             if (parameters != null && parameters != IParameters.EMPTY )
             {
-                bindings.forEach((id, value) -> {
+                bindings.keySet().forEach(id -> {
                     if (id instanceof Integer)
-                        parameters.setParameter((Integer)id, value);
+                        parameters.setParameter((Integer)id, call.getParameter((Integer)id));
                     else
-                        parameters.setParameter((String)id, value);
+                        parameters.setParameter((String)id, call.getParameter((String)id));
                 });
             }
         }

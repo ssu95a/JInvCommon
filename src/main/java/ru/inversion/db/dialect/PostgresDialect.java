@@ -360,15 +360,15 @@ final class PostgresDialect extends BaseDialect {
             "               when 'D' then 93\n" +
             "           end\n" +
             "       end column_type\n" +
-            "  from pg_catalog.pg_attribute a\n" +
-            "       inner join pg_catalog.pg_type t on t.oid = a.atttypid\n" +
+            "  from pg_attribute a\n" +
+            "       inner join pg_type t on t.oid = a.atttypid\n" +
             " where attRelId = (\n" +
             "       select oid\n" +
-            "         from pg_catalog.pg_class c\n" +
+            "         from pg_class c\n" +
             "        where c.relname = ?\n" +
             "          and c.relnamespace = (\n" +
             "              select oid\n" +
-            "                from pg_catalog.pg_namespace\n" +
+            "                from pg_namespace\n" +
             "               where nspname = ?\n" +
             "          )\n" +
             " )\n" +

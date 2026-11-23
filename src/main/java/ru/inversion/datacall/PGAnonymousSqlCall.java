@@ -62,18 +62,20 @@ import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.WORD;
 public class PGAnonymousSqlCall implements IDataCall {
 
     private static final JsonProvider JSON = JsonProvider.provider();
+
     private static final String PGV_SLOT = "'jinv_anonymous_call', 'payload'";
     private static final String PGV_SET = "pgv_set(" + PGV_SLOT + ", ";
-    private static final String PGV_GET = "pgv_get(" + PGV_SLOT + ", NULL::pg_catalog.jsonb, true)";
+    private static final String PGV_GET = "pgv_get(" + PGV_SLOT + ", NULL::jsonb, true)";
     private static final String PGV_REMOVE = "pgv_remove(" + PGV_SLOT + ")";
     private static final String OUTER_LABEL = "jinv_outer";
     private static final String DO_TAG = "$jinv_do$";
 
+    /** Данные параметра */
     private static final class Parameter {
-        private final ParameterMetadata<?> metadata;
-        private String variable;
-        private int bindPosition = -1;
-        private Object value = IParameters.NO_PARAMETER_VALUE;
+        private final   ParameterMetadata<?> metadata;
+        private String  variable;
+        private int     bindPosition = -1;
+        private Object  value = IParameters.NO_PARAMETER_VALUE;
         private Supplier<?> inputCallback;
         private BiConsumer<Object, Object> outputListener;
 
@@ -94,7 +96,8 @@ public class PGAnonymousSqlCall implements IDataCall {
     private BiConsumer<Object, Object> outputListener;
     private Map<String, Object> properties;
 
-    // Границы деклараций внутри preparedSql. До первого execute() этот участок пуст.
+    // Границы деклараций внутри preparedSql.
+    // До первого execute() этот участок пуст.
     private final int declarationsOffset;
     private int declarationsLength;
     private String preparedSql;
@@ -109,32 +112,37 @@ public class PGAnonymousSqlCall implements IDataCall {
         CallStatement callStatement,
         IParameters callBackParameters,
         String name
-    ) {
+    )
+    {
         this.tc = Checks.Require.object(tc, "tc");
         this.requiresAutoCommit = Checks.Require.object(callStatement, "callStatement").isAutoCommit();
         this.name = name;
         this.callBackParameters = callBackParameters == null ? IParameters.EMPTY : callBackParameters;
 
         String source = callStatement.sourceSql();
-        if( source.contains(DO_TAG) )
-            throw new CallException(Tags.PRODUCT_LABEL + "Reserved PL/pgSQL delimiter: " + DO_TAG);
 
-        for (ParameterMetadata<?> parameter : callStatement.getParameterIter())
+        if( source.contains(DO_TAG) )
+            throw new CallException( Tags.PRODUCT_LABEL + "Reserved PL/pgSQL delimiter: " + DO_TAG + ", in script source" );
+
+        for( ParameterMetadata<?> parameter : callStatement.getParameterIter() )
         {
             if (!(parameter instanceof RawParameterMetadata) || ((RawParameterMetadata)parameter).isDeclared())
-                parameters.put(parameter.getIdentifier(), new Parameter(parameter));
+                parameters.put(parameter.getIdentifier(), new Parameter(parameter) );
         }
 
         List<Token> tokens = callStatement.sqlTokens();
+
         Set<String> identifiers = new HashSet<>();
         identifiers.add("found");
-        for (Token token : tokens)
+
+        for( Token token : tokens )
         {
             String identifier;
-            if (token.kind() == WORD)
+
+            if( token.kind() == WORD )
                 identifier = token.text(source).toLowerCase(Locale.ROOT);
             else
-                if (token.kind() == QUOTED_IDENTIFIER)
+                if( token.kind() == QUOTED_IDENTIFIER )
                 {
                     String quoted = token.text(source);
                     identifier = quoted.substring(1, quoted.length() - 1).replace("\"\"", "\"").toLowerCase(Locale.ROOT);
@@ -143,16 +151,17 @@ public class PGAnonymousSqlCall implements IDataCall {
                     continue;
 
             if( identifier.equals(OUTER_LABEL) || identifier.startsWith(OUTER_LABEL + "_") )
-                throw new CallException(Tags.PRODUCT_LABEL + "Reserved PL/pgSQL identifier: " + identifier);
+                throw new CallException(Tags.PRODUCT_LABEL + "Reserved PL/pgSQL identifier: " + identifier + ", in script source" );
 
-            identifiers.add(identifier);
+            identifiers.add( identifier );
         }
 
         String block = replaceParameters( source, tokens, identifiers );
-        for (Parameter parameter : parameters.values())
+
+        for( Parameter parameter : parameters.values() )
         {
-            if (parameter.metadata.isOut())
-                bind(parameter, identifiers);
+            if( parameter.metadata.isOut() )
+                bind( parameter, identifiers );
         }
 
         hideValues = parameters.values().stream().anyMatch(parameter -> parameter.bindPosition >= 0 && parameter.metadata.isIn() && !parameter.metadata.isLogValue());
@@ -169,10 +178,11 @@ public class PGAnonymousSqlCall implements IDataCall {
     /** */
     private void bind(Parameter parameter, Set<String> identifiers)
     {
-        if (parameter.bindPosition >= 0)
+        if( parameter.bindPosition >= 0)
             return;
 
         String variable = parameter.metadata.getName();
+
         // Позиционному параметру или имени, уже встречающемуся в блоке, даём отдельное имя.
         if( variable == null
             || !variable.matches("[\\p{L}_][\\p{L}\\p{N}_.]*")
@@ -192,18 +202,24 @@ public class PGAnonymousSqlCall implements IDataCall {
     /** */
     private String replaceParameters(String source, List<Token> tokens, Set<String> identifiers)
     {
-        StringBuilder result = new StringBuilder(source.length());
+        StringBuilder result = new StringBuilder( source.length() );
+
         Token last = null;
+
         int position = 0;
-        for (Token token : tokens)
+
+        for( Token token : tokens )
         {
-            switch (token.kind()) {
+            switch (token.kind())
+            {
                 case NAMED_PARAMETER:
                 case POSITIONAL_PARAMETER:
-                    Comparable<?> id = token.kind() == NAMED_PARAMETER ? CallDescriptor.namedParameterId(source, token) : position++;
+                    Comparable<?> id = token.kind() == NAMED_PARAMETER ? CallDescriptor.namedParameterId( source, token ) : position++;
                     Parameter parameter = parameters.computeIfAbsent(id, key -> new Parameter(inferredInput(key)));
                     bind(parameter, identifiers);
+
                     result.append(OUTER_LABEL).append(".\"").append(parameter.variable).append('"');
+
                     break;
                 case NUMBERED_PARAMETER:
                     throw new CallException(Tags.PRODUCT_LABEL + "Use :name or ? for anonymous block parameters");
@@ -216,18 +232,19 @@ public class PGAnonymousSqlCall implements IDataCall {
                 case HINT:
                 case PARAMETERIZE_OFF:
                 case PARAMETERIZE_ON:
-                    result.append(source, token.start(), token.end());
+                    result.append( source, token.start(), token.end() );
                     continue;
                 default:
-                    result.append(source, token.start(), token.end());
+                    result.append( source, token.start(), token.end() );
             }
+
             last = token;
         }
 
-        if (last == null)
+        if( last == null )
             throw new CallException(Tags.PRODUCT_LABEL + "Empty PostgreSQL anonymous block");
 
-        if( last.end() - last.start() != 1 || source.charAt(last.start()) != ';')
+        if( last.end() - last.start() != 1 || source.charAt( last.start() ) != ';')
             result.append("\n;");
 
         return result.toString();
@@ -280,30 +297,30 @@ public class PGAnonymousSqlCall implements IDataCall {
     private static String pgType( ParameterMetadata<?> parameter, Object value )
     {
         Integer declared = parameter.getSQLType();
+
         Class<?> javaType = value == null ? parameter.getParameterType() : value.getClass();
 
         int inferred = Types.NULL;
 
-        if (javaType != null && (value != null || declared == null))
+        if (javaType != null && (value != null || declared == null) )
         {
             try {
                 inferred = Jt2St.get(javaType, Types.BOOLEAN);
             } catch (IllegalArgumentException ex) {
                 throw new CallException("Parameter " + parameter.getIdentifier() + " requires a scalar value", ex);
             }
-
             pgScalarType(inferred, parameter);
         }
 
-        if (declared == null && parameter.isOut())
-            throw new CallException(Tags.PRODUCT_LABEL + "No SQL type for OUT parameter " + parameter.getIdentifier());
+        if( declared == null && parameter.isOut() )
+            throw new CallException(Tags.PRODUCT_LABEL + "No SQL type for OUT parameter " + parameter.getIdentifier() );
 
         int type = declared == null ? inferred : declared;
         if (type == Types.OTHER)
+
         {
             String element = parameter.getElementType();
-            boolean uuid = element == null ? javaType == UUID.class || parameter.getParameterType() == UUID.class
-                    : "uuid".equalsIgnoreCase(element) || "pg_catalog.uuid".equalsIgnoreCase(element);
+            boolean uuid = element == null ? javaType == UUID.class || parameter.getParameterType() == UUID.class : "uuid".equalsIgnoreCase(element) || "pg_catalog.uuid".equalsIgnoreCase(element);
             if (!uuid)
                 throw unsupportedType(parameter, element == null ? "OTHER" : element);
         }
@@ -316,44 +333,44 @@ public class PGAnonymousSqlCall implements IDataCall {
         switch (sqlType) {
             case Types.BIT:
             case Types.BOOLEAN:
-                return "pg_catalog.bool";
+                return "bool";
             case Types.TINYINT:
             case Types.SMALLINT:
-                return "pg_catalog.int2";
+                return "int2";
             case Types.INTEGER:
-                return "pg_catalog.int4";
+                return "int4";
             case Types.BIGINT:
-                return "pg_catalog.int8";
+                return "int8";
             case Types.NUMERIC:
             case Types.DECIMAL:
-                return "pg_catalog.numeric";
+                return "numeric";
             case Types.REAL:
-                return "pg_catalog.float4";
+                return "float4";
             case Types.FLOAT:
             case Types.DOUBLE:
-                return "pg_catalog.float8";
+                return "float8";
             case Types.DATE:
-                return "pg_catalog.date";
+                return "date";
             case Types.TIME:
-                return "pg_catalog.time";
+                return "time";
             case Types.TIME_WITH_TIMEZONE:
-                return "pg_catalog.timetz";
+                return "timetz";
             case Types.TIMESTAMP:
-                return "pg_catalog.timestamp";
+                return "timestamp";
             case Types.TIMESTAMP_WITH_TIMEZONE:
-                return "pg_catalog.timestamptz";
+                return "timestamptz";
             case Types.CHAR:
             case Types.NCHAR:
-                return "pg_catalog.bpchar";
+                return "bpchar";
             case Types.VARCHAR:
             case Types.NVARCHAR:
             case Types.NULL:
-                return "pg_catalog.varchar";
+                return "varchar";
             case Types.LONGVARCHAR:
             case Types.LONGNVARCHAR:
-                return "pg_catalog.text";
+                return "text";
             case Types.OTHER:
-                return "pg_catalog.uuid";
+                return "uuid";
             case -1024:
                 throw unsupportedType(parameter, "JSON_STRUCT");
             case -1025:
@@ -368,80 +385,76 @@ public class PGAnonymousSqlCall implements IDataCall {
     /** */
     private static CallException unsupportedType(ParameterMetadata<?> parameter, String type)
     {
-        return new CallException(Tags.PRODUCT_LABEL + "Unsupported type " + type + " for parameter "
-                + parameter.getIdentifier() + ". Use a stored procedure for complex parameters.");
+        return new CallException(Tags.PRODUCT_LABEL + "Unsupported type " + type + " for parameter " + parameter.getIdentifier() + ". Use a stored procedure for complex parameters.");
     }
+
 
     /** */
     private StringBuilder jdbcHeader( Parameter[] bound )
     {
-        StringBuilder sql = new StringBuilder("SELECT ").append(PGV_SET)
-                .append("?::pg_catalog.jsonb, false);\nDO ").append(DO_TAG).append('\n');
+        StringBuilder sql = new StringBuilder("SELECT ").append(PGV_SET).append("?::jsonb, false);\nDO ").append(DO_TAG).append('\n');
 
         if( Arrays.stream(bound).anyMatch(parameter -> parameter.metadata.isIn()) )
-            sql.append("DECLARE\n").append(OUTER_LABEL).append("_input pg_catalog.jsonb := ")
-                    .append(PGV_GET).append(";\n");
+            sql.append("DECLARE\n").append(OUTER_LABEL).append("_input jsonb := ").append(PGV_GET).append(";\n");
 
         // Удаляем вход до преобразования параметров и выполнения пользовательского SQL.
-        sql.append("BEGIN\nPERFORM ").append(PGV_REMOVE)
-                .append(";\n<<").append(OUTER_LABEL).append(">>\n");
+        sql.append("BEGIN\nPERFORM ").append(PGV_REMOVE).append(";\n<<").append(OUTER_LABEL).append(">>\n");
         if( bound.length > 0)
             sql.append("DECLARE\n");
 
         return sql;
     }
 
+
     /** */
     private void appendJdbcBody(StringBuilder sql, String block, Parameter[] bound)
     {
         sql.append("BEGIN\n").append(block).append('\n');
 
-        if (outputCount > 0)
+        if( outputCount > 0 )
         {
             StringJoiner result = new StringJoiner(", ", "ARRAY[", "]");
-            for (Parameter parameter : bound) {
-                if (parameter.metadata.isOut())
-                    result.add("pg_catalog.to_jsonb(\"" + parameter.variable + "\")");
+            for( Parameter parameter : bound )
+            {
+                if( parameter.metadata.isOut() )
+                    result.add("to_jsonb(\"" + parameter.variable + "\")");
             }
-            sql.append("PERFORM ").append(PGV_SET).append("pg_catalog.to_jsonb(")
-                    .append(result).append("), false);\n");
+            sql.append("PERFORM ").append(PGV_SET).append("to_jsonb(").append(result).append("), false);\n");
         }
         sql.append("END ").append(OUTER_LABEL).append(";\nEND;\n").append(DO_TAG).append(";\n");
 
-        if (outputCount > 0) {
+        if( outputCount > 0 )
+        {
             // Материализация читает значение до вызова pgv_remove.
             sql.append("WITH result AS MATERIALIZED (SELECT ").append(PGV_GET)
-                    .append(" AS data)\nSELECT data::pg_catalog.text, ").append(PGV_REMOVE)
-                    .append(" FROM result WHERE pg_catalog.jsonb_array_length(data) = ")
-                    .append(outputCount).append(";\n");
+               .append(" AS data)\nSELECT data::text, ").append(PGV_REMOVE)
+               .append(" FROM result WHERE jsonb_array_length(data) = ")
+               .append(outputCount).append(";\n");
         }
 
-        if (hideValues)
+        if( hideValues )
             sql.append("--lhv:1\n");
     }
 
     /** */
-    private static Object fromJson(JsonValue value, Class<?> javaType)
+    private static Object fromJson( JsonValue value, Class<?> javaType )
     {
-        switch (value.getValueType()) {
+        switch( value.getValueType() )
+        {
             case NULL:
                 return null;
             case STRING:
                 String text = ((JsonString)value).getString();
-                if (javaType == UUID.class)
-                    return UUID.fromString(text);
-                if (javaType == OffsetDateTime.class)
-                    return OffsetDateTime.parse(text);
-                if (javaType == OffsetTime.class)
-                    return OffsetTime.parse(text);
                 return javaType == null ? text : TypeConverter.convert(text, javaType);
             case NUMBER:
                 JsonNumber number = (JsonNumber)value;
-                if (javaType != null)
+                if( javaType != null )
                     return TypeConverter.convert(number.bigDecimalValue(), javaType);
-                if (number.isIntegral() && number.bigIntegerValue().bitLength() <= 63)
+                if( number.isIntegral() && number.bigIntegerValue().bitLength() <= 63 )
                     return number.longValueExact();
+
                 return number.bigDecimalValue();
+
             case TRUE:
             case FALSE:
                 boolean flag = value == JsonValue.TRUE;
@@ -455,6 +468,7 @@ public class PGAnonymousSqlCall implements IDataCall {
     private String executeSql(String sql, String input) throws SQLException
     {
         Connection connection = tc.getConnection();
+
         boolean autoCommit = connection.getAutoCommit();
         boolean switchAutoCommit = requiresAutoCommit && !autoCommit;
 

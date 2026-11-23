@@ -34,6 +34,7 @@ import static javax.persistence.ParameterMode.IN;
 import static javax.persistence.ParameterMode.INOUT;
 import static javax.persistence.ParameterMode.OUT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -196,23 +197,24 @@ class CallWorkExecutionTest {
                 .lang(LangEnum.PL_pgSQL)
                 .build();
         String declaration = "\"value\" %1$s := (jinv_outer_input ->> 'value')::%1$s;";
-        String intDeclaration = String.format(declaration, "pg_catalog.int4");
+        String intDeclaration = String.format(declaration, "int4");
 
         try (IDataCall call = new PGAnonymousSqlCall(taskContext(jdbc.connection()), statement, null, "sample")) {
             call.setParameter("value", 7);
             call.execute();
             String intSql = jdbc.preparedSql;
             assertTrue(intSql.contains(intDeclaration), intSql);
+            assertFalse(intSql.replace("1::pg_catalog.int4", "").contains("pg_catalog."), intSql);
 
             call.setParameter("value", 7L);
             call.execute();
-            assertEquals(intSql.replace(intDeclaration, String.format(declaration, "pg_catalog.int8")),
+            assertEquals(intSql.replace(intDeclaration, String.format(declaration, "int8")),
                     jdbc.preparedSql);
 
             call.setParameter("value", "text");
             call.execute();
             String varcharSql = jdbc.preparedSql;
-            assertEquals(intSql.replace(intDeclaration, String.format(declaration, "pg_catalog.varchar")),
+            assertEquals(intSql.replace(intDeclaration, String.format(declaration, "varchar")),
                     varcharSql);
 
             call.setParameter("value", null);
