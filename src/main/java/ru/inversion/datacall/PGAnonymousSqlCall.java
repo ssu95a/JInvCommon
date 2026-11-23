@@ -578,9 +578,7 @@ public class PGAnonymousSqlCall implements IDataCall {
         if( closed )
             throw new CallException(Tags.PRODUCT_LABEL + "DataCall is closed");
 
-        final boolean fireListeners = !listeners.isEmpty();
-
-        if( fireListeners )
+        if(!listeners.isEmpty() )
             listeners.fire( new DataCallEvent(this, DataCallEvent.Type.EXECUTE, true ) );
 
         Throwable failure = null;
@@ -629,18 +627,20 @@ public class PGAnonymousSqlCall implements IDataCall {
                 int declarationsEnd = declarationsOffset + declarationsLength;
 
                 preparedSql = new StringBuilder(preparedSql.length() - declarationsLength + declarationSql.length())
-                        .append(preparedSql, 0, declarationsOffset)
-                        .append(declarationSql)
-                        .append(preparedSql, declarationsEnd, preparedSql.length())
-                        .toString();
+                                .append(preparedSql, 0, declarationsOffset)
+                                .append(declarationSql)
+                                .append(preparedSql, declarationsEnd, preparedSql.length())
+                                .toString();
 
                 declarationsLength = declarationSql.length();
             }
+
             sql = preparedSql;
 
-            applyOutputs(executeSql(sql, input.build().toString()), bound);
+            applyOutputs( executeSql(sql, input.build().toString() ), bound );
 
             return this;
+
         } catch (SQLException | RuntimeException ex) {
             CallException error = new CallException(Tags.PRODUCT_LABEL + "Error on execute PostgreSQL anonymous block", name, sql, ex);
             failure = error;
@@ -651,7 +651,7 @@ public class PGAnonymousSqlCall implements IDataCall {
         }
         finally {
             try {
-                if( fireListeners )
+                if(!listeners.isEmpty() )
                     listeners.fire (new DataCallEvent(this, DataCallEvent.Type.EXECUTE, false, failure == null));
             } catch (RuntimeException | Error listenerFailure) {
                 if( failure == null )
