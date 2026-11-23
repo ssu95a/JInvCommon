@@ -312,6 +312,47 @@ public class DataSetSelectBuilderTest {
         assertTrue(sql.getSql().contains("q.id = ?"));
     }
 
+    @Test public void compoundSourceUsesOuterFilterAndSort() {
+        String source = "select name, id from a where kind = :kind"
+                + " union all select name, -id from b where kind = :extra;";
+        DataSetSelectBuilder b = new DataSetSelectBuilder(source, SqlDialectFactory.POSTGRES);
+        assertEquals(source, b.buildSql());
+
+        b.addPredicate("id <> :hidden");
+        b.orderBy("lower(name), id DESC");
+        String sql = b.prepare().getSql();
+
+        assertTrue(sql, sql.startsWith("SELECT qrslt.* FROM ("));
+        assertTrue(sql, sql.indexOf(") qrslt") < sql.indexOf("id <> ?"));
+        assertTrue(sql, sql.indexOf("id <> ?") < sql.indexOf("ORDER BY lower(name), id DESC"));
+        assertFalse(sql, sql.contains(";"));
+        assertEquals(Arrays.asList(1, 2, 3), b.values(new Params()
+                .set("kind", 1).set("extra", 2).set("hidden", 3)));
+    }
+
+    @Test public void compoundFilterKeepsSourceOrderingOnOuterSelect() {
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
+                "select id from a union all select id from b order by id DESC", SqlDialectFactory.ORACLE);
+        b.addPredicate("id <> :hidden");
+
+        String sql = b.buildSql();
+
+        assertTrue(sql, sql.indexOf(") qrslt") < sql.indexOf("WHERE"));
+        assertTrue(sql, sql.indexOf("WHERE") < sql.indexOf("order by id DESC"));
+        assertEquals(sql.indexOf("order by id DESC"), sql.lastIndexOf("order by id DESC"));
+    }
+
+    @Test public void compoundSortPreservesOrderingUsedBySourceLimit() {
+        DataSetSelectBuilder b = new DataSetSelectBuilder(
+                "select id from a union all select id from b order by id limit 2", SqlDialectFactory.POSTGRES);
+        b.orderBy("id DESC");
+
+        String sql = b.buildSql();
+
+        assertTrue(sql, sql.indexOf("order by id limit 2") < sql.indexOf(") qrslt"));
+        assertTrue(sql, sql.indexOf(") qrslt") < sql.indexOf("ORDER BY id DESC"));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void queryAliasMustBeSingleIdentifier() {
         new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES)

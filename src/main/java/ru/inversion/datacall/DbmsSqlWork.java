@@ -19,7 +19,8 @@ import static javax.persistence.ParameterMode.OUT;
  * <p>
  * ver 1.1
  */
-public class DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
+public class
+DbmsSqlWork implements IDBWork<Void,IDBWork>, AutoCloseable {
 
     /** Значения параметров из вне */
     private final IParameters callBackParameters;

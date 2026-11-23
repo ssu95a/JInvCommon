@@ -181,7 +181,7 @@ final class CallPrepareContext {
     /** */
     private Comparable<?> bindId(Token token, int indexedBind)
     {
-        return token.kind() == NAMED_PARAMETER ? source.substring(token.start() + 1, token.end()) : indexedBind;
+        return token.kind() == NAMED_PARAMETER ? CallDescriptor.namedParameterId(source, token) : indexedBind;
     }
 
     /** */

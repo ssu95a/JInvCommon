@@ -60,6 +60,21 @@ public final class SqlSelect {
         this.layout = inspect();
     }
 
+    /** Возвращает SQL с внешним SELECT, если составному запросу нужны фильтр или сортировка. */
+    public String wrapCompoundForOuterClauses(boolean hasPredicates, boolean replaceOrderBy) {
+        if (!layout.compound || (!replaceOrderBy && (!hasPredicates || layout.legacyWhereMarkerStart >= 0)))
+            return source;
+
+        String inner = source.substring(0, layout.statementEnd);
+        if (layout.orderStart >= 0 && !layout.hasRowSelection)
+            inner = source.substring(0, layout.orderStart) + source.substring(layout.orderEnd, layout.statementEnd);
+
+        String sql = "SELECT qrslt.* FROM (\n" + inner + "\n) qrslt";
+        if (!replaceOrderBy && layout.orderStart >= 0)
+            sql += "\n" + source.substring(layout.orderStart, layout.orderEnd);
+        return sql;
+    }
+
     /** */
     public void setPredicates( List<String> values ) {
         Objects.requireNonNull(values, "values");
@@ -487,6 +502,9 @@ public final class SqlSelect {
         result.compound = compoundQuery;
         result.orderSiblings = siblings;
         result.markRestriction = markRestriction;
+        result.statementEnd = statementEndIndex < sourceTokens.size()
+                ? sourceTokens.get(statementEndIndex).start() : source.length();
+        result.hasRowSelection = limit >= 0 || offset >= 0 || fetch >= 0;
 
         int[] legacyWhereMarker = findLegacyWhereMarker();
         if (legacyWhereMarker != null) {
@@ -723,6 +741,8 @@ public final class SqlSelect {
         String rowLimitRestriction;
 
         boolean compound;
+        int statementEnd;
+        boolean hasRowSelection;
         boolean orderSiblings;
 
         String markRestriction;

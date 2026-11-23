@@ -97,9 +97,11 @@ final class CommonRecognizers {
     /** Только явные JDBC-параметры: ? и :name. */
     static final class Parameter implements TokenRecognizer {
         private final boolean oracle;
+        private final boolean allowWhitespaceAfterColon;
 
-        Parameter(boolean oracle) {
+        Parameter(boolean oracle, boolean allowWhitespaceAfterColon) {
             this.oracle = oracle;
+            this.allowWhitespaceAfterColon = allowWhitespaceAfterColon;
         }
 
         @Override
@@ -108,9 +110,14 @@ final class CommonRecognizers {
             if (ch == '?') {
                 return new SqlScanner.Token(POSITIONAL_PARAMETER, at, at + 1);
             }
-            if (ch != ':' || at + 1 == sql.length()
-                    || !ScanChars.identifierStart(sql.charAt(at + 1))) return null;
-            int end = ScanChars.identifierEnd(sql, at + 1, oracle);
+            if (ch != ':') return null;
+
+            int start = at + 1;
+            if (allowWhitespaceAfterColon) {
+                while (start < sql.length() && Character.isWhitespace(sql.charAt(start))) start++;
+            }
+            if (start == sql.length() || !ScanChars.identifierStart(sql.charAt(start))) return null;
+            int end = ScanChars.identifierEnd(sql, start, oracle);
 
             // Forms-style application parameters use qualified names such as
             // :BLOCK.ITEM. The complete name belongs to one bind parameter;

@@ -50,7 +50,7 @@ import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.QUOTED_IDENTIFIE
 import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.WORD;
 
 /**
- * Выполняет анонимный блок PL/pgSQL через DO с параметрами в локальной настройке транзакции.
+ * Выполняет анонимный блок PL/pgSQL через DO с передачей параметров через pg_variables.
  * <p>
  * Для обёртки зарезервированы идентификаторы {@code jinv_outer} и {@code jinv_outer_*}
  * без учёта регистра.
@@ -62,7 +62,10 @@ import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.WORD;
 public class PGAnonymousSqlCall implements IDataCall {
 
     private static final JsonProvider JSON = JsonProvider.provider();
-    private static final String SETTING = "'jinv.anonymous_call'";
+    private static final String PGV_SLOT = "'jinv_anonymous_call', 'payload'";
+    private static final String PGV_SET = "pgv_set(" + PGV_SLOT + ", ";
+    private static final String PGV_GET = "pgv_get(" + PGV_SLOT + ", NULL::pg_catalog.jsonb, true)";
+    private static final String PGV_REMOVE = "pgv_remove(" + PGV_SLOT + ")";
     private static final String OUTER_LABEL = "jinv_outer";
     private static final String DO_TAG = "$jinv_do$";
 
@@ -197,7 +200,7 @@ public class PGAnonymousSqlCall implements IDataCall {
             switch (token.kind()) {
                 case NAMED_PARAMETER:
                 case POSITIONAL_PARAMETER:
-                    Comparable<?> id = token.kind() == NAMED_PARAMETER ? source.substring(token.start() + 1, token.end()) : position++;
+                    Comparable<?> id = token.kind() == NAMED_PARAMETER ? CallDescriptor.namedParameterId(source, token) : position++;
                     Parameter parameter = parameters.computeIfAbsent(id, key -> new Parameter(inferredInput(key)));
                     bind(parameter, identifiers);
                     result.append(OUTER_LABEL).append(".\"").append(parameter.variable).append('"');
@@ -372,17 +375,18 @@ public class PGAnonymousSqlCall implements IDataCall {
     /** */
     private StringBuilder jdbcHeader( Parameter[] bound )
     {
-        final StringBuilder sql =
-            new StringBuilder("SELECT 1 FROM pg_catalog.set_config(")
-                .append(SETTING).append(", ?, true);\nDO ").append(DO_TAG).append("\n<<").append(OUTER_LABEL).append(">>\n");
+        StringBuilder sql = new StringBuilder("SELECT ").append(PGV_SET)
+                .append("?::pg_catalog.jsonb, false);\nDO ").append(DO_TAG).append('\n');
 
+        if( Arrays.stream(bound).anyMatch(parameter -> parameter.metadata.isIn()) )
+            sql.append("DECLARE\n").append(OUTER_LABEL).append("_input pg_catalog.jsonb := ")
+                    .append(PGV_GET).append(";\n");
+
+        // Удаляем вход до преобразования параметров и выполнения пользовательского SQL.
+        sql.append("BEGIN\nPERFORM ").append(PGV_REMOVE)
+                .append(";\n<<").append(OUTER_LABEL).append(">>\n");
         if( bound.length > 0)
-        {
             sql.append("DECLARE\n");
-
-            if( Arrays.stream(bound).anyMatch(parameter -> parameter.metadata.isIn()) )
-                sql.append(OUTER_LABEL).append("_input pg_catalog.jsonb := pg_catalog.current_setting(").append(SETTING).append(")::pg_catalog.jsonb;\n");
-        }
 
         return sql;
     }
@@ -399,16 +403,17 @@ public class PGAnonymousSqlCall implements IDataCall {
                 if (parameter.metadata.isOut())
                     result.add("pg_catalog.to_jsonb(\"" + parameter.variable + "\")");
             }
-            sql.append("PERFORM pg_catalog.set_config(").append(SETTING).append(", pg_catalog.to_jsonb(").append(result).append(")::pg_catalog.text, true);\n");
+            sql.append("PERFORM ").append(PGV_SET).append("pg_catalog.to_jsonb(")
+                    .append(result).append("), false);\n");
         }
-        sql.append("END ").append(OUTER_LABEL).append(";\n").append(DO_TAG).append(";\n");
+        sql.append("END ").append(OUTER_LABEL).append(";\nEND;\n").append(DO_TAG).append(";\n");
 
         if (outputCount > 0) {
-            // OUT записывается JSON-массивом. Если остался входной объект, ошибка SELECT откатит и DO.
-            sql.append("SELECT data FROM (SELECT pg_catalog.current_setting(")
-                .append(SETTING)
-                    .append(") AS data) AS result WHERE pg_catalog.jsonb_array_length(data::pg_catalog.jsonb) = ")
-                        .append(outputCount).append(";\n");
+            // Материализация читает значение до вызова pgv_remove.
+            sql.append("WITH result AS MATERIALIZED (SELECT ").append(PGV_GET)
+                    .append(" AS data)\nSELECT data::pg_catalog.text, ").append(PGV_REMOVE)
+                    .append(" FROM result WHERE pg_catalog.jsonb_array_length(data) = ")
+                    .append(outputCount).append(";\n");
         }
 
         if (hideValues)
@@ -451,13 +456,14 @@ public class PGAnonymousSqlCall implements IDataCall {
     {
         Connection connection = tc.getConnection();
         boolean autoCommit = connection.getAutoCommit();
+        boolean switchAutoCommit = requiresAutoCommit && !autoCommit;
 
-        if (requiresAutoCommit && !autoCommit)
-            throw new CallException(Tags.PRODUCT_LABEL + "This anonymous block requires an auto-commit connection");
-        if (autoCommit && connection.unwrap(PGConnection.class).getPreferQueryMode() == PreferQueryMode.SIMPLE)
+        if ((autoCommit || switchAutoCommit)
+                && connection.unwrap(PGConnection.class).getPreferQueryMode() == PreferQueryMode.SIMPLE)
             throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous calls in simple query mode require a transaction");
 
-        try( PreparedStatement statement = connection.prepareStatement(sql) )
+        try( TaskContext.AutoCommitScope ignored = switchAutoCommit ? tc.autoCommitScope(true) : null;
+             PreparedStatement statement = connection.prepareStatement(sql) )
         {
             statement.setString(1, input);
 

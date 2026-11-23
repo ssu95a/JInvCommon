@@ -143,7 +143,7 @@ public class CallDescriptor {
         for( SqlScanner.Token token : tokenList )
         {
             if( token.kind() == NAMED_PARAMETER )
-                consumer.accept( sourceSql.substring(token.start() + 1, token.end()) );
+                consumer.accept( namedParameterId(sourceSql, token) );
 
             else if( token.kind() == POSITIONAL_PARAMETER )
                 consumer.accept( position++ );
@@ -156,9 +156,25 @@ public class CallDescriptor {
         if( S.isNullOrEmpty(name) )
             throw new IllegalArgumentException( "'name' is null" );
 
-        return tokenList.stream().anyMatch(t -> t.kind() == NAMED_PARAMETER
-                && t.end() - t.start() == name.length() + 1
-                && sourceSql.regionMatches(true, t.start() + 1, name, 0, name.length()));
+        for (SqlScanner.Token token : tokenList) {
+            if (token.kind() != NAMED_PARAMETER)
+                continue;
+            int start = namedParameterStart(sourceSql, token);
+            if (token.end() - start == name.length() && sourceSql.regionMatches(true, start, name, 0, name.length()))
+                return true;
+        }
+        return false;
+    }
+
+    static String namedParameterId(String source, SqlScanner.Token token) {
+        return source.substring(namedParameterStart(source, token), token.end());
+    }
+
+    private static int namedParameterStart(String source, SqlScanner.Token token) {
+        int start = token.start() + 1;
+        while (start < token.end() && Character.isWhitespace(source.charAt(start)))
+            start++;
+        return start;
     }
     /** */
     public boolean hasNamedParameters() {

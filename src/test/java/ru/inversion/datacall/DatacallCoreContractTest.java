@@ -170,6 +170,32 @@ class DatacallCoreContractTest {
     }
 
     @Test
+    void oracleCallAcceptsWhitespaceAfterBindColon() {
+        String block = "BEGIN UPDATE t SET c = : simvol_2, note = ': text'; -- : comment\n"
+                + ":\tresult := :SIMVOL_2; END;";
+        CallDescriptor descriptor = CallDescriptor.create(block, LangEnum.PL_SQL);
+        assertTrue(descriptor.hasNamedParameter("simvol_2"));
+        assertTrue(descriptor.hasNamedParameter("result"));
+        assertFalse(descriptor.hasNamedParameter("text"));
+        assertFalse(descriptor.hasNamedParameter("comment"));
+
+        CallStatement statement = CallBuilder.NEW()
+                .sql(block)
+                .lang(LangEnum.PL_SQL)
+                .parameter(OUT, "result", Types.VARCHAR, null, String.class, null, true)
+                .removeAdditionalInfo(true)
+                .build();
+        List<Object> ids = new ArrayList<>();
+        String jdbc = statement.prepareJdbcSql((position, id) -> ids.add(id), (position, value) -> {});
+
+        assertEquals(Arrays.asList("simvol_2", "result", "SIMVOL_2"), ids);
+        assertEquals("simvol_2", statement.getParameter("simvol_2").getName());
+        assertTrue(statement.getParameter("result").isOut());
+        assertTrue(jdbc.contains("c = ?, note = ': text'"), jdbc);
+        assertTrue(jdbc.contains("? := ?"), jdbc);
+    }
+
+    @Test
     void orderByOrdinalIsKeptWhenLiteralsAreReplaced() {
         CallStatement statement = CallBuilder.NEW()
                 .sql("select 7 from t ORDER BY 1")

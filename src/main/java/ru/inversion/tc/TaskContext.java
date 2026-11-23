@@ -288,6 +288,40 @@ public class TaskContext implements AutoCloseable {
         }
     }
 
+    /**
+     * Устанавливает режим autoCommit на время блока try-with-resources.
+     * Переход из false в true фиксирует открытую JDBC-транзакцию.
+     */
+    public AutoCommitScope autoCommitScope(boolean newAutoCommit) throws SQLException {
+        return new AutoCommitScope(getConnection(), newAutoCommit);
+    }
+
+    public static final class AutoCommitScope implements AutoCloseable {
+        private final Connection connection;
+        private final boolean previousAutoCommit;
+        private boolean restore;
+
+        private AutoCommitScope(Connection connection, boolean newAutoCommit) throws SQLException {
+            this.connection = connection;
+            this.previousAutoCommit = connection.getAutoCommit();
+            if (previousAutoCommit != newAutoCommit) {
+                connection.setAutoCommit(newAutoCommit);
+                restore = true;
+            }
+        }
+
+        public boolean getAutoCommit() throws SQLException {
+            return connection.getAutoCommit();
+        }
+
+        @Override
+        public void close() throws SQLException {
+            if (restore) {
+                connection.setAutoCommit(previousAutoCommit);
+                restore = false;
+            }
+        }
+    }
 
     /** */
     public String setSavepoint()

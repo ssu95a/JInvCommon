@@ -241,7 +241,15 @@ public class DataSetSelectBuilder {
     /** */
     private SqlSelect createSelect()
     {
-        SqlSelect select = new SqlSelect( sourceForSelect(), dialect);
+        String source = queryAlias == null ? sourceSql
+                : "SELECT " + queryAlias + ".* FROM (\n" + sourceSql + "\n) " + queryAlias;
+        SqlSelect select = new SqlSelect(source, dialect);
+        String sql = select.wrapCompoundForOuterClauses(!predicates.isEmpty(), sorting != null);
+        if (optimizerHint != null)
+            sql = addOptimizerHint(sql);
+        if (!source.equals(sql))
+            select = new SqlSelect(sql, dialect);
+
         List<String> predicatesSql = new ArrayList<>(predicates.size());
 
         for( Part part : predicates )
@@ -255,17 +263,6 @@ public class DataSetSelectBuilder {
             select.setMark(mark, "MARK");
 
         return select;
-    }
-
-    /** */
-    private String sourceForSelect()
-    {
-        String source = queryAlias == null
-                ? sourceSql
-                : "SELECT " + queryAlias + ".* FROM (\n"
-                    + sourceSql + "\n) " + queryAlias;
-
-        return optimizerHint == null ? source : addOptimizerHint(source);
     }
 
     /** */

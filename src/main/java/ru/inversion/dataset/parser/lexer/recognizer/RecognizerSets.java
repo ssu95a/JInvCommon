@@ -31,7 +31,7 @@ public final class RecognizerSets {
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),
                 new OperatorRecognizer(false, call),
-                new CommonRecognizers.Parameter(true),
+                new CommonRecognizers.Parameter(true, call),
                 new NumberRecognizer(),
                 new CommonRecognizers.Word(true),
                 new CommonRecognizers.Symbol(call)
@@ -56,7 +56,7 @@ public final class RecognizerSets {
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),
                 new OperatorRecognizer(true),
-                new CommonRecognizers.Parameter(false),
+                new CommonRecognizers.Parameter(false, false),
                 new NumberRecognizer(),
                 new CommonRecognizers.Word(false),
                 new CommonRecognizers.Symbol(procedural)
