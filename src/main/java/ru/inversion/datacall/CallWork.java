@@ -262,17 +262,17 @@ public class CallWork implements AutoCloseable {
     }
 
     /** */
-    public <T> CallWork set( Comparable<?> parameter, Supplier<T> supplier ) throws CallException {
+    public <T> CallWork set( Comparable parameter, Supplier<T> supplier ) throws CallException {
         return put( parameter, supplier );
     }
 
     /** */
-    public <T> CallWork set( Comparable<?> parameter, T value ) throws CallException {
+    public <T> CallWork set( Comparable parameter, T value ) throws CallException {
         return put( parameter, value );
     }
 
     /** Получение значения параметра */
-    public <T> T get( Comparable<?> parameter ) throws CallException {
+    public <T> T get( Comparable parameter ) throws CallException {
 
         PV pv = pvMap.get( parameter );
 
