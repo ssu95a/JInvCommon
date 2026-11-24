@@ -94,14 +94,14 @@ final class CommonRecognizers {
         }
     }
 
-    /** Только явные JDBC-параметры: ? и :name. */
+    /** JDBC-параметры ? и :name. В вызовах имя может состоять из цифр. */
     static final class Parameter implements TokenRecognizer {
         private final boolean oracle;
-        private final boolean allowWhitespaceAfterColon;
+        private final boolean call;
 
-        Parameter(boolean oracle, boolean allowWhitespaceAfterColon) {
+        Parameter(boolean oracle, boolean call) {
             this.oracle = oracle;
-            this.allowWhitespaceAfterColon = allowWhitespaceAfterColon;
+            this.call = call;
         }
 
         @Override
@@ -113,10 +113,17 @@ final class CommonRecognizers {
             if (ch != ':') return null;
 
             int start = at + 1;
-            if (allowWhitespaceAfterColon) {
+            if (oracle && call) {
                 while (start < sql.length() && Character.isWhitespace(sql.charAt(start))) start++;
             }
-            if (start == sql.length() || !ScanChars.identifierStart(sql.charAt(start))) return null;
+            if (start == sql.length()) return null;
+            if (call && ScanChars.digit(sql.charAt(start))) {
+                int end = ScanChars.digitsEnd(sql, start);
+                if (end < sql.length() && ScanChars.identifierPart(sql.charAt(end), oracle))
+                    return null;
+                return new SqlScanner.Token(NAMED_PARAMETER, at, end);
+            }
+            if (!ScanChars.identifierStart(sql.charAt(start))) return null;
             int end = ScanChars.identifierEnd(sql, start, oracle);
 
             // Forms-style application parameters use qualified names such as

@@ -1,13 +1,17 @@
 package ru.inversion.datacall;
 
 import org.junit.jupiter.api.Test;
+import ru.inversion.datacall.impl.SQLExprXMLLoader;
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.parser.statement.LangEnum;
 import ru.inversion.parser.statement.PrepareModeEnum;
+import ru.inversion.utils.MemoryURL;
 
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static javax.persistence.ParameterMode.IN;
 import static javax.persistence.ParameterMode.OUT;
@@ -193,6 +197,34 @@ class DatacallCoreContractTest {
         assertTrue(statement.getParameter("result").isOut());
         assertTrue(jdbc.contains("c = ?, note = ': text'"), jdbc);
         assertTrue(jdbc.contains("? := ?"), jdbc);
+    }
+
+    @Test
+    void postgresXmlKeepsNumericOutNamesAndLoadsOtherExpressions() throws Exception {
+        String xml = "<sql_expr_list>"
+                + "<expression name=\"GetDCM\" lang=\"PL/pgSQL\">"
+                + "<script><![CDATA[BEGIN NULL; END;]]></script></expression>"
+                + "<expression name=\"getMF\" lang=\"PL/pgSQL\">"
+                + "<script><![CDATA[BEGIN :1:=:docid; :2:=:1; END;]]></script>"
+                + "<parameters>"
+                + "<parameter name=\"docid\" mode=\"IN\" sqlType=\"NUMERIC\" javaType=\"Long\"/>"
+                + "<parameter name=\"1\" mode=\"OUT\" sqlType=\"BIGINT\" javaType=\"Long\"/>"
+                + "<parameter name=\"2\" mode=\"OUT\" sqlType=\"BIGINT\" javaType=\"Long\"/>"
+                + "</parameters></expression></sql_expr_list>";
+        try (SQLExprXMLLoader loader = new SQLExprXMLLoader(MemoryURL.create("numeric-out-names.xml", xml))) {
+            Map<String, CallStatement> statements = loader.parse(SqlDialectFactory.POSTGRES);
+            assertTrue(statements.containsKey("GetDCM"));
+
+            CallStatement statement = statements.get("getMF");
+            assertEquals(OUT, statement.getParameter("1").getMode());
+            assertEquals(OUT, statement.getParameter("2").getMode());
+            assertEquals(Long.class, statement.getParameter("1").getParameterType());
+            assertNull(statement.getParameter(1));
+
+            List<Object> ids = new ArrayList<>();
+            statement.prepareJdbcSql((position, id) -> ids.add(id), (position, value) -> {});
+            assertEquals(Arrays.asList("1", "docid", "2", "1"), ids);
+        }
     }
 
     @Test

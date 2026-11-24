@@ -56,7 +56,7 @@ public final class RecognizerSets {
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),
                 new OperatorRecognizer(true),
-                new CommonRecognizers.Parameter(false, false),
+                new CommonRecognizers.Parameter(false, procedural),
                 new NumberRecognizer(),
                 new CommonRecognizers.Word(false),
                 new CommonRecognizers.Symbol(procedural)

@@ -68,6 +68,22 @@ public class SqlScannerTest {
         assertEquals(sql, recreate(sql, tokens));
     }
 
+    @Test
+    public void callScannersRecognizeNumericNamesAsNamedBinds() {
+        String sql = "BEGIN :1:=:10::bigint; :2:=$1; :3:=?; END;";
+        List<SqlScanner.Token> tokens = PostgresSqlScanner.forPlPgSql().scan(sql);
+        assertTrue(containsText(sql, tokens, NAMED_PARAMETER, ":1"));
+        assertTrue(containsText(sql, tokens, NAMED_PARAMETER, ":10"));
+        assertEquals(4, count(tokens, NAMED_PARAMETER));
+        assertEquals(1, count(tokens, NUMBERED_PARAMETER));
+        assertEquals(1, count(tokens, POSITIONAL_PARAMETER));
+
+        String oracle = "BEGIN : 1:=:2; END;";
+        assertEquals(2, count(OracleSqlScanner.forCall().scan(oracle), NAMED_PARAMETER));
+        assertThrows(IllegalArgumentException.class, () -> POSTGRES.scan("select :1"));
+        assertThrows(IllegalArgumentException.class, () -> ORACLE.scan("select :1 from dual"));
+    }
+
 
     @Test
     public void postgresOperatorsPreserveLegacyConcatMarkers() {
