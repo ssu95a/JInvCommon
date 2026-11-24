@@ -496,7 +496,7 @@ import java.util.function.UnaryOperator;
     }
 
 
-    /** Для текстового блока PostgreSQL все bind-параметры, кроме o1, работают как INOUT. */
+    /** Для текстового блока PostgreSQL все bind-параметры работают как INOUT. */
     private static void executePostgresText( SQLCallBuilder builder, IParameters parameters) {
 
         final Map<Comparable<?>, Object> bindings = new LinkedHashMap<>();
@@ -507,17 +507,16 @@ import java.util.function.UnaryOperator;
                 public ParameterMetadata<?> apply( ParameterMetadata<?> parameter)
                 {
                     final String name = parameter.getName();
-                    final boolean outputOnly = "o1".equalsIgnoreCase(name);
 
                     Object value = null;
 
-                    if( !outputOnly && parameters != null )
+                    if( parameters != null )
                         value = parameter.isIndexed() ? parameters.getParameter( parameter.getPosition()) : parameters.getParameter(name);
 
-                    bindings.put( parameter.getIdentifier(), TypeConverter.convert(value, String.class ) );
+                    bindings.put( parameter.getIdentifier(), TypeConverter.convert( value, String.class ) );
 
                     ParameterMetadataBuilder metadata = new ParameterMetadataBuilder()
-                        .mode( outputOnly ? ParameterMode.OUT : ParameterMode.INOUT )
+                        .mode( ParameterMode.INOUT )
                             .sqlType(Types.VARCHAR);
 
                     if (parameter.isIndexed())
@@ -543,9 +542,9 @@ import java.util.function.UnaryOperator;
             {
                 bindings.keySet().forEach(id -> {
                     if (id instanceof Integer)
-                        parameters.setParameter((Integer)id, call.getParameter((Integer)id));
+                        parameters.setParameter( (Integer)id, call.getParameter((Integer)id));
                     else
-                        parameters.setParameter((String)id, call.getParameter((String)id));
+                        parameters.setParameter( (String)id,  call.getParameter((String)id));
                 });
             }
         }
