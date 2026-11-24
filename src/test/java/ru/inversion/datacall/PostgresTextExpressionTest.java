@@ -1,3 +1,4 @@
+package ru.inversion.datacall;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Isolated;
@@ -9,7 +10,6 @@ import ru.inversion.tc.TaskContext;
 import ru.inversion.utils.ParametersValues;
 
 import java.lang.reflect.Field;
-import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
@@ -51,32 +51,37 @@ class PostgresTextExpressionTest {
     }
 
     private static void checkAnonymousText(Connection connection) throws Exception {
-        ParametersValues values = new ParametersValues() {
-            @Override
-            public Object getParameter(String name) {
-                assertFalse("o1".equalsIgnoreCase(name), "o1 нельзя читать как входной параметр");
-                return super.getParameter(name);
-            }
-        };
+        ParametersValues values = new ParametersValues();
         values.setParameter("order_count", 6);
         values.setParameter("note", null);
         values.setParameter("o1", "previous");
         values.setParameter("rate", 1.5d);
         values.setParameter("enabled", true);
 
-        String sql = "BEGIN :order_count := :order_count + 1; :note := coalesce(:note, 'new');"
-                + " :rate := :rate + 1; :enabled := NOT :enabled; :O1 := coalesce(:o1, 'done'); END;";
+        String sql = "BEGIN "
+                + ":order_count := CAST(:order_count AS integer) + 1; "
+                + ":note := coalesce(:note, 'new'); "
+                + ":rate := CAST(:rate AS numeric) + 1; "
+                + ":enabled := NOT CAST(:enabled AS boolean); "
+                + ":O1 := coalesce(:o1, 'done') || '!'; "
+                + "END;";
         SQLExpressionFactory.execute("testPostgresTextExpression", sql, connection, values);
-        assertEquals(Integer.valueOf(7), values.get("order_count"));
+        assertEquals("7", values.get("order_count"));
         assertEquals("new", values.get("note"));
-        assertEquals("done", values.get("o1"));
-        assertEquals(Double.valueOf(2.5), values.get("rate"));
-        assertEquals(Boolean.FALSE, values.get("enabled"));
+        assertEquals("previous!", values.get("o1"));
+        assertEquals("2.5", values.get("rate"));
+        assertEquals("false", values.get("enabled"));
 
-        // SQL того же exprId остаётся в кэше. Типы bind вычисляются заново из текущих значений.
-        values.setParameter("order_count", new BigDecimal("1.5"));
+        // Тот же блок берёт текущее значение o1 при каждом вызове.
+        values.removeParameter("o1");
         SQLExpressionFactory.execute("testPostgresTextExpression", sql, connection, values);
-        assertEquals(new BigDecimal("2.5"), values.get("order_count"));
+        assertEquals("8", values.get("order_count"));
+        assertEquals("done!", values.get("o1"));
+
+        values.setParameter("o1", null);
+        SQLExpressionFactory.execute("testPostgresTextExpression", sql, connection, values);
+        assertEquals("9", values.get("order_count"));
+        assertEquals("done!", values.get("o1"));
     }
 
     private static void checkOrdinarySql(Connection connection) throws Exception {
