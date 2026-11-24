@@ -321,7 +321,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    /**
-    * Устанавливает alias источника строк запроса.
+    * Устанавливает alias таблицы или результата подзапроса.
+    * Для простого текстового запроса заданный alias должен совпадать
+    * с alias, уже объявленным в его FROM.
     */
    public void setQueryAlias( String qa ) {
 
@@ -827,18 +829,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    protected DataSetSelectBuilder createDataSetSelectBuilder( boolean ignoreFilters ) {
       SqlDialect dialect = getTaskContextForUse().dialect();
-      Class<?> rowClass = getRowClass();
-      Table table = rowClass == null ? null : rowClass.getAnnotation(Table.class);
-      String alias = getQueryAlias();
-      DataSetSelectBuilder builder;
-      if (table != null && S.isNotNullOrEmpty(table.name()) && getSQL() == null) {
-         if (alias != null)
-            DataSetSelectBuilder.validateTableAlias(alias, dialect);
-         String sql = alias == null ? internalGetSQL() : tableSelect(rowClass, table, alias, dialect);
-         builder = new DataSetSelectBuilder(sql, dialect);
-      } else {
-         builder = DataSetSelectBuilder.forDataSet(internalGetSQL(), dialect).queryAlias(alias);
-      }
+      DataSetSelectBuilder builder = createDataSetSourceBuilder(dialect);
       builder.optimizerHint(getOptimizerHint());
       addPredicates(builder, ignoreFilters);
       builder.orderBy(getOrderBy());
@@ -850,6 +841,19 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
 
       return builder;
+   }
+
+   final DataSetSelectBuilder createDataSetSourceBuilder(SqlDialect dialect) {
+      String alias = getQueryAlias();
+      Class<?> rowClass = getRowClass();
+      Table table = rowClass == null ? null : rowClass.getAnnotation(Table.class);
+      if (table != null && S.isNotNullOrEmpty(table.name()) && getSQL() == null) {
+         if (alias != null)
+            DataSetSelectBuilder.validateTableAlias(alias, dialect);
+         String sql = alias == null ? internalGetSQL() : tableSelect(rowClass, table, alias, dialect);
+         return DataSetSelectBuilder.forDataSetTable(sql, dialect, alias);
+      }
+      return DataSetSelectBuilder.forDataSet(internalGetSQL(), dialect).queryAlias(alias);
    }
 
    private void addPredicates( DataSetSelectBuilder builder, boolean ignoreFilters ) {
@@ -1389,22 +1393,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          throw new IllegalArgumentException(
                  "Refresh current row PK list is empty");
 
-      String sourceSql = internalGetSQL();
-      String alias = getQueryAlias();
-
-      DataSetSelectBuilder builder =
-              new DataSetSelectBuilder(sourceSql, dialect);
-
-      if( S.isNotNullOrEmpty(alias) )
-         builder.queryAlias(alias);
-
+      DataSetSelectBuilder builder = createDataSetSourceBuilder(dialect);
       builder.optimizerHint(getOptimizerHint());
 
       Set<String> usedNames = new HashSet<>();
       SqlScanner scanner = SqlScannerFactory.create(dialect);
       collectNamedParameters(
               usedNames,
-              sourceSql,
+              builder.sourceSql(),
               scanner
       );
 
@@ -1423,8 +1419,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       List<String> idParameterNames =
               new ArrayList<>(idColumns.size());
       StringBuilder predicate = new StringBuilder();
-      String qualifier =
-              S.isNullOrEmpty(alias) ? "" : alias + ".";
+      String qualifier = builder.predicateQualifier();
 
       for( int i = 0; i < idColumns.size(); i++ ) {
          if( i > 0 )

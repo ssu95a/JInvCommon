@@ -32,6 +32,8 @@ public class DataSetSelectBuilder {
     private final SqlDialect dialect;
     private final SqlScanner scanner;
     private final boolean useLegacySourceShape;
+    private final String tableAlias;
+    private SqlSelect.DataSetSource dataSetSource;
 
     private final List<Part> predicates = new ArrayList<>();
 
@@ -49,19 +51,25 @@ public class DataSetSelectBuilder {
 
     public DataSetSelectBuilder(String sql, SqlDialect dialect)
     {
-        this(sql, dialect, false);
+        this(sql, dialect, false, null);
     }
 
     /** Для текстовых SELECT, полученных из SQLDataSet. */
     public static DataSetSelectBuilder forDataSet(String sql, SqlDialect dialect) {
-        return new DataSetSelectBuilder(sql, dialect, true);
+        return new DataSetSelectBuilder(sql, dialect, true, null);
     }
 
-    private DataSetSelectBuilder(String sql, SqlDialect dialect, boolean useLegacySourceShape)
+    /** Для SQL, уже построенного по аннотации @Table. */
+    public static DataSetSelectBuilder forDataSetTable(String sql, SqlDialect dialect, String tableAlias) {
+        return new DataSetSelectBuilder(sql, dialect, false, tableAlias);
+    }
+
+    private DataSetSelectBuilder(String sql, SqlDialect dialect, boolean useLegacySourceShape, String tableAlias)
     {
         this.sourceSql = Checks.Require.text  ( sql, "sql");
         this.dialect   = Checks.Require.object( dialect, "dialect");
         this.useLegacySourceShape = useLegacySourceShape;
+        this.tableAlias = tableAlias;
 
         this.scanner   = SqlScannerFactory.create(dialect);
     }
@@ -103,6 +111,7 @@ public class DataSetSelectBuilder {
             validateAlias(value, scanner);
 
         queryAlias = value;
+        dataSetSource = null;
         invalidate();
 
         return this;
@@ -250,15 +259,43 @@ public class DataSetSelectBuilder {
         return PreparedSqlValues.jdbc( prepare(), values(primary) );
     }
 
+    /** Исходный SQL, без предикатов и других настроек билдера. */
+    public String sourceSql() {
+        return sourceSql;
+    }
+
+    /** Квалификатор для генерируемого предиката, с точкой при наличии алиаса. */
+    public String predicateQualifier() {
+        if (useLegacySourceShape)
+            return dataSetSource().predicateQualifier();
+        String alias = queryAlias == null ? tableAlias : queryAlias;
+        return alias == null ? "" : alias + ".";
+    }
+
+    private SqlSelect.DataSetSource dataSetSource() {
+        if (dataSetSource == null)
+            dataSetSource = new SqlSelect(sourceSql, dialect).dataSetSource(queryAlias, false);
+        return dataSetSource;
+    }
+
     /** */
     private SqlSelect createSelect()
     {
-        String source = queryAlias == null || useLegacySourceShape ? sourceSql
-                : "SELECT " + queryAlias + ".* FROM (\n" + sourceSql + "\n) " + queryAlias;
-        SqlSelect select = new SqlSelect(source, dialect);
-        String sql = useLegacySourceShape
-                ? select.wrapLegacyDataSetSource(queryAlias, sorting != null)
-                : select.wrapCompoundForOuterClauses(!predicates.isEmpty(), sorting != null);
+        String source;
+        String sql;
+        SqlSelect select;
+        if (useLegacySourceShape) {
+            SqlSelect.DataSetSource dataSet = dataSetSource();
+            dataSetSource = null;
+            select = dataSet.select();
+            source = dataSet.sql();
+            sql = source;
+        } else {
+            source = queryAlias == null ? sourceSql
+                    : "SELECT " + queryAlias + ".* FROM (\n" + sourceSql + "\n) " + queryAlias;
+            select = new SqlSelect(source, dialect);
+            sql = select.wrapCompoundForOuterClauses(!predicates.isEmpty(), sorting != null);
+        }
         if (optimizerHint != null)
             sql = addOptimizerHint(sql);
         if (!source.equals(sql))

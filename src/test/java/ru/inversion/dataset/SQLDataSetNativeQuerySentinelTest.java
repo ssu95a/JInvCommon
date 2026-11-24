@@ -122,6 +122,49 @@ public class SQLDataSetNativeQuerySentinelTest {
     }
 
     @Test
+    public void simpleNativeQueryAddsExplicitAliasToTable() throws Exception {
+        SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
+        ds.setTaskContext(oracleTaskContext());
+        assertEquals("select ID from NATIVE_SOURCE", ds.createDataSetSelectBuilder(false).buildSql());
+
+        ds.setQueryAlias("qrslt");
+        ds.setWherePredicat("qrslt.id = :id");
+        String sql = ds.createDataSetSelectBuilder(false).buildSql();
+        assertTrue(sql, sql.startsWith("select ID from NATIVE_SOURCE qrslt"));
+        assertTrue(sql, sql.contains("qrslt.id = :id"));
+
+        ds.setQueryAlias("entry");
+        ds.setWherePredicat("entry.id = :id");
+        sql = ds.createDataSetSelectBuilder(false).buildSql();
+        assertTrue(sql, sql.startsWith("select ID from NATIVE_SOURCE entry"));
+        assertFalse(sql, sql.contains("qrslt"));
+    }
+
+    @Test
+    public void simpleNativeQueryRejectsConflictingSourceAlias() throws Exception {
+        SQLDataSet<JoinedRow> ds = new SQLDataSet<>(JoinedRow.class);
+        ds.setTaskContext(oracleTaskContext());
+        ds.setNativeQueryName("simple");
+        ds.setQueryAlias("other");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ds.createDataSetSelectBuilder(false).buildSql());
+        assertTrue(error.getMessage(), error.getMessage().contains("SQL source alias entry"));
+    }
+
+    @Test
+    public void simpleQueryRejectsAliasThatWouldHideQualifiedTableName() throws Exception {
+        SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
+        ds.setTaskContext(oracleTaskContext());
+        ds.setSQL("select entry_table.id from schema_name.entry_table");
+        ds.setQueryAlias("other");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> ds.createDataSetSelectBuilder(false).buildSql());
+        assertTrue(error.getMessage(), error.getMessage().contains("hide SQL source name entry_table"));
+    }
+
+    @Test
     public void joinedNativeQueryHasLegacyResultAliasBeforeAddingPredicates() throws Exception {
         SQLDataSet<JoinedRow> ds = new SQLDataSet<>(JoinedRow.class);
         ds.setTaskContext(oracleTaskContext());

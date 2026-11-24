@@ -878,15 +878,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         builder.mark("1");
 
-        String alias = getQueryAlias();
-
-        builder.addPredicate(
-                markExistsPredicate(
-                        S.isNullOrEmpty(alias)
-                                ? ""
-                                : alias + "."
-                )
-        );
+        builder.addPredicate(markExistsPredicate(builder.predicateQualifier()));
 
         return builder;
     }
@@ -918,27 +910,12 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             List<String> predicates,
             ru.inversion.db.dialect.SqlDialect dialect
     ) {
-        DataSetSelectBuilder source =
-                new DataSetSelectBuilder(
-                        internalGetSQL(),
-                        dialect
-                );
-
-        String alias = getQueryAlias();
-
-        if( S.isNotNullOrEmpty(alias) )
-            source.queryAlias(alias);
+        DataSetSelectBuilder source = createDataSetSourceBuilder(dialect);
 
         for( String predicate : predicates )
             source.addPredicate(predicate);
 
-        source.addPredicate(
-                markExistsPredicate(
-                        S.isNullOrEmpty(alias)
-                                ? ""
-                                : alias + "."
-                )
-        );
+        source.addPredicate(markExistsPredicate(source.predicateQualifier()));
 
         return source;
     }

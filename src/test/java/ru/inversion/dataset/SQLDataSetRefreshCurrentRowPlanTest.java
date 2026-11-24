@@ -125,11 +125,7 @@ public class SQLDataSetRefreshCurrentRowPlanTest {
 
         assertTrue(
                 plan.sql,
-                plan.sql.contains("SELECT q.* FROM (")
-        );
-        assertTrue(
-                plan.sql,
-                plan.sql.contains(") q")
+                plan.sql.startsWith("select ID, AMOUNT from T q")
         );
         String pkParameter = plan.idParameterNames.get(0);
 
@@ -142,6 +138,20 @@ public class SQLDataSetRefreshCurrentRowPlanTest {
                 plan.preparedSql.getSql(),
                 plan.preparedSql.getSql().contains("q.ID = ?")
         );
+    }
+
+    @Test
+    public void refreshOfJoinedSourceUsesDefaultResultAlias() {
+        TestDataSet ds = new TestDataSet();
+        ds.setSQL("select t.ID from T t join A a on a.ID = t.ID where a.FLAG = :flag");
+        SQLDataSet.RefreshCurrentRowPlan plan = ds.createRefreshCurrentRowPlan(
+                Collections.singletonList("ID"), SqlDialectFactory.POSTGRES);
+
+        String sql = plan.preparedSql.getSql();
+        assertTrue(sql, sql.startsWith("SELECT qrslt.* FROM ("));
+        assertTrue(sql, sql.contains(") qrslt WHERE ((qrslt.ID = ?"));
+        assertEquals("flag", plan.preparedSql.getParameters().get(0).getName());
+        assertEquals(plan.idParameterNames.get(0), plan.preparedSql.getParameters().get(1).getName());
     }
 
     @Test
@@ -187,7 +197,7 @@ public class SQLDataSetRefreshCurrentRowPlanTest {
         assertTrue(
                 plan.sql,
                 plan.sql.contains(
-                        "SELECT /*+ INDEX(q IDX_T_ID)*/  q.*"
+                        "select /*+ INDEX(q IDX_T_ID)*/  ID, AMOUNT from T q"
                 )
         );
         assertEquals(1, plan.preparedSql.getParameters().size());

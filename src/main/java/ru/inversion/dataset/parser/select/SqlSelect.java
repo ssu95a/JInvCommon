@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.*;
@@ -24,6 +25,8 @@ import static ru.inversion.dataset.parser.lexer.SqlKeyword.*;
  * prepare() повторно сканирует собранный SQL только при сбросе кеша.
  */
 public final class SqlSelect {
+
+    private static final String DEFAULT_SUBQUERY_ALIAS = "qrslt";
 
     private final String source;
     private final SqlScanner scanner;
@@ -65,17 +68,46 @@ public final class SqlSelect {
         if (!layout.compound || (!replaceOrderBy && (!hasPredicates || layout.legacyWhereMarkerStart >= 0)))
             return source;
 
-        return wrapCompoundSource("qrslt", replaceOrderBy);
+        return wrapCompoundSource(DEFAULT_SUBQUERY_ALIAS, replaceOrderBy);
     }
 
-    /** Оборачивает текстовый запрос DataSet, если он сложнее SELECT из одного источника. */
+    /** Готовит источник строк текстового запроса DataSet. */
     public String wrapLegacyDataSetSource(String queryAlias, boolean replaceOrderBy) {
-        String alias = queryAlias == null ? "qrslt" : queryAlias;
+        return dataSetSource(queryAlias, replaceOrderBy).sql();
+    }
+
+    public DataSetSource dataSetSource(String queryAlias, boolean replaceOrderBy) {
+        String alias = queryAlias == null ? DEFAULT_SUBQUERY_ALIAS : queryAlias;
+        // Предикаты при <w> вставляются в исходный запрос, где внешнего алиаса нет.
+        String outerAlias = layout.legacyWhereMarkerStart < 0 ? alias : null;
         if (layout.compound)
-            return wrapCompoundSource(alias, replaceOrderBy);
-        if (needsLegacyDataSetWrapper())
-            return wrapSource(source.substring(0, layout.statementEnd), alias);
-        return source;
+            return new DataSetSource(new SqlSelect(wrapCompoundSource(alias, replaceOrderBy), scanner), outerAlias);
+
+        int table = simpleDataSetTable();
+        if (table == -1)
+            return new DataSetSource(new SqlSelect(wrapSource(source.substring(0, layout.statementEnd), alias), scanner), outerAlias);
+        if (table == sourceTokens.size()) {
+            if (queryAlias != null)
+                throw new IllegalArgumentException("queryAlias requires a FROM source");
+            return new DataSetSource(this, null);
+        }
+
+        int next = nextSignificant(table + 1);
+        if (!endOfDataSetFrom(next)) {
+            int existing = keyword(next, AS) ? nextSignificant(next + 1) : next;
+            String currentAlias = sourceTokens.get(existing).text(source);
+            if (queryAlias != null && !identifierName(currentAlias).equals(identifierName(queryAlias)))
+                throw new IllegalArgumentException("queryAlias " + queryAlias
+                        + " conflicts with SQL source alias " + currentAlias);
+            return new DataSetSource(this, currentAlias);
+        }
+        if (queryAlias == null)
+            return new DataSetSource(this, null);
+
+        checkTableReferences(table, queryAlias);
+        int end = sourceTokens.get(table).end();
+        String aliased = source.substring(0, end) + " " + queryAlias + source.substring(end);
+        return new DataSetSource(new SqlSelect(aliased, scanner), queryAlias);
     }
 
     private String wrapCompoundSource(String alias, boolean replaceOrderBy) {
@@ -93,39 +125,64 @@ public final class SqlSelect {
         return "SELECT " + alias + ".* FROM (\n" + sql + "\n) " + alias;
     }
 
-    private boolean needsLegacyDataSetWrapper() {
+    /** Индекс последней части имени таблицы, -1 для SFS, размер списка для SELECT без FROM. */
+    private int simpleDataSetTable() {
         int from = -1;
         boolean hasWhere = false;
         for (int i = 0; i < sourceTokens.size(); i++) {
             if (keyword(i, FROM)) {
                 if (from >= 0)
-                    return true;
+                    return -1;
                 from = i;
             }
             if (keyword(i, WHERE)) {
                 if (hasWhere)
-                    return true;
+                    return -1;
                 hasWhere = true;
             }
         }
         if (from < 0)
-            return false;
+            return sourceTokens.size();
 
         int table = nextSignificant(from + 1);
         if (!identifier(table))
-            return true;
+            return -1;
         int next = nextSignificant(table + 1);
         while (next < sourceTokens.size() && symbol(source, sourceTokens.get(next), ".")) {
             table = nextSignificant(next + 1);
             if (!identifier(table))
-                return true;
+                return -1;
             next = nextSignificant(table + 1);
         }
         if (endOfDataSetFrom(next))
-            return false;
+            return table;
         if (keyword(next, AS))
             next = nextSignificant(next + 1);
-        return !identifier(next) || !endOfDataSetFrom(nextSignificant(next + 1));
+        return identifier(next) && endOfDataSetFrom(nextSignificant(next + 1)) ? table : -1;
+    }
+
+    /** Алиас скрывает прежнее имя таблицы. Ссылки внутри исходного SQL сохраняем. */
+    private void checkTableReferences(int table, String alias) {
+        String tableName = identifierName(sourceTokens.get(table).text(source));
+        boolean sameName = tableName.equals(identifierName(alias));
+        for (int i = 0, previous = -1; i < sourceTokens.size(); i = nextSignificant(i + 1)) {
+            if (i != table && identifier(i) && tableName.equals(identifierName(sourceTokens.get(i).text(source)))) {
+                boolean schemaQualified = previous >= 0 && symbol(source, sourceTokens.get(previous), ".");
+                int next = nextSignificant(i + 1);
+                boolean qualifier = next < sourceTokens.size() && symbol(source, sourceTokens.get(next), ".");
+                if (schemaQualified || !sameName && (qualifier || !(scanner instanceof OracleSqlScanner)))
+                    throw new IllegalArgumentException("queryAlias " + alias
+                            + " would hide SQL source name " + sourceTokens.get(table).text(source)
+                            + ". Declare the alias in the source SQL.");
+            }
+            previous = i;
+        }
+    }
+
+    private String identifierName(String value) {
+        if (value.startsWith("\""))
+            return value.substring(1, value.length() - 1).replace("\"\"", "\"");
+        return scanner instanceof OracleSqlScanner ? value.toUpperCase(Locale.ROOT) : value.toLowerCase(Locale.ROOT);
     }
 
     private boolean identifier(int index) {
@@ -782,6 +839,28 @@ public final class SqlSelect {
 
     private static boolean symbol(String sql, SqlScanner.Token token, String value) {
         return token.kind() == SYMBOL && token.text(sql).equals(value);
+    }
+
+    public static final class DataSetSource {
+        private final SqlSelect select;
+        private final String predicateAlias;
+
+        private DataSetSource(SqlSelect select, String predicateAlias) {
+            this.select = select;
+            this.predicateAlias = predicateAlias;
+        }
+
+        public String sql() {
+            return select.source;
+        }
+
+        public SqlSelect select() {
+            return select;
+        }
+
+        public String predicateQualifier() {
+            return predicateAlias == null ? "" : predicateAlias + ".";
+        }
     }
 
     /** */

@@ -529,13 +529,7 @@ public class AggregatorContractTest {
         assertTrue(
                 prepared.getSql(),
                 prepared.getSql().contains(
-                        "SELECT q.* FROM ("
-                )
-        );
-        assertTrue(
-                prepared.getSql(),
-                prepared.getSql().contains(
-                        ") q"
+                        "select ID, AMOUNT from T q"
                 )
         );
         assertTrue(
@@ -578,6 +572,21 @@ public class AggregatorContractTest {
 
         assertFalse(sql, sql.contains("SELECT q.* FROM ("));
         assertTrue(sql, sql.contains("a$.idrow = ID"));
+    }
+
+    @Test
+    public void markedAggregateOfJoinedSourceQualifiesKeyWithDefaultResultAlias() {
+        TestXXIDataSet ds = new TestXXIDataSet();
+        ds.setSQL("select t.ID from T t join A a on a.ID = t.ID");
+        ds.setRowClass(MarkRow.class);
+
+        String sql = ds.createMarkedAggregateSourceBuilder(
+                java.util.Collections.emptyList(),
+                ru.inversion.db.dialect.SqlDialectFactory.POSTGRES
+        ).buildSql();
+
+        assertTrue(sql, sql.startsWith("SELECT qrslt.* FROM ("));
+        assertTrue(sql, sql.contains("a$.idrow = qrslt.ID"));
     }
 
 
