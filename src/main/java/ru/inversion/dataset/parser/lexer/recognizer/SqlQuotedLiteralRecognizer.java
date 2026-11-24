@@ -4,17 +4,15 @@ import ru.inversion.dataset.parser.lexer.SqlScanner;
 import ru.inversion.dataset.parser.lexer.TokenRecognizer;
 
 /**
- * Fail-fast guard for quoted value syntax outside the supported sparser SQL.
- *
- * Supported application values are plain strings/numbers or explicit bind
- * parameters. Prefixed and typed quoted literals are intentionally rejected.
+ * Распознаёт литерал DATE целиком, чтобы строка даты осталась частью SQL
+ * при параметризации. Остальные специальные формы проверяются отдельно.
  */
-final class UnsupportedQuotedLiteralRecognizer implements TokenRecognizer {
+final class SqlQuotedLiteralRecognizer implements TokenRecognizer {
 
     private final boolean oracle;
     private final CommonRecognizers.BlockComment blockComment;
 
-    UnsupportedQuotedLiteralRecognizer(boolean oracle) {
+    SqlQuotedLiteralRecognizer(boolean oracle) {
         this.oracle = oracle;
         this.blockComment = new CommonRecognizers.BlockComment(!oracle);
     }
@@ -26,7 +24,7 @@ final class UnsupportedQuotedLiteralRecognizer implements TokenRecognizer {
 
         int end = ScanChars.identifierEnd(sql, at, oracle);
 
-        // E'...', N'...', q'...', B'...', X'...' and similar prefixes.
+        // Строки с префиксами E, N, q, B, X и подобными.
         if (end < sql.length() && sql.charAt(end) == '\'')
             throw unsupported(at);
 
@@ -39,27 +37,31 @@ final class UnsupportedQuotedLiteralRecognizer implements TokenRecognizer {
                 || sql.charAt(end + 1) == '"'))
             throw unsupported(at);
 
-        // DATE '...', TIME '...', TIMESTAMP(3) WITH TIME ZONE '...', ...
-        if (typedQuotedLiteral(sql, at, end))
+        if (word(sql, at, end, "DATE")) {
+            int quote = skipTrivia(sql, end);
+            return quote < sql.length() && sql.charAt(quote) == '\''
+                    ? new SqlScanner.Token(SqlScanner.Kind.TYPED_LITERAL, at, ScanChars.quotedEnd(sql, quote, '\''))
+                    : null;
+        }
+
+        // TIME, TIMESTAMP и INTERVAL пока отклоняются.
+        if (unsupportedTypedLiteral(sql, at, end))
             throw unsupported(at);
 
         return null;
     }
 
-    private boolean typedQuotedLiteral(String sql, int at, int end) {
-        boolean date = word(sql, at, end, "DATE");
+    private boolean unsupportedTypedLiteral(String sql, int at, int end) {
         boolean time = word(sql, at, end, "TIME");
         boolean timestamp = word(sql, at, end, "TIMESTAMP");
         boolean interval = word(sql, at, end, "INTERVAL");
 
-        if (!date && !time && !timestamp && !interval)
+        if (!time && !timestamp && !interval)
             return false;
 
         int i = skipTrivia(sql, end);
 
-        if ((time || timestamp || interval)
-                && i < sql.length()
-                && sql.charAt(i) == '(') {
+        if (i < sql.length() && sql.charAt(i) == '(') {
             int afterPrecision = precisionEnd(sql, i);
             if (afterPrecision < 0)
                 return false;

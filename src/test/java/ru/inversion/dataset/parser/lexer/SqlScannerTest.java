@@ -231,6 +231,17 @@ public class SqlScannerTest {
     }
 
     @Test
+    public void dateLiteralIsOneTokenAndPreservesItsOriginalText() {
+        String literal = "Date /* business date */ '2013-12-14'";
+        for (SqlScanner scanner : Arrays.asList(ORACLE, POSTGRES)) {
+            List<SqlScanner.Token> tokens = scanner.scan(literal);
+            assertEquals(1, tokens.size());
+            assertEquals(TYPED_LITERAL, tokens.get(0).kind());
+            assertEquals(literal, tokens.get(0).text(literal));
+        }
+    }
+
+    @Test
     public void unsupportedPrefixedStringFormsAreRejected() {
         rejects(ORACLE, "select q'[abc]' from dual");
         rejects(ORACLE, "select nq'<abc>' from dual");
@@ -241,11 +252,9 @@ public class SqlScannerTest {
         rejects(POSTGRES, "select X'AB'");
         rejects(POSTGRES, "select U&'abc'");
         rejects(POSTGRES, "select U&\"name\"");
-        rejects(POSTGRES, "select DATE '2026-01-01'");
         rejects(POSTGRES, "select TIME /* c */ '12:00'");
         rejects(POSTGRES,
                 "select TIMESTAMP(3) WITH TIME ZONE '2026-01-01 12:00:00'");
-        rejects(ORACLE, "select DATE '2026-01-01' from dual");
         rejects(POSTGRES, "select $abc$");
         rejects(POSTGRES, "select $abc$");
         rejects(POSTGRES, "select $tag$abc$tag$");

@@ -26,7 +26,7 @@ public final class RecognizerSets {
                 new CommonRecognizers.BlockComment(false)
         ));
         if( !call )
-            rules.add(new UnsupportedQuotedLiteralRecognizer(true));
+            rules.add(new SqlQuotedLiteralRecognizer(true));
         rules.addAll(Arrays.asList(
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),
@@ -51,7 +51,7 @@ public final class RecognizerSets {
                 new OptimizerHintRecognizer(true),
                 new CommonRecognizers.BlockComment(true),
                 procedural ? new PostgresRecognizers.QuotedLiteral()
-                           : new UnsupportedQuotedLiteralRecognizer(false),
+                           : new SqlQuotedLiteralRecognizer(false),
                 new PostgresRecognizers.NumberedParameter(),
                 new CommonRecognizers.StringLiteral(),
                 new CommonRecognizers.QuotedIdentifier(),

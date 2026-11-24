@@ -167,11 +167,30 @@ public class SQLDataSetNativeQuerySentinelTest {
     }
 
     @Test
+    public void legacyOrderByPreservesDateLiterals() throws Exception {
+        SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
+        ds.setTaskContext(oracleTaskContext());
+        ds.setSQL("SELECT dTrcDoc, cNalFlag, iTrcPriority, dTrcCreate, iTrcNum, iTrcANum FROM XTRC");
+        ds.setWherePredicat("iTrcNum >= :minNum");
+        String order = "CASE WHEN dTrcDoc < Date '2013-12-14' AND cNalFlag IS NOT NULL THEN 5 "
+                + "WHEN dTrcDoc < Date '2013-12-14' AND iTrcPriority > 3 THEN iTrcPriority - 1 "
+                + "ELSE iTrcPriority END, dTrcCreate, iTrcNum, iTrcANum";
+        ds.setOrderBy("~" + order + "~");
+
+        PreparedSql prepared = ds.createDataSetSelectBuilder(false).prepare();
+        String sql = prepared.getSql();
+        assertTrue(sql, sql.contains("ORDER BY " + order));
+        assertFalse(sql, sql.contains("~"));
+        assertEquals(1, prepared.getParameters().size());
+        assertEquals("minNum", prepared.getParameters().get(0).getName());
+    }
+
+    @Test
     public void queryPreparationFailurePrintsSourceAndOrderByInStackTrace() throws Exception {
         SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
         ds.setTaskContext(oracleTaskContext());
         String sql = "SELECT id, due_date FROM NATIVE_SOURCE WHERE id = :id";
-        String order = "CASE WHEN due_date = DATE '1999-12-31' THEN 1 ELSE 0 END";
+        String order = "CASE WHEN due_date = TIMESTAMP '1999-12-31 00:00:00' THEN 1 ELSE 0 END";
         ds.setSQL(sql);
         ds.setOrderBy(order);
         ds.setParameter("id", "runtime-bind-value");

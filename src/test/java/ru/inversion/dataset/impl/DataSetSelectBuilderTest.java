@@ -471,9 +471,9 @@ public class DataSetSelectBuilderTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void typedStringLiteralIsRejected() {
+    public void unsupportedTypedStringLiteralIsRejected() {
         new DataSetSelectBuilder(
-                "select id from t where d = DATE '2026-10-26'",
+                "select id from t where d = TIMESTAMP '2026-10-26 00:00:00'",
                 SqlDialectFactory.ORACLE)
                 .prepare();
     }

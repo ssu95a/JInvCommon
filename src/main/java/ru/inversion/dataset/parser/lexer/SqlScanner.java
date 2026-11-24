@@ -28,7 +28,8 @@ public abstract class SqlScanner {
         NAMED_PARAMETER,
         NUMBERED_PARAMETER,
         OPERATOR,
-        SYMBOL
+        SYMBOL,
+        TYPED_LITERAL
     }
 
     public static final class Token {

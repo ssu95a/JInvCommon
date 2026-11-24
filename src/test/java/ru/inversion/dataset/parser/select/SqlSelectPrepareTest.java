@@ -218,9 +218,7 @@ public class SqlSelectPrepareTest {
         assertEquals("Y", p.getParameters().get(0).getValue());
     }
 
-    @Test public void typedStringLiteralsAreRejected() {
-        assertRejected(() -> pg(
-                "select id from t where dt >= date '2026-01-01'").prepare());
+    @Test public void unsupportedTypedStringLiteralsAreRejected() {
         assertRejected(() -> pg(
                 "select id from t where tm > time '12:00'").prepare());
         assertRejected(() -> pg(
@@ -471,6 +469,17 @@ public class SqlSelectPrepareTest {
         assertRejected(() -> pg(
                 "select x from t where ts > timestamp(3) '2026-01-01 12:00:00'")
                 .prepare());
+    }
+
+    @Test public void dateLiteralOutsideOrderByStaysInSql() {
+        String source = "select id from t where dt < DATE '2013-12-14' and flag='A' and id=:id";
+        for (SqlSelect select : Arrays.asList(ora(source), pg(source))) {
+            PreparedSql p = select.prepare();
+            assertEquals("select id from t where dt < DATE '2013-12-14' and flag=? and id=?", p.getSql());
+            assertParameterKinds(p, Parameter.Kind.LITERAL, Parameter.Kind.NAMED);
+            assertEquals("A", p.getParameters().get(0).getValue());
+            assertEquals("id", p.getParameters().get(1).getName());
+        }
     }
 
 }
