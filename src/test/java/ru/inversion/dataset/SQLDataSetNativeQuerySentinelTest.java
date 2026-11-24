@@ -11,6 +11,8 @@ import javax.persistence.Id;
 import javax.persistence.NamedNativeQueries;
 import javax.persistence.NamedNativeQuery;
 import javax.persistence.Table;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -162,6 +164,26 @@ public class SQLDataSetNativeQuerySentinelTest {
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> ds.createDataSetSelectBuilder(false).buildSql());
         assertTrue(error.getMessage(), error.getMessage().contains("hide SQL source name entry_table"));
+    }
+
+    @Test
+    public void queryPreparationFailurePrintsSourceAndOrderByInStackTrace() throws Exception {
+        SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
+        ds.setTaskContext(oracleTaskContext());
+        String sql = "SELECT id, due_date FROM NATIVE_SOURCE WHERE id = :id";
+        String order = "CASE WHEN due_date = DATE '1999-12-31' THEN 1 ELSE 0 END";
+        ds.setSQL(sql);
+        ds.setOrderBy(order);
+        ds.setParameter("id", "runtime-bind-value");
+
+        DataSetException error = assertThrows(DataSetException.class, () -> ds.executeQuery());
+        StringWriter output = new StringWriter();
+        error.printStackTrace(new PrintWriter(output));
+        String trace = output.toString();
+        assertTrue(trace, trace.contains("Unsupported quoted literal at offset 21"));
+        assertTrue(trace, trace.contains("Source SQL\n" + sql));
+        assertTrue(trace, trace.contains("ORDER BY fragment\n" + order));
+        assertFalse(trace, trace.contains("runtime-bind-value"));
     }
 
     @Test

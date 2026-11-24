@@ -878,9 +878,18 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    protected PreparedSql prepareDataQuery() throws DataSetException {
       DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
-      PreparedSql sql = builder.prepare();
-      preparedSelectBuilder = builder;
-      return sql;
+      try {
+         PreparedSql sql = builder.prepare();
+         preparedSelectBuilder = builder;
+         return sql;
+      }
+      catch( RuntimeException ex ) {
+         String message = Tags.PRODUCT_LABEL + "Error preparing DataSet query\nSource SQL\n" + builder.sourceSql();
+         String orderBy = builder.orderBySql();
+         if( orderBy != null )
+            message += "\nORDER BY fragment\n" + orderBy;
+         throw new DataSetException(message, ex);
+      }
    }
 
    /** {@inheritDoc} */

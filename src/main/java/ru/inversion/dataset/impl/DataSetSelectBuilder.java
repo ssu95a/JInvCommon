@@ -264,6 +264,11 @@ public class DataSetSelectBuilder {
         return sourceSql;
     }
 
+    /** Фрагмент сортировки, заданный поверх исходного SQL. */
+    public String orderBySql() {
+        return sorting == null ? null : sorting.sql;
+    }
+
     /** Квалификатор для генерируемого предиката, с точкой при наличии алиаса. */
     public String predicateQualifier() {
         if (useLegacySourceShape)
