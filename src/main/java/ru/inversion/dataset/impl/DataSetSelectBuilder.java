@@ -31,6 +31,7 @@ public class DataSetSelectBuilder {
 
     private final SqlDialect dialect;
     private final SqlScanner scanner;
+    private final boolean useLegacySourceShape;
 
     private final List<Part> predicates = new ArrayList<>();
 
@@ -48,8 +49,19 @@ public class DataSetSelectBuilder {
 
     public DataSetSelectBuilder(String sql, SqlDialect dialect)
     {
+        this(sql, dialect, false);
+    }
+
+    /** Для текстовых SELECT, полученных из SQLDataSet. */
+    public static DataSetSelectBuilder forDataSet(String sql, SqlDialect dialect) {
+        return new DataSetSelectBuilder(sql, dialect, true);
+    }
+
+    private DataSetSelectBuilder(String sql, SqlDialect dialect, boolean useLegacySourceShape)
+    {
         this.sourceSql = Checks.Require.text  ( sql, "sql");
         this.dialect   = Checks.Require.object( dialect, "dialect");
+        this.useLegacySourceShape = useLegacySourceShape;
 
         this.scanner   = SqlScannerFactory.create(dialect);
     }
@@ -79,8 +91,8 @@ public class DataSetSelectBuilder {
     }
 
     /**
-     * Оборачивает исходный SELECT внешним SELECT с alias.
-     * Predicates, mark и ORDER BY применяются к внешнему SELECT.
+     * Задаёт alias обёртки. Для SQLDataSet необходимость обёртки
+     * определяется по форме исходного запроса.
      */
     public DataSetSelectBuilder queryAlias(String alias) {
         String value = alias == null ? null : alias.trim();
@@ -88,7 +100,7 @@ public class DataSetSelectBuilder {
             value = null;
 
         if( value != null )
-            validateAlias(value);
+            validateAlias(value, scanner);
 
         queryAlias = value;
         invalidate();
@@ -241,10 +253,12 @@ public class DataSetSelectBuilder {
     /** */
     private SqlSelect createSelect()
     {
-        String source = queryAlias == null ? sourceSql
+        String source = queryAlias == null || useLegacySourceShape ? sourceSql
                 : "SELECT " + queryAlias + ".* FROM (\n" + sourceSql + "\n) " + queryAlias;
         SqlSelect select = new SqlSelect(source, dialect);
-        String sql = select.wrapCompoundForOuterClauses(!predicates.isEmpty(), sorting != null);
+        String sql = useLegacySourceShape
+                ? select.wrapLegacyDataSetSource(queryAlias, sorting != null)
+                : select.wrapCompoundForOuterClauses(!predicates.isEmpty(), sorting != null);
         if (optimizerHint != null)
             sql = addOptimizerHint(sql);
         if (!source.equals(sql))
@@ -295,8 +309,12 @@ public class DataSetSelectBuilder {
         throw new IllegalArgumentException( "Top-level SELECT not found for optimizerHint");
     }
 
-    /** */
-    private void validateAlias(String alias) {
+    /** Проверяет alias, который SQLDataSet подставляет после имени таблицы. */
+    public static void validateTableAlias(String alias, SqlDialect dialect) {
+        validateAlias(alias, SqlScannerFactory.create(dialect));
+    }
+
+    private static void validateAlias(String alias, SqlScanner scanner) {
 
         final List<SqlScanner.Token> tokens = scanner.scan(alias);
 

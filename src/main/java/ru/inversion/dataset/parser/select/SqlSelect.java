@@ -65,14 +65,83 @@ public final class SqlSelect {
         if (!layout.compound || (!replaceOrderBy && (!hasPredicates || layout.legacyWhereMarkerStart >= 0)))
             return source;
 
+        return wrapCompoundSource("qrslt", replaceOrderBy);
+    }
+
+    /** Оборачивает текстовый запрос DataSet, если он сложнее SELECT из одного источника. */
+    public String wrapLegacyDataSetSource(String queryAlias, boolean replaceOrderBy) {
+        String alias = queryAlias == null ? "qrslt" : queryAlias;
+        if (layout.compound)
+            return wrapCompoundSource(alias, replaceOrderBy);
+        if (needsLegacyDataSetWrapper())
+            return wrapSource(source.substring(0, layout.statementEnd), alias);
+        return source;
+    }
+
+    private String wrapCompoundSource(String alias, boolean replaceOrderBy) {
         String inner = source.substring(0, layout.statementEnd);
         if (layout.orderStart >= 0 && !layout.hasRowSelection)
             inner = source.substring(0, layout.orderStart) + source.substring(layout.orderEnd, layout.statementEnd);
 
-        String sql = "SELECT qrslt.* FROM (\n" + inner + "\n) qrslt";
+        String sql = wrapSource(inner, alias);
         if (!replaceOrderBy && layout.orderStart >= 0)
             sql += "\n" + source.substring(layout.orderStart, layout.orderEnd);
         return sql;
+    }
+
+    private static String wrapSource(String sql, String alias) {
+        return "SELECT " + alias + ".* FROM (\n" + sql + "\n) " + alias;
+    }
+
+    private boolean needsLegacyDataSetWrapper() {
+        int from = -1;
+        boolean hasWhere = false;
+        for (int i = 0; i < sourceTokens.size(); i++) {
+            if (keyword(i, FROM)) {
+                if (from >= 0)
+                    return true;
+                from = i;
+            }
+            if (keyword(i, WHERE)) {
+                if (hasWhere)
+                    return true;
+                hasWhere = true;
+            }
+        }
+        if (from < 0)
+            return false;
+
+        int table = nextSignificant(from + 1);
+        if (!identifier(table))
+            return true;
+        int next = nextSignificant(table + 1);
+        while (next < sourceTokens.size() && symbol(source, sourceTokens.get(next), ".")) {
+            table = nextSignificant(next + 1);
+            if (!identifier(table))
+                return true;
+            next = nextSignificant(table + 1);
+        }
+        if (endOfDataSetFrom(next))
+            return false;
+        if (keyword(next, AS))
+            next = nextSignificant(next + 1);
+        return !identifier(next) || !endOfDataSetFrom(nextSignificant(next + 1));
+    }
+
+    private boolean identifier(int index) {
+        if (index >= sourceTokens.size())
+            return false;
+        SqlScanner.Kind kind = sourceTokens.get(index).kind();
+        return kind == WORD || kind == QUOTED_IDENTIFIER;
+    }
+
+    private boolean endOfDataSetFrom(int index) {
+        return index >= sourceTokens.size()
+                || sourceTokens.get(index).start() >= layout.statementEnd
+                || sourceTokens.get(index).start() == layout.legacyWhereMarkerStart
+                || in(keyword(index), WHERE, HAVING, WINDOW, QUALIFY, MODEL)
+                || keywords(index, GROUP, BY) || orderClauseAt(index) || tailAt(index)
+                || keywords(index, START, WITH) || keywords(index, CONNECT, BY);
     }
 
     /** */

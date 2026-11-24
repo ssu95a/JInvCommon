@@ -321,7 +321,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
    /**
-    * Устанавливает alias внешнего SELECT.
+    * Устанавливает alias источника строк запроса.
     */
    public void setQueryAlias( String qa ) {
 
@@ -336,7 +336,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
-   /** Возвращает alias внешнего SELECT. */
+   /** Возвращает заданный alias источника строк запроса. */
    public String getQueryAlias() {
       return queryAlias;
    }
@@ -692,20 +692,19 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       if( clazz == null )
          return null;
 
-      {
-         Table table = clazz.getAnnotation(Table.class);
+      Table table = clazz.getAnnotation(Table.class);
+      return table == null || S.isNullOrEmpty(table.name())
+              ? null : tableSelect(clazz, table, null, taskContext.dialect());
+   }
 
-         if( table != null && !S.isNullOrEmpty(table.name()) ) {
-
-            sql = Arrays.asList( clazz.getMethods () )
-                    .stream()
-                    .filter( methodFilter::test )
-                    .map( (m)->columnMapper.apply( m, null, taskContext.dialect() ) )
-                    .collect( Collectors.joining( ",", "SELECT ", " FROM " + table.name() ) );
-         }//end if
-      }
-
-      return sql;
+   private static String tableSelect(Class<?> rowClass, Table table, String alias, SqlDialect dialect) {
+      String from = " FROM " + table.name();
+      if (alias != null)
+         from += " " + alias;
+      return Arrays.stream(rowClass.getMethods())
+              .filter(methodFilter)
+              .map(method -> columnMapper.apply(method, alias, dialect))
+              .collect(Collectors.joining(",", "SELECT ", from));
    }
 
    /**
@@ -828,8 +827,18 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    protected DataSetSelectBuilder createDataSetSelectBuilder( boolean ignoreFilters ) {
       SqlDialect dialect = getTaskContextForUse().dialect();
-       DataSetSelectBuilder builder = new DataSetSelectBuilder(internalGetSQL(), dialect);
-      builder.queryAlias(getQueryAlias());
+      Class<?> rowClass = getRowClass();
+      Table table = rowClass == null ? null : rowClass.getAnnotation(Table.class);
+      String alias = getQueryAlias();
+      DataSetSelectBuilder builder;
+      if (table != null && S.isNotNullOrEmpty(table.name()) && getSQL() == null) {
+         if (alias != null)
+            DataSetSelectBuilder.validateTableAlias(alias, dialect);
+         String sql = alias == null ? internalGetSQL() : tableSelect(rowClass, table, alias, dialect);
+         builder = new DataSetSelectBuilder(sql, dialect);
+      } else {
+         builder = DataSetSelectBuilder.forDataSet(internalGetSQL(), dialect).queryAlias(alias);
+      }
       builder.optimizerHint(getOptimizerHint());
       addPredicates(builder, ignoreFilters);
       builder.orderBy(getOrderBy());
