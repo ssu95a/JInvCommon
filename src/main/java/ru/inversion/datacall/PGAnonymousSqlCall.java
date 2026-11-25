@@ -81,10 +81,12 @@ public class PGAnonymousSqlCall implements IDataCall {
 
     private final TaskContext tc;
     private final boolean requiresAutoCommit;
+    private final boolean closeAfterExecute;
 
     private final IParameters callBackParameters;
     private final Map<Comparable<?>, Parameter> parameters = new TreeMap<>(ParametersValues.ParamIdComparator);
 
+    private final Parameter[] bound;
     private final boolean hideValues;
 
     private final IListenerManEvent<IDataCallListener, DataCallEvent> listeners = ListenerManFactory.createListenerManEvent(IDataCallListener::dataCallChanged);
@@ -96,6 +98,8 @@ public class PGAnonymousSqlCall implements IDataCall {
     private final int declarationsOffset;
     private int declarationsLength;
     private String preparedSql;
+    private String[] declarationTypes;
+    private PreparedStatement reusableStatement;
     private int bindCount;
     private int outputCount;
     private String name;
@@ -109,7 +113,14 @@ public class PGAnonymousSqlCall implements IDataCall {
         String name
     )
     {
+        this(tc, callStatement, callBackParameters, name, true);
+    }
+
+    PGAnonymousSqlCall(TaskContext tc, CallStatement callStatement, IParameters callBackParameters,
+                       String name, boolean closeAfterExecute)
+    {
         this.tc = Checks.Require.object(tc, "tc");
+        this.closeAfterExecute = closeAfterExecute;
         this.requiresAutoCommit = Checks.Require.object(callStatement, "callStatement").isAutoCommit();
         this.name = name;
         this.callBackParameters = callBackParameters == null ? IParameters.EMPTY : callBackParameters;
@@ -161,7 +172,7 @@ public class PGAnonymousSqlCall implements IDataCall {
 
         hideValues = parameters.values().stream().anyMatch(parameter -> parameter.bindPosition >= 0 && parameter.metadata.isIn() && !parameter.metadata.isLogValue());
 
-        Parameter[] bound = boundParameters();
+        bound = collectBoundParameters();
 
         StringBuilder sql = jdbcHeader(bound);
 
@@ -470,33 +481,70 @@ public class PGAnonymousSqlCall implements IDataCall {
         if( (autoCommit || switchAutoCommit) &&  tc.dialect().requiresTransactionForAnonymousBlock(connection) )
              throw new CallException(Tags.PRODUCT_LABEL + "PostgreSQL anonymous calls in simple query mode require a transaction");
 
+        if( !closeAfterExecute && !switchAutoCommit )
+        {
+            if( reusableStatement != null
+                    && (reusableStatement.isClosed() || reusableStatement.getConnection() != connection) )
+                closeReusableStatement();
+
+            if( reusableStatement == null )
+                reusableStatement = connection.prepareStatement(sql);
+
+            String result = executeStatement(reusableStatement, input);
+            reusableStatement.clearParameters();
+            return result;
+        }
+
+        closeReusableStatement();
         try (
             TaskContext.AutoCommitScope ignored = switchAutoCommit ? tc.autoCommitScope(true) : null;
             PreparedStatement statement = connection.prepareStatement(sql)
         )
         {
-            statement.setString(1, input);
+            return executeStatement(statement, input);
+        }
+    }
 
-            String result = null;
-            int resultSets = 0;
+    private static String executeStatement(PreparedStatement statement, String input) throws SQLException
+    {
+        statement.setString(1, input);
 
-            boolean hasResult = statement.execute();
+        String result = null;
+        int resultSets = 0;
 
-            while (hasResult || statement.getUpdateCount() != -1)
+        boolean hasResult = statement.execute();
+        while (hasResult || statement.getUpdateCount() != -1)
+        {
+            if( hasResult )
             {
-                if( hasResult )
+                try (ResultSet rows = statement.getResultSet())
                 {
-                    try (ResultSet rows = statement.getResultSet())
-                    {
-                        if (++resultSets == 2 && rows.next())
-                            result = rows.getString(1);
-                    }
+                    if (++resultSets == 2 && rows.next())
+                        result = rows.getString(1);
                 }
-
-                hasResult = statement.getMoreResults();
-
             }
-            return result;
+
+            hasResult = statement.getMoreResults();
+        }
+        return result;
+    }
+
+    private void closeReusableStatement() throws SQLException
+    {
+        PreparedStatement statement = reusableStatement;
+        reusableStatement = null;
+        if( statement != null )
+            statement.close();
+    }
+
+    private void closeReusableStatementAfterFailure(Throwable failure)
+    {
+        try {
+            closeReusableStatement();
+        }
+        catch( SQLException | RuntimeException | Error closeFailure ) {
+            if( closeFailure != failure )
+                failure.addSuppressed(closeFailure);
         }
     }
 
@@ -558,7 +606,7 @@ public class PGAnonymousSqlCall implements IDataCall {
     }
 
     /** */
-    private Parameter[] boundParameters()
+    private Parameter[] collectBoundParameters()
     {
         Parameter[] bound = new Parameter[bindCount];
 
@@ -586,67 +634,55 @@ public class PGAnonymousSqlCall implements IDataCall {
 
         try {
 
-            Parameter[] bound = boundParameters();
-
             JsonObjectBuilder input = JSON.createObjectBuilder();
+            String[] previousTypes = declarationTypes;
+            String[] types = previousTypes == null ? new String[bound.length] : previousTypes;
 
-            StringBuilder declarations = new StringBuilder();
-
-            for (Parameter parameter : bound)
+            for( int i = 0; i < bound.length; i++ )
             {
+                Parameter parameter = bound[i];
                 boolean isInput = parameter.metadata.isIn();
-
                 Object value = isInput ? inputValue(parameter) : null;
-                String type  = pgType(parameter.metadata, value);
+                String type = pgType(parameter.metadata, value);
 
-                declarations.append('"').append(parameter.variable).append("\" ").append(type);
+                if( !type.equals(types[i]) )
+                {
+                    // При стабильных типах используем существующий массив и текст SQL.
+                    if( types == previousTypes )
+                        types = previousTypes.clone();
+                    types[i] = type;
+                }
 
                 if( isInput )
                 {
-                    declarations.append(" := (").append(OUTER_LABEL).append("_input ->> '").append(parameter.variable).append("')::").append(type);
-
                     if( value == null )
                         input.addNull(parameter.variable);
                     else
                     {
-                        if (value.getClass() == java.util.Date.class)
+                        if( value.getClass() == java.util.Date.class )
                             value = new java.sql.Date(((java.util.Date)value).getTime());
 
                         input.add(parameter.variable, value.toString());
                     }
                 }
-
-                declarations.append(";\n");
-
-            }//end for
-
-            String declarationSql = declarations.toString();
-
-            if( declarationsLength != declarationSql.length() || !preparedSql.regionMatches(declarationsOffset, declarationSql, 0, declarationsLength) )
-            {
-                int declarationsEnd = declarationsOffset + declarationsLength;
-
-                preparedSql = new StringBuilder(preparedSql.length() - declarationsLength + declarationSql.length())
-                                .append(preparedSql, 0, declarationsOffset)
-                                .append(declarationSql)
-                                .append(preparedSql, declarationsEnd, preparedSql.length())
-                                .toString();
-
-                declarationsLength = declarationSql.length();
             }
 
-            sql = preparedSql;
+            if( types != declarationTypes )
+                updateDeclarations(types);
 
-            applyOutputs( executeSql(sql, input.build().toString() ), bound );
+            sql = preparedSql;
+            applyOutputs( executeSql(sql, input.build().toString()), bound );
 
             return this;
 
         } catch (SQLException | RuntimeException ex) {
             CallException error = new CallException(Tags.PRODUCT_LABEL + "Error on execute PostgreSQL anonymous block", name, sql, ex);
             failure = error;
+            closeReusableStatementAfterFailure(error);
             throw error;
         } catch (Error error) {
             failure = error;
+            closeReusableStatementAfterFailure(error);
             throw error;
         }
         finally {
@@ -661,6 +697,37 @@ public class PGAnonymousSqlCall implements IDataCall {
                     failure.addSuppressed(listenerFailure);
             }
         }
+    }
+
+    private void updateDeclarations(String[] types) throws SQLException
+    {
+        if( types.length > 0 )
+        {
+            StringBuilder declarations = new StringBuilder(declarationsLength);
+            for( int i = 0; i < bound.length; i++ )
+            {
+                Parameter parameter = bound[i];
+                String type = types[i];
+                declarations.append('"').append(parameter.variable).append("\" ").append(type);
+
+                if( parameter.metadata.isIn() )
+                    declarations.append(" := (").append(OUTER_LABEL).append("_input ->> '")
+                                .append(parameter.variable).append("')::").append(type);
+
+                declarations.append(";\n");
+            }
+
+            closeReusableStatement();
+            int declarationsEnd = declarationsOffset + declarationsLength;
+            preparedSql = new StringBuilder(preparedSql.length() - declarationsLength + declarations.length())
+                            .append(preparedSql, 0, declarationsOffset)
+                            .append(declarations)
+                            .append(preparedSql, declarationsEnd, preparedSql.length())
+                            .toString();
+            declarationsLength = declarations.length();
+        }
+
+        declarationTypes = types;
     }
 
     @Override
@@ -776,8 +843,21 @@ public class PGAnonymousSqlCall implements IDataCall {
     public void close() {
         if (closed)
             return;
-        listeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, true));
+        try {
+            listeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, true));
+        }
+        catch( RuntimeException | Error failure ) {
+            closeReusableStatementAfterFailure(failure);
+            throw failure;
+        }
+
         closed = true;
+        try {
+            closeReusableStatement();
+        }
+        catch( SQLException ex ) {
+            throw new CallException(Tags.PRODUCT_LABEL + "Error on close PostgreSQL anonymous block", ex);
+        }
         listeners.fire(new DataCallEvent(this, DataCallEvent.Type.CLOSE, false));
     }
 }

@@ -131,7 +131,7 @@ public class SQLCallBuilder {
         return this;
     }
 
-    /** */
+    /** При false DataCall может переиспользовать statement. Такой вызов нужно закрывать через close(). */
     public SQLCallBuilder closeAfterExecute( boolean v ) {
         this.closeAfterExecute = v;
         return this;
@@ -370,7 +370,7 @@ public class SQLCallBuilder {
             {
                 //if( Boolean.parseBoolean(System.getProperty("ru.inversion.datacall.pg_anonymous_direct")) )
                 CallStatement prepared = prepare == null ? callStatement : callStatement.mapParameters(prepare);
-                return new PGAnonymousSqlCall( tc, prepared, callBackParameters, name );
+                return new PGAnonymousSqlCall( tc, prepared, callBackParameters, name, closeAfterExecute );
                 //return new JsonSqlCall( tc, callStatement, callBackParameters, name );
             }
 

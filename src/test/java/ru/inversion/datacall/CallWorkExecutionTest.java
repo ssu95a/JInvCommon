@@ -228,6 +228,47 @@ class CallWorkExecutionTest {
     }
 
     @Test
+    void postgresDirectCallReusesStatementOnlyWhileSqlIsStable() {
+        JdbcScenario jdbc = new JdbcScenario();
+        jdbc.autoCommit = false;
+        CallStatement statement = CallBuilder.NEW()
+                .sql("BEGIN PERFORM :value; END;")
+                .lang(LangEnum.PL_pgSQL)
+                .build();
+
+        try (IDataCall call = SQLCallBuilder.NEW(taskContext(jdbc.connection()))
+                .callStatement(ignored -> statement)
+                .closeAfterExecute(false)
+                .build()) {
+            call.setParameter("value", 7);
+            call.execute();
+            call.setParameter("value", 8);
+            call.execute();
+            assertEquals(1, jdbc.statements.size());
+            StatementState first = jdbc.statements.get(0);
+            assertEquals(2, first.executions);
+            assertEquals(2, first.clearCalls);
+            assertFalse(first.closed);
+
+            call.setParameter("value", 8L);
+            call.execute();
+            assertEquals(2, jdbc.statements.size());
+            assertTrue(first.closed);
+            assertFalse(jdbc.statements.get(1).closed);
+
+            jdbc.failExecute = true;
+            assertThrows(CallException.class, call::execute);
+            assertTrue(jdbc.statements.get(1).closed);
+
+            jdbc.failExecute = false;
+            call.execute();
+            assertEquals(3, jdbc.statements.size());
+            assertFalse(jdbc.statements.get(2).closed);
+        }
+        assertTrue(jdbc.statements.get(2).closed);
+    }
+
+    @Test
     void jsonInOutStartsWithDefaultAndReusesReturnedValuesIncludingNull() {
         JdbcScenario jdbc = new JdbcScenario();
         CallStatement statement = CallBuilder.NEW()
@@ -547,9 +588,9 @@ class CallWorkExecutionTest {
             switch( method.getName() ) {
                 case "prepareStatement":
                     preparedSql = (String)args[0];
-                    return statement(false).proxy();
+                    return statement(false, (Connection)proxy).proxy();
                 case "prepareCall":
-                    return statement(true).proxy();
+                    return statement(true, (Connection)proxy).proxy();
                 case "getAutoCommit":
                     return autoCommit;
                 case "setAutoCommit": {
@@ -576,8 +617,8 @@ class CallWorkExecutionTest {
             }
         }
 
-        private StatementState statement(boolean callable) {
-            StatementState result = new StatementState(this, callable);
+        private StatementState statement(boolean callable, Connection connection) {
+            StatementState result = new StatementState(this, callable, connection);
             statements.add(result);
             return result;
         }
@@ -636,6 +677,7 @@ class CallWorkExecutionTest {
     private static final class StatementState implements InvocationHandler {
         final JdbcScenario scenario;
         final boolean callable;
+        final Connection connection;
         final List<Integer> outPositions = new ArrayList<>();
         final Map<Integer,Object> boundValues = new HashMap<>();
 
@@ -645,9 +687,10 @@ class CallWorkExecutionTest {
         int closeOnCompletionCalls;
         boolean closed;
 
-        StatementState(JdbcScenario scenario, boolean callable) {
+        StatementState(JdbcScenario scenario, boolean callable, Connection connection) {
             this.scenario = scenario;
             this.callable = callable;
+            this.connection = connection;
         }
 
         PreparedStatement proxy() {
@@ -684,11 +727,14 @@ class CallWorkExecutionTest {
                 case "registerOutParameter":
                     outPositions.add((Integer)args[0]);
                     return null;
+                case "execute":
                 case "executeUpdate":
                 case "executeLargeUpdate":
                     executions++;
                     if( scenario.failExecute )
                         throw new SQLException("Execution failure", "99999");
+                    if( method.getReturnType() == boolean.class )
+                        return false;
                     if( method.getReturnType() == long.class )
                         return 1L;
                     return 1;
@@ -698,6 +744,8 @@ class CallWorkExecutionTest {
                     return scenario.generatedKeys();
                 case "getUpdateCount":
                     return -1;
+                case "getConnection":
+                    return connection;
                 case "clearParameters":
                     clearCalls++;
                     if( scenario.failClearParameters )
