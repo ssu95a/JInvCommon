@@ -126,9 +126,6 @@ final class CommonRecognizers {
             if (!ScanChars.identifierStart(sql.charAt(start))) return null;
             int end = ScanChars.identifierEnd(sql, start, oracle);
 
-            // Forms-style application parameters use qualified names such as
-            // :BLOCK.ITEM. The complete name belongs to one bind parameter;
-            // this is an established JInvCommon contract, not SQL navigation.
             while (end + 1 < sql.length()
                     && sql.charAt(end) == '.'
                     && ScanChars.identifierStart(sql.charAt(end + 1))) {

@@ -98,10 +98,7 @@ public class SQLExpression implements ISQLExpression {
 		parameterNamedMap.putAll(parameters);
 	}
 
-    /**
-     * Compatibility API. Without an explicit SQL dialect the legacy parser
-     * remains responsible for interpreting parameters.
-     */
+    /** */
     @Override
     public String getCompletedSQL() {
 
@@ -112,13 +109,7 @@ public class SQLExpression implements ISQLExpression {
         return sp.prepareSqlWithParametersValue(this);
     }
 
-    /**
-     * Diagnostic SQL with runtime values converted as JDBC execution sees them
-     * and substituted using the actual dialect lexer.
-     *
-     * Works with arbitrary SQL fragments, not just SELECT statements.
-     * Literal text, quoted identifiers and comments are left unchanged.
-     */
+    /** */
     public String getCompletedSQL(SqlDialect dialect) {
 
         if( S.isNullOrEmpty(strSQL) )

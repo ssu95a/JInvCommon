@@ -103,9 +103,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return predicates;
    }
 
-   /**
-    * Поставщик данных из SQL источника данных.
-    */
+   /** Поставщик данных из SQL источника данных. */
    protected ISQLDataReader<P> dataReader;
 
    /** Актуальный PreparedSql обычного data-query. */
@@ -116,23 +114,32 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /** Живое представление параметров DataSet. Явный null имеет приоритет. */
    protected final IParameters mainSqlParameters = new IParameters() {
-      @Override public Object getParameter(String name) {
-         return SQLDataSet.this.getParameterValue(name);
-      }
-      @Override public Object getParameter(int index) {
-         return SQLDataSet.this.getParameterValue(index);
-      }
-      @Override public boolean hasParameter(String name) {
-         IParameters callback = SQLDataSet.this.getCallbackParameters();
-         return (callback != null && callback.hasParameter(name))
-                 || SQLDataSet.this.hasParameter(name);
-      }
-      @Override public boolean hasParameter(int index) {
-         IParameters callback = SQLDataSet.this.getCallbackParameters();
-         return (callback != null && callback.hasParameter(index))
-                 || SQLDataSet.this.hasParameter(index);
-      }
+
+        @Override
+        public Object getParameter(String name)
+        {
+            return SQLDataSet.this.getParameterValue(name);
+        }
+
+        @Override
+        public Object getParameter(int index)
+        {
+            return SQLDataSet.this.getParameterValue(index);
+        }
+
+        @Override public boolean hasParameter(String name)
+        {
+            IParameters callback = SQLDataSet.this.getCallbackParameters();
+            return ( callback != null && callback.hasParameter(name) ) || SQLDataSet.this.hasParameter(name);
+        }
+
+        @Override public boolean hasParameter(int index)
+        {
+            IParameters callback = SQLDataSet.this.getCallbackParameters();
+            return (callback != null && callback.hasParameter(index)) || SQLDataSet.this.hasParameter(index);
+        }
    };
+
 
    /**
     * Размер страницы данных.
@@ -141,6 +148,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * По умолчанию устанавливается равным 60.
     */
    private int pageSize = 60;
+
 
    /**
     * Маппер для загрузки записей из JDBC ResultSet.
@@ -151,8 +159,10 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    private IRowMapper<P> rowMapper;
 
+
    /** */
    private DataQueryModeEnum dataQueryMode = DataQueryModeEnum.STANDARD;
+
 
    /**
     * Флаг сигнализирующий о том, что необходимо перестроить SQL выражение на котором построен SQLDataSet.
@@ -169,12 +179,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    };
 
+
    /**
     * Создает пустой DataSet.
     */
    public SQLDataSet( ) {
       this((Class)null);
    }
+
 
    /**
     * Создает пустой DataSet с типом записи.
@@ -186,6 +198,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       this( null, rowClass );
    }
 
+
    /**
     * Создает пустой DataSet и инициализирует TaskContext.
     * <p>
@@ -195,6 +208,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public SQLDataSet( TaskContext tc ) {
       this( tc, null );
    }
+
 
    /**
     * Создает пустой DataSet с TaskContext и типом строки.
@@ -208,6 +222,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       this( tc, rowClass, null );
    }
 
+
    /**
     * Создает пустой DataSet с TaskContext, типом строки и параметрами.
     * <p>
@@ -217,11 +232,11 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    public SQLDataSet( TaskContext tc, Class<? extends P > rowClass, IParameters parameters ) {
       super( rowClass );
+
       setTaskContext(tc);
       setCallbackParameters(parameters);
 
-      needReCreateReader.addListener(
-              (property, oldValue, newValue) -> refreshCurrentRowPlan = null);
+      needReCreateReader.addListener( (property, oldValue, newValue) -> refreshCurrentRowPlan = null );
    }
 
    /** {@inheritDoc } */
@@ -266,6 +281,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
+
    /**
     * Версия метода setRowClass в стиле "Fluent interface".
     * <p>
@@ -280,6 +296,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setRowClass(rowClass);
       return this;
    }
+
 
    /**
     * Устанавливает размер страницы данных при подкачке.
@@ -299,6 +316,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       this.pageSize = pageSize;
    }
 
+
    /**
     * Возвращает размер страницы установленный методом {@link #setPageSize(int) }.
     * <p>
@@ -307,6 +325,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public int getPageSize() {
       return pageSize;
    }
+
 
    /**
     * Версия метода setPageSize в стиле "Fluent interface".
@@ -332,7 +351,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       String newQueryAlias = qa == null ? null : qa.trim();
 
       if( S.isNullOrEmpty(newQueryAlias) )
-         newQueryAlias = null;
+          newQueryAlias = null;
 
       if( !Objects.equals(newQueryAlias, queryAlias) ) {
          queryAlias = newQueryAlias;
@@ -340,10 +359,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
+
    /** Возвращает заданный alias источника строк запроса. */
    public String getQueryAlias() {
       return queryAlias;
    }
+
 
    /** Fluent version of setQueryAlias. */
    public SQLDataSet<P> queryAlias( String queryAlias ) {
@@ -351,21 +372,22 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return this;
    }
 
-   /**
-    * Устанавливает optimizer hint.
-    */
+
+   /** Устанавливает optimizer hint. */
    public void setOptimizerHint( String oh ) {
 
       String newOptimizerHint = oh == null ? null : oh.trim();
 
       if( S.isNullOrEmpty(newOptimizerHint) )
-         newOptimizerHint = null;
+          newOptimizerHint = null;
 
-      if( !Objects.equals(newOptimizerHint, optimizerHint) ) {
+      if( !Objects.equals(newOptimizerHint, optimizerHint) )
+      {
          optimizerHint = newOptimizerHint;
          needReCreateReader();
       }
    }
+
 
    /** Возвращает optimizer hint. */
    public String getOptimizerHint() {
@@ -383,25 +405,30 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * null снимает runtime override и сохраняет row limit исходного SQL.
     */
    public void setRowLimit( Integer value ) {
-      if( value != null && value < 0 )
+
+       if( value != null && value < 0 )
          throw new IllegalArgumentException("rowLimit must be >= 0");
 
-      if( !Objects.equals(rowLimit, value) ) {
+      if( !Objects.equals(rowLimit, value) )
+      {
          rowLimit = value;
          needReCreateReader();
       }
    }
+
 
    /** Возвращает runtime row limit или null, если override не задан. */
    public Integer getRowLimit() {
       return rowLimit;
    }
 
+
    /** Fluent version of setRowLimit(Integer). */
    public SQLDataSet<P> rowLimit( Integer value ) {
       setRowLimit(value);
       return this;
    }
+
 
    /** */
    public void setNativeQueryName( String nqn ) {
@@ -420,6 +447,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
+
    /** */
    public String getNativeQueryName( ) {
       return this.nativeQueryName;
@@ -428,6 +456,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setNativeQueryName(nqn);
       return this;
    }
+
 
    /**
     * Метод сброса флага состояния о том, что SQL выражение изменилось.
@@ -444,6 +473,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       needReCreateReader.setValue( true );
    }
 
+
    /**
     * Устанавливает TaskContext для доступа к БД.
     * <p>
@@ -452,11 +482,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * @see TaskContext
     */
    public void setTaskContext( TaskContext taskContext ) {
-      if (this.taskContext != taskContext) {
-         this.taskContext = taskContext;
-         needReCreateReader();
+
+      if( this.taskContext != taskContext )
+      {
+          this.taskContext = taskContext;
+          needReCreateReader();
       }
    }
+
 
    /**
     * Возвращает TaskContext установленный методом {@link #setTaskContext(ru.inversion.tc.TaskContext) }.
@@ -469,6 +502,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    public TaskContext getTaskContext( ) {
       return this.taskContext;
    }
+
 
    /**
     * Версия метода setTaskContext в стиле "Fluent interface".
@@ -484,6 +518,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setTaskContext( taskContext );
       return this;
    }
+
 
    /**
     * Возвращает TaskContext для использования в методах SQLDataSet.
@@ -509,6 +544,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return tc;
    }
 
+
    /**
     * Установка Rel-OO маппера для SQLDataSet.
     * <p>
@@ -526,6 +562,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       needReCreateReader( );
    }
 
+
    /**
     * Возвращает Rel-OO маппер установленный для SQLDataSet.
     * <p>
@@ -541,6 +578,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return rowMapper;
    }
 
+
+   /** */
    protected IRowMapper< P > getRowMapperForUse() {
 
       IRowMapper< P > rowMapper = getRowMapper();
@@ -553,6 +592,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       return rowMapper;
    }
+
 
    /**
     * Версия метода setRowMapper в стиле "Fluent interface".
@@ -580,15 +620,18 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       this.dataQueryMode = dataQueryMode;
    }
 
+
    /** */
    public boolean isQueryAllRows() {
       return getDataQueryMode() == DataQueryModeEnum.QUERY_ALL_ROWS;
    }
 
+
    /** */
    public boolean isSingleRow() {
       return getDataQueryMode() == DataQueryModeEnum.SINGLE_ROW;
    }
+
 
    /** */
    public SQLDataSet< P > queryAllRows() {
@@ -601,17 +644,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return this;
    }
 
-   /**
-    * Возвращает признак, что DataSet поддерживает режим пометки записей.
-    * <p>
-    * В базовой реализации определено, что пометка не поддерживается.
-    * Производные классы должны этот метод перекрыть если будут поддерживать пометку.
-    *
-    * @return признак поддержки пометки
-   protected boolean isSupportMark( ) {
-   return false;
-   }
-    */
+
 
    /**
     * Возвращает часть SQL выражения в части 'SELECT' отвечающая за пометку.
@@ -626,6 +659,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
    /** Отбор столбцов для селекта */
    public final static Predicate<Method> methodFilter = new Predicate< Method >() {
+
       @Override
       public boolean test( Method m ) {
          if( !m.isAnnotationPresent(Transient.class) ) {
@@ -681,9 +715,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    };
 
 
-   /**
-    * Получение текущей строки SQL на которой строится выражение получения данных.
-    */
+   /** Получение текущей строки SQL на которой строится выражение получения данных. */
    protected String internalGetSQL( ) {
 
       String sql = getSQL( );
@@ -697,124 +729,30 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          return null;
 
       Table table = clazz.getAnnotation(Table.class);
-      return table == null || S.isNullOrEmpty(table.name())
-              ? null : tableSelect(clazz, table, null, taskContext.dialect());
+      return table == null || S.isNullOrEmpty(table.name()) ? null : tableSelect(clazz, table, null, taskContext.dialect());
    }
 
-   private static String tableSelect(Class<?> rowClass, Table table, String alias, SqlDialect dialect) {
+
+   /** */
+   private static String tableSelect( Class<?> rowClass, Table table, String alias, SqlDialect dialect )
+   {
       String from = " FROM " + table.name();
-      if (alias != null)
+
+      if( alias != null )
          from += " " + alias;
+
       return Arrays.stream(rowClass.getMethods())
-              .filter(methodFilter)
-              .map(method -> columnMapper.apply(method, alias, dialect))
-              .collect(Collectors.joining(",", "SELECT ", from));
+                .filter(methodFilter)
+                    .map(method -> columnMapper.apply(method, alias, dialect))
+                .collect(Collectors.joining(",", "SELECT ", from));
    }
 
-   /**
-    * Возвращает значение индексированного параметра.
-    * <p>
-    * SQLDataSet различает ситуацию когда параметр установлен в {@code null} и когда параметр отсутствует.
-    * При отсутствии параметра выбрасывается исключение.
-    *
-    * @param index
-    *        индекс параметра
-    *
-    * @return
-    *        значение параметра
-    *
-    * @throws
-    *          DataSetParameterException если параметр с таким индексом отсутствует
-   protected Object getParameterValue( int index ) throws DataSetParameterException {
-
-   Object value = NO_PARAMETER_VALUE;
-
-   IParameters cp = getCallbackParameters();
-
-   if( cp != null && cp.hasParameter(index) )
-   value = cp.getParameter(index);
-
-   if( value == NO_PARAMETER_VALUE && hasParameter(index) )
-   value = getParameter(index);
-
-   if( value == NO_PARAMETER_VALUE )
-   DataSetParameterException.throwNoSetParameterValue(index);
-
-   return value;
-   }
-    */
-
-
-   /**
-    * Возвращает значение именованного параметра.
-    * <p>
-    * SQLDataSet различает ситуацию когда параметр установлен в {@code null} и когда параметр отсутствует.
-    * При отсутствии параметра выбрасывается исключение.
-    *
-    * @param name
-    *          имя параметра
-    *
-    * @return значение параметра
-    *
-    * @throws
-    *          DataSetParameterException если параметр с таким именем отсутствует
-   protected Object getParameterValue( String name ) throws DataSetParameterException {
-
-   Object value = NO_PARAMETER_VALUE;
-
-   IParameters cp = getCallbackParameters();
-
-   if( cp != null && cp.hasParameter(name) )
-   value = cp.getParameter(name);
-
-   if( value == NO_PARAMETER_VALUE && hasParameter(name) )
-   value = getParameter(name);
-
-   if( value == NO_PARAMETER_VALUE )
-   DataSetParameterException.throwNoSetParameterValue(name);
-
-   return value;
-   }
-    */
-
-   /** {@inheritDoc}
-    @Override
-    public String getFilter( FilterTypeEnum ... filterType ) {
-
-    if( filterType == null || filterType.length == 0 )
-    return null;
-
-    List<String> ls = new ArrayList<>( FilterTypeEnum.values().length );
-
-    for( FilterTypeEnum ft : filterType ) {
-
-    switch( ft ) {
-    case AUTO:
-    ls.add( this.autoFilter );
-    break;
-    case FIXED:
-    ls.addAll( filters.values().stream().filter( (f)->f.isFixed() ).map( (f)->f.getFilterStr() ).collect( Collectors.toList( ) ) );
-    break;
-    case TEMPORARY:
-    ls.addAll( filters.values().stream().filter( (f)->f.isTemporary() ).map( (f)->f.getFilterStr() ).collect( Collectors.toList() ) );
-    break;
-    }
-    }//end for
-
-    if( ls.isEmpty() )
-    return null;
-
-    if( ls.size() == 1 )
-    return ls.get(0);
-
-    return ls.stream().filter((s)->S.isNotNullOrEmpty(s)).collect( Collectors.joining(" ) and ( ", "(", ")") );
-    }
-    */
 
    /** Перед первым выполнением запроса DataSet */
    protected void onBeforeFirstExecute( ) throws DataSetException {
-
+        // empty
    }
+
 
    /** */
    private int incrementCounter() throws DataSetException {
@@ -826,48 +764,64 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return execute_count;
    }
 
-   /**
-    * Canonical SELECT builder hook.
-    */
-   protected DataSetSelectBuilder createDataSetSelectBuilder( boolean ignoreFilters ) {
-      SqlDialect dialect = getTaskContextForUse().dialect();
-      DataSetSelectBuilder builder = createDataSetSourceBuilder(dialect);
-      builder.optimizerHint(getOptimizerHint());
-      addPredicates(builder, ignoreFilters);
-      builder.orderBy(getOrderBy());
-      builder.rowLimit(getRowLimit());
-      builder.afterOrderBy(getAfterOrderBy());
 
-      if (isSupportMark()) {
-         String mark = getMarkSQLPart();
-         builder.mark(mark == null ? "0" : mark);
-      }
+   /**  Canonical SELECT builder hook. */
+   protected DataSetSelectBuilder createDataSetSelectBuilder( boolean ignoreFilters )
+   {
+        SqlDialect dialect = getTaskContextForUse().dialect();
+        DataSetSelectBuilder builder = createDataSetSourceBuilder(dialect);
 
-      return builder;
+        builder.optimizerHint(getOptimizerHint());
+
+        addPredicates(builder, ignoreFilters);
+
+        builder.orderBy(getOrderBy());
+        builder.rowLimit(getRowLimit());
+
+        if( isSupportMark() )
+        {
+            String mark = getMarkSQLPart();
+            builder.mark(mark == null ? "0" : mark);
+        }
+
+        return builder;
    }
 
-   final DataSetSelectBuilder createDataSetSourceBuilder(SqlDialect dialect) {
-      String alias = getQueryAlias();
+
+   /** */
+   final DataSetSelectBuilder createDataSetSourceBuilder(SqlDialect dialect)
+   {
+      String      alias = getQueryAlias();
       Class<?> rowClass = getRowClass();
+
       Table table = rowClass == null ? null : rowClass.getAnnotation(Table.class);
-      if (table != null && S.isNotNullOrEmpty(table.name()) && getSQL() == null) {
-         if (alias != null)
-            DataSetSelectBuilder.validateTableAlias(alias, dialect);
+
+      if( table != null && S.isNotNullOrEmpty(table.name()) && getSQL() == null )
+      {
+         if( alias != null )
+             DataSetSelectBuilder.validateTableAlias(alias, dialect);
+
          String sql = alias == null ? internalGetSQL() : tableSelect(rowClass, table, alias, dialect);
+
          return DataSetSelectBuilder.forDataSetTable(sql, dialect, alias);
       }
+
       return DataSetSelectBuilder.forDataSet(internalGetSQL(), dialect).queryAlias(alias);
    }
 
-   private void addPredicates( DataSetSelectBuilder builder, boolean ignoreFilters ) {
-      for( PredicateItem item : predicates.values() ) {
-         if( ignoreFilters && item.isFilter() )
-            continue;
 
-         if( item.getExpression() != null ) {
+   /** */
+   private void addPredicates( DataSetSelectBuilder builder, boolean ignoreFilters )
+   {
+      for( PredicateItem item : predicates.values() )
+      {
+         if( ignoreFilters && item.isFilter() )
+             continue;
+
+         if( item.getExpression() != null )
+         {
             if( !item.getFilterStr().equals(item.getExpression().getSQL()) )
-               throw new IllegalStateException(
-                       "ISQLExpression SQL changed after filter registration");
+                throw new IllegalStateException( "ISQLExpression SQL changed after filter registration");
 
             builder.addPredicate(item.getExpression());
          }
@@ -876,12 +830,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
-   /**
-    * Подготовить PreparedSql обычного data-query.
-    */
-   protected PreparedSql prepareDataQuery() throws DataSetException {
+
+   /**  Подготовить PreparedSql обычного data-query. */
+   protected PreparedSql prepareDataQuery() throws DataSetException
+   {
       DataSetSelectBuilder builder = createDataSetSelectBuilder( false );
-      try {
+
+      try
+      {
          PreparedSql sql = builder.prepare();
          preparedSelectBuilder = builder;
          return sql;
@@ -890,14 +846,17 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          String message = Tags.PRODUCT_LABEL + "Error preparing DataSet query\nSource SQL\n" + builder.sourceSql();
          String orderBy = builder.orderBySql();
          if( orderBy != null )
-            message += "\nORDER BY fragment\n" + orderBy;
+             message += "\nORDER BY fragment\n" + orderBy;
+
          throw new DataSetException(message, ex);
       }
    }
 
+
    /** {@inheritDoc} */
    @Override
    public synchronized void executeQuery( boolean fetchAllRows ) throws DataSetException {
+
       try {
 
          fireDataSetEvent( DataSetEvent.DataSetEventType.EXECUTE, true );
@@ -919,7 +878,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             if( dataReader == null || needReCreateReader.getValue() )
             {
                if( dataReader != null )
-                  closeDataReader();
+                   closeDataReader();
 
                preparedDataQuery = null;
                preparedSelectBuilder = null;
@@ -935,6 +894,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             executePreparedDataQuery();
 
             totalRowCount = -1;
+
             clear( );
             swappingData( fetchAllRows );
 
@@ -945,16 +905,19 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             // Первая инициализация не завершена: retry должен снова вызвать
             // onBeforeFirstExecute() и восстановить auto/default filters.
             if( executeCount == 1 )
-               setProperty("ds.execute_count", previousExecuteCount);
+                setProperty("ds.execute_count", previousExecuteCount);
 
             // При ошибке исполнения ИЛИ чтения первой страницы pre-предикаты откатываются.
             predicates.entrySet().removeIf(entry -> entry.getValue().isPre());
+
             needReCreateReader();
 
             // Не оставляем открытый курсор/PreparedStatement после неудачной загрузки.
             preparedDataQuery = null;
             preparedSelectBuilder = null;
+
             closeDataReaderAfterFailure(th);
+
             throw th;
          }
 
@@ -972,33 +935,32 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
-   /**
-    * Execute the current data-query through the resolved-value JDBC boundary.
-    */
+
+   /** */
    private void executePreparedDataQuery() throws DataSetException {
 
       if( preparedDataQuery == null ) {
-         dataReader.executeQuery(mainSqlParameters);
-         return;
+          dataReader.executeQuery(mainSqlParameters);
+          return;
       }
 
       List<Object> jdbcValues;
 
-      if( preparedSelectBuilder != null
-              && preparedSelectBuilder.prepare() == preparedDataQuery )
+      if( preparedSelectBuilder != null && preparedSelectBuilder.prepare() == preparedDataQuery )
          jdbcValues = preparedSelectBuilder.jdbcValues(mainSqlParameters);
       else
-         jdbcValues = PreparedSqlValues.jdbc(
-                 preparedDataQuery, mainSqlParameters);
+         jdbcValues = PreparedSqlValues.jdbc( preparedDataQuery, mainSqlParameters );
 
       dataReader.executeQuery(jdbcValues);
    }
+
 
    /** {@inheritDoc} */
    @Override
    public void executeQuery( ) throws DataSetException {
       executeQuery( false );
    }
+
 
    /**
     * Версия метода executeQuery в стиле "Fluent interface".
@@ -1012,6 +974,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       executeQuery( );
       return this;
    }
+
 
    /**
     * Версия метода executeQuery(boolean) в стиле "Fluent interface".
@@ -1035,21 +998,13 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    private String getNativeQuery( ) {
 
       if( QUERY_TABLE.equals(nativeQueryName) )
-         return null;
+          return null;
 
-      String queryName =
-              QUERY_UNNAMED.equals(nativeQueryName)
-                      ? null
-                      : nativeQueryName;
+      String queryName = QUERY_UNNAMED.equals(nativeQueryName) ? null : nativeQueryName;
 
-      return getRowClass() == null
-              ? null
-              : XXIDsDao.getNativeQuery(
-                      getTaskContext(),
-                      getRowClass(),
-                      queryName
-              );
+      return getRowClass() == null ? null : XXIDsDao.getNativeQuery( getTaskContext(), getRowClass(), queryName );
    }
+
 
    /** {@inheritDoc} */
    @Override
@@ -1057,12 +1012,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return U.nvl( strSQL, getNativeQuery() );
    }
 
+
    /** {@inheritDoc} */
    @Override
    public void setSQL( String strSQL ) {
       this.strSQL = strSQL;
       needReCreateReader();
    }
+
 
    /**
     * Версия метода setSQL(String) в стиле "Fluent interface".
@@ -1076,6 +1033,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setSQL( strSQL );
       return this;
    }
+
 
    /** {@inheritDoc} */
    @Override
@@ -1093,6 +1051,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          needReCreateReader();
       }
    }
+
 
    /** {@inheritDoc} */
    @Override
@@ -1137,6 +1096,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setWherePredicat(wherePredicate, false );
    }
 
+
    /**
     * Версия метода setWherePredicat(String) в стиле "Fluent interface".
     * <p>
@@ -1150,28 +1110,35 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return this;
    }
 
+
    /** {@inheritDoc} */
    @Override
-   public int setFilter( ISQLExpression sqlExpression, boolean fixed, boolean append ) throws DataSetException {
-      if (sqlExpression == null || S.isNullOrEmpty(sqlExpression.getSQL()))
-         return 0;
+   public int setFilter( ISQLExpression sqlExpression, boolean fixed, boolean append ) throws DataSetException
+   {
+      if( sqlExpression == null || S.isNullOrEmpty(sqlExpression.getSQL()) )
+          return 0;
 
       String sql = sqlExpression.getSQL();
       // Выражение с собственными параметрами нельзя разрывать между
       // предикатом и сортировкой без переноса источника значений.
-      if (splitFilterOrderBy(sql)[1] != null)
-         throw new DataSetException(
-                 "Embedded ORDER BY in ISQLExpression filter is not supported");
+      if( splitFilterOrderBy(sql)[1] != null )
+         throw new DataSetException( "Embedded ORDER BY in ISQLExpression filter is not supported");
 
       int id = setFilter(sql, fixed, append);
-      if (id > 0) {
+
+      if( id > 0 )
+      {
          PredicateItem previous = predicates.get(id);
-         if (previous == null)
-            throw new IllegalStateException("Filter was not registered: " + id);
-         predicates.put(id, new PredicateItem(sqlExpression, previous.getType()));
+
+         if( previous == null )
+             throw new IllegalStateException("Filter was not registered: " + id);
+
+         predicates.put(id, new PredicateItem( sqlExpression, previous.getType()) );
       }
+
       return id;
    }
+
 
    /** {@inheritDoc} */
    @Override
@@ -1179,17 +1146,22 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       return setFilter( filterString, fixed, append, false );
    }
 
-   private String[] splitFilterOrderBy(String filter) {
+
+   /** */
+   private String[] splitFilterOrderBy(String filter)
+   {
       if( !filter.toUpperCase(Locale.ROOT).contains("ORDER") )
-         return new String[] {filter, null};
+          return new String[] {filter, null};
 
       TaskContext tc = getTaskContext();
-      SqlScanner scanner = tc == null
-              ? new OracleSqlScanner()
-              : SqlScannerFactory.create(tc.dialect());
-      return OrderByParser.splitFilter(filter, scanner);
+
+      SqlScanner scanner = tc == null ? new OracleSqlScanner() : SqlScannerFactory.create( tc.dialect() );
+
+      return OrderByParser.splitFilter( filter, scanner );
    }
 
+
+   /** */
    protected int setFilter( String filterString, boolean fixed, boolean append, boolean auto ) {
 
       String newfilterString = ( filterString == null ? null : filterString.trim() );
@@ -1201,29 +1173,32 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       int filterId = -1;
 
-      if( !auto ) {
-
+      if( !auto )
+      {
          filterId = g_filterIDSequence.incrementAndGet();
 
-         if(fixed) {
-            if(!append) {
+         if(fixed)
+         {
+            if(!append)
                predicates.entrySet().removeIf(( t ) -> t.getValue().isFixed() && !t.getValue().isLink() );
-            }
-         } else {
-            if(!append) {
-               predicates.entrySet().removeIf(( t ) -> t.getValue().isTemporary());
-            }
+
+         }
+         else
+         {
+            if( !append )
+                predicates.entrySet().removeIf(( t ) -> t.getValue().isTemporary());
          }
       }
 
-      if( filterParts[1] != null ) {
+      if( filterParts[1] != null )
+      {
          newfilterString = filterParts[0];
          setOrderBy("~" + filterParts[1] + "~");
       }
 
       if( !S.isNullOrEmpty(newfilterString ) )
       {
-         if( !auto )
+         if(!auto )
             predicates.put( filterId, new PredicateItem( newfilterString, fixed ? PredicateTypeEnum.FIXED_FILTER : PredicateTypeEnum.TEMPORARY_FILTER ) );
          else
             predicates.put( filterId, new PredicateItem( newfilterString, PredicateTypeEnum.AUTO_FILTER ) );
@@ -1236,22 +1211,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          return -1;
    }
 
-   /** {@inheritDoc}
-    @Override
-    public String removeFilter( int filterId ) {
-
-    FltrItem fi = filters.remove(filterId);
-
-    if( fi != null ) {
-
-    needReCreateReader( );
-
-    return fi.getFilterStr();
-    }
-
-    return null;
-    }
-    */
 
    /**
     * Версия метода setFilter в стиле "Fluent interface".
@@ -1260,10 +1219,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     *        this
     * @see #setFilter(java.lang.String, boolean, boolean)
     */
-   public SQLDataSet<P> filter( String filterString, boolean fixed, boolean append ) {
+   public SQLDataSet<P> filter( String filterString, boolean fixed, boolean append )
+   {
       setFilter( filterString, fixed, append );
       return this;
    }
+
 
    /**
     * Версия метода setFilter в стиле "Fluent interface".
@@ -1273,30 +1234,26 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     *
     * @see #setFilter(ru.inversion.dataset.ISQLExpression, boolean, boolean)
     */
-   public SQLDataSet< P > filter( ISQLExpression sqlExpression, boolean fixed, boolean append ) throws DataSetException {
+   public SQLDataSet< P > filter( ISQLExpression sqlExpression, boolean fixed, boolean append ) throws DataSetException
+   {
       setFilter( sqlExpression, fixed, append );
       return this;
    }
 
+
    /** */
    @Override
-   public void clearFilter( boolean allFilters ) {
+   public void clearFilter( boolean allFilters )
+   {
 
-      if( allFilters ) {
-
-         predicates.entrySet().removeIf (
-                 (t) ->
-                         ( t.getValue().isFilter()
-                                 &&
-                                 !t.getValue().isLink()
-                         )
-         );
-      }
+      if( allFilters )
+         predicates.entrySet().removeIf ( (t) -> ( t.getValue().isFilter() && !t.getValue().isLink() ) );
       else
          predicates.entrySet().removeIf( (t) -> t.getValue().isTemporary() );
 
       needReCreateReader( );
    }
+
 
    /**
     * Возвращает predicates DataSet с фактическими runtime-значениями.
@@ -1310,45 +1267,41 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          return renderCompletedWherePredicate(getTaskContextForUse().dialect());
       }
       catch( Throwable ex ) {
-         throw new DataSetException(
-                 Tags.PRODUCT_LABEL
-                         + "Error in dataSet on call 'getCompletedWherePredicate'",
-                 ex
-         );
+         throw new DataSetException( Tags.PRODUCT_LABEL + "Error in dataSet on call 'getCompletedWherePredicate'", ex );
       }
    }
 
+
+   /** */
    String renderCompletedWherePredicate( SqlDialect dialect ) {
 
       if( predicates.isEmpty() )
-         return null;
+          return null;
 
       final String prefix = "SELECT NULL WHERE NULL IS NULL ";
 
-      DataSetSelectBuilder builder =
-              new DataSetSelectBuilder(prefix + "<w>", dialect);
+      DataSetSelectBuilder builder = new DataSetSelectBuilder(prefix + "<w>", dialect);
 
-      addPredicates(builder, false);
+      addPredicates( builder, false );
 
       PreparedSql preparedSql = builder.prepare();
       List<Object> values = builder.values(mainSqlParameters);
 
       SqlScanner scanner = SqlScannerFactory.create(dialect);
 
-      String completed =
-              renderPreparedSql(preparedSql, values, scanner);
+      String   completed = renderPreparedSql( preparedSql, values, scanner );
 
       if( !completed.startsWith(prefix) )
-         throw new IllegalStateException(
-                 "Unexpected completed predicate SQL: " + completed);
+          throw new IllegalStateException( "Unexpected completed predicate SQL: " + completed);
 
       String predicate = completed.substring(prefix.length()).trim();
 
       if( predicate.regionMatches(true, 0, "AND ", 0, 4) )
-         predicate = predicate.substring(4).trim();
+          predicate = predicate.substring(4).trim();
 
       return predicate;
    }
+
 
    /**
     * Вернуть диагностический SQL с теми значениями, которые фактически
@@ -1362,8 +1315,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          PreparedSql preparedSql = builder.prepare();
          List<Object> values = builder.values(mainSqlParameters);
 
-         SqlScanner scanner =
-                 SqlScannerFactory.create(getTaskContextForUse().dialect());
+         SqlScanner scanner = SqlScannerFactory.create(getTaskContextForUse().dialect());
 
          return renderPreparedSql(preparedSql, values, scanner);
       }
@@ -1372,154 +1324,121 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
-   static String renderPreparedSql(
-           PreparedSql preparedSql,
-           IParameters parameters,
-           SqlScanner scanner
-   ) {
+
+   /** */
+   static String renderPreparedSql( PreparedSql preparedSql, IParameters parameters, SqlScanner scanner )
+   {
       return PreparedSqlRenderer.renderJdbc(preparedSql, parameters, scanner);
    }
 
-   static String renderPreparedSql(
-           PreparedSql preparedSql,
-           List<?> values,
-           SqlScanner scanner
-   ) {
+
+   /** */
+   static String renderPreparedSql( PreparedSql preparedSql, List<?> values, SqlScanner scanner )
+   {
       return PreparedSqlRenderer.renderJdbc(preparedSql, values, scanner);
    }
 
-   static final class RefreshCurrentRowPlan {
-      final String sql;
-      final PreparedSql preparedSql;
+
+   /** */
+   static final class RefreshCurrentRowPlan
+   {
+      final String       sql;
+      final PreparedSql  preparedSql;
       final List<String> idParameterNames;
 
-      RefreshCurrentRowPlan(
-              String sql,
-              PreparedSql preparedSql,
-              List<String> idParameterNames
-      ) {
-         this.sql = Objects.requireNonNull(sql, "sql");
-         this.preparedSql = Objects.requireNonNull(
-                 preparedSql,
-                 "preparedSql"
-         );
-         this.idParameterNames =
-                 Collections.unmodifiableList(
-                         new ArrayList<>(idParameterNames));
+      /** */
+      RefreshCurrentRowPlan( String sql, PreparedSql preparedSql, List<String> idParameterNames )
+      {
+         this.sql         = Checks.Require.text( sql, "sql" );
+         this.preparedSql = Checks.Require.object( preparedSql, "preparedSql" );
+
+         this.idParameterNames = Collections.unmodifiableList( new ArrayList<>(idParameterNames));
       }
    }
 
+   /** */
    private transient RefreshCurrentRowPlan refreshCurrentRowPlan;
 
-   RefreshCurrentRowPlan createRefreshCurrentRowPlan(
-           List<String> idColumns,
-           SqlDialect dialect
-   ) {
-      Objects.requireNonNull(idColumns, "idColumns");
-      Objects.requireNonNull(dialect, "dialect");
+   RefreshCurrentRowPlan createRefreshCurrentRowPlan( List<String> idColumns, SqlDialect dialect )
+   {
+       Checks.Require.object( idColumns, "idColumns");
+       Checks.Require.object( dialect,   "dialect"  );
 
       if( idColumns.isEmpty() )
-         throw new IllegalArgumentException(
-                 "Refresh current row PK list is empty");
+          throw new IllegalArgumentException( "Refresh current row PK list is empty");
 
       DataSetSelectBuilder builder = createDataSetSourceBuilder(dialect);
-      builder.optimizerHint(getOptimizerHint());
+
+      builder.optimizerHint( getOptimizerHint() );
 
       Set<String> usedNames = new HashSet<>();
       SqlScanner scanner = SqlScannerFactory.create(dialect);
-      collectNamedParameters(
-              usedNames,
-              builder.sourceSql(),
-              scanner
-      );
+
+      collectNamedParameters( usedNames, builder.sourceSql(), scanner );
 
       String mark = null;
 
-      if( isSupportMark() ) {
+      if( isSupportMark() )
+      {
          mark = getMarkSQLPart();
-         collectNamedParameters(
-                 usedNames,
-                 mark,
-                 scanner
-         );
+         collectNamedParameters( usedNames, mark, scanner );
+
          builder.mark(mark == null ? "0" : mark);
       }
 
-      List<String> idParameterNames =
-              new ArrayList<>(idColumns.size());
+      List<String> idParameterNames = new ArrayList<>(idColumns.size());
       StringBuilder predicate = new StringBuilder();
       String qualifier = builder.predicateQualifier();
 
-      for( int i = 0; i < idColumns.size(); i++ ) {
+      for( int i = 0; i < idColumns.size(); i++ )
+      {
          if( i > 0 )
             predicate.append(" and ");
 
-         String parameterName =
-                 nextRefreshCurrentRowParameterName(
-                         usedNames,
-                         i
-                 );
+         String parameterName = nextRefreshCurrentRowParameterName( usedNames, i );
 
          idParameterNames.add(parameterName);
 
-         predicate.append(qualifier)
-                  .append(idColumns.get(i))
-                  .append(" = :")
-                  .append(parameterName);
+         predicate.append(qualifier).append(idColumns.get(i)).append(" = :").append(parameterName);
       }
 
       builder.addPredicate(predicate.toString());
 
-      return new RefreshCurrentRowPlan(
-              builder.buildSql(),
-              builder.prepare(),
-              idParameterNames
-      );
+      return new RefreshCurrentRowPlan( builder.buildSql(), builder.prepare(), idParameterNames );
    }
 
-   static List<Object> refreshCurrentRowJdbcValues(
-           RefreshCurrentRowPlan plan,
-           List<?> idValues,
-           IParameters primary
-   ) {
-      Objects.requireNonNull(plan, "plan");
-      Objects.requireNonNull(idValues, "idValues");
-      Objects.requireNonNull(primary, "primary");
+   /** */
+   static List<Object> refreshCurrentRowJdbcValues( RefreshCurrentRowPlan plan, List<?> idValues, IParameters primary )
+   {
+       Checks.Require.object( plan,     "plan");
+       Checks.Require.object( idValues, "idValues");
+       Checks.Require.object( primary,  "primary");
 
       if( plan.idParameterNames.size() != idValues.size() )
-         throw new IllegalArgumentException(
-                 "Refresh current row PK parameter/value count mismatch: "
-                         + plan.idParameterNames.size()
-                         + " != "
-                         + idValues.size()
-         );
+          throw new IllegalArgumentException( "Refresh current row PK parameter/value count mismatch: " + plan.idParameterNames.size() + " != " + idValues.size() );
 
-      Map<String,Object> pkValues =
-              new HashMap<>(plan.idParameterNames.size());
+      Map<String,Object> pkValues = new HashMap<>(plan.idParameterNames.size());
 
-      for( int i = 0; i < plan.idParameterNames.size(); i++ )
-         pkValues.put(
-                 plan.idParameterNames.get(i),
-                 idValues.get(i)
-         );
+      for( int i = 0; i < plan.idParameterNames.size(); i++ ) {
+           pkValues.put( plan.idParameterNames.get(i), idValues.get(i) );
+      }
 
       IParameters refreshParameters = new IParameters() {
          @Override
-         public Object getParameter( String parameterName ) {
-            return pkValues.containsKey(parameterName)
-                    ? pkValues.get(parameterName)
-                    : primary.getParameter(parameterName);
+         public Object getParameter( String parameterName )
+         {
+            return pkValues.containsKey(parameterName) ? pkValues.get(parameterName) : primary.getParameter(parameterName);
          }
 
          @Override
-         public Object getParameter( int parameterIndex ) {
+         public Object getParameter( int parameterIndex )
+         {
             return primary.getParameter(parameterIndex);
          }
 
          @Override
          public boolean hasParameter( String parameterName ) {
-            return pkValues.containsKey(parameterName)
-                    || primary.hasParameter(parameterName);
+            return pkValues.containsKey(parameterName) || primary.hasParameter(parameterName);
          }
 
          @Override
@@ -1528,53 +1447,40 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          }
       };
 
-      return PreparedSqlValues.jdbc(
-              plan.preparedSql,
-              refreshParameters
-      );
+      return PreparedSqlValues.jdbc( plan.preparedSql, refreshParameters );
    }
 
-   private static void collectNamedParameters(
-           Set<String> names,
-           String sql,
-           SqlScanner scanner
-   ) {
+   /** */
+   private static void collectNamedParameters( Set<String> names, String sql, SqlScanner scanner )
+   {
       if( S.isNullOrEmpty(sql) )
          return;
 
-      for( SqlScanner.Token token : scanner.scan(sql) ) {
-         if( token.kind()
-                 != SqlScanner.Kind.NAMED_PARAMETER )
-            continue;
-
-         names.add(
-                 token.text(sql)
-                         .substring(1)
-                         .toUpperCase(Locale.ROOT)
-         );
+      for( SqlScanner.Token token : scanner.scan(sql) )
+      {
+         if( token.kind() != SqlScanner.Kind.NAMED_PARAMETER )
+             continue;
+         names.add( token.text(sql) .substring(1) .toUpperCase(Locale.ROOT) );
       }
    }
 
-   private static String nextRefreshCurrentRowParameterName(
-           Set<String> usedNames,
-           int index
-   ) {
+   /** */
+   private static String nextRefreshCurrentRowParameterName( Set<String> usedNames, int index )
+   {
       String base = "jinv_refresh_pk_" + index;
       String name = base;
       int suffix = 0;
 
-      while( !usedNames.add(
-              name.toUpperCase(Locale.ROOT)) )
-         name = base + "_" + (++suffix);
+      while( !usedNames.add( name.toUpperCase(Locale.ROOT)) )
+             name = base + "_" + (++suffix);
 
       return name;
    }
 
+
    /** {@inheritDoc} */
-   public void refreshCurrentRowFromDB(
-           boolean refreshDependentData,
-           Consumer<SQLDataSet> onNoDataFound
-   ) throws DataSetException {
+   public void refreshCurrentRowFromDB( boolean refreshDependentData, Consumer<SQLDataSet> onNoDataFound ) throws DataSetException
+   {
 
       final P row = getCurrentRow();
 
@@ -1582,103 +1488,61 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          return;
 
       try {
-         List<IEntityProperty<P,?>> idPropertyList =
-                 EntityMetadataFactory
-                         .getEntityMetaData(getRowClass())
-                         .getIDList();
+         List<IEntityProperty<P,?>> idPropertyList = EntityMetadataFactory .getEntityMetaData(getRowClass()).getIDList();
 
          if( idPropertyList.isEmpty() )
-            throw new DataSetException(
-                    Tags.PRODUCT_LABEL
-                            + "In the class of entry '"
-                            + getRowClass().getName()
-                            + "' is not defined PK fields"
-            );
+            throw new DataSetException( Tags.PRODUCT_LABEL + "In the class of entry '" + getRowClass().getName() + "' is not defined PK fields" );
 
-         List<String> idColumns =
-                 new ArrayList<>(idPropertyList.size());
-         List<Object> idValues =
-                 new ArrayList<>(idPropertyList.size());
+         List<String> idColumns = new ArrayList<>(idPropertyList.size());
+         List<Object> idValues =  new ArrayList<>(idPropertyList.size());
 
-         for( IEntityProperty<P,?> property : idPropertyList ) {
-            idColumns.add(
-                    property.getColumnInfo().getName());
+         for( IEntityProperty<P,?> property : idPropertyList )
+         {
+            idColumns.add( property.getColumnInfo().getName());
 
             try {
-               idValues.add(
-                       property.invokeGetter(row));
+               idValues.add( property.invokeGetter(row));
             }
             catch( Throwable th ) {
-               throw new RuntimeException(
-                       Tags.PRODUCT_LABEL
-                               + "Error while retrieving the value PK "
-                               + "for row class - "
-                               + getRowClass().getName(),
-                       th
-               );
+               throw new RuntimeException( Tags.PRODUCT_LABEL + "Error while retrieving the value PK for row class - " + getRowClass().getName(), th );
             }
          }
 
          if( refreshCurrentRowPlan == null )
-            refreshCurrentRowPlan =
-                    createRefreshCurrentRowPlan(
-                            idColumns,
-                            getTaskContextForUse().dialect()
-                    );
+             refreshCurrentRowPlan = createRefreshCurrentRowPlan( idColumns, getTaskContextForUse().dialect() );
 
-         List<Object> refreshValues =
-                 refreshCurrentRowJdbcValues(
-                         refreshCurrentRowPlan,
-                         idValues,
-                         mainSqlParameters
-                 );
+         List<Object> refreshValues = refreshCurrentRowJdbcValues( refreshCurrentRowPlan, idValues, mainSqlParameters );
 
-         try( JDBCDataReader<P> recordReader =
-                      new JDBCDataReader<>(
-                              getTaskContextForUse().getConnection(),
-                              refreshCurrentRowPlan.preparedSql,
-                              getRowMapper(),
-                              getRowClass(),
-                              isSupportMark()
-                      ) ) {
-
+         try( JDBCDataReader<P> recordReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), refreshCurrentRowPlan.preparedSql, getRowMapper(), getRowClass(), isSupportMark() ) )
+         {
             recordReader.executeQuery(refreshValues);
 
             List<P> item = recordReader.getNextPage(1);
 
-            if( !item.isEmpty() ) {
+            if( !item.isEmpty() )
+            {
                P newRow = item.get(0);
                P oldRow = updateCurrentRow(newRow);
 
                if( refreshDependentData )
-                  fireRowEvent(
-                          REFRESH,
-                          oldRow,
-                          newRow,
-                          getCurrentRowNum(),
-                          1
-                  );
+                  fireRowEvent( REFRESH, oldRow, newRow, getCurrentRowNum(), 1 );
             }
-            else {
+            else
+            {
                if( onNoDataFound != null )
-                  onNoDataFound.accept(this);
+                   onNoDataFound.accept(this);
                else
-                  JInvDbException.throwNoDataFound(
-                          refreshCurrentRowPlan.sql,
-                          idValues
-                  );
+                  JInvDbException.throwNoDataFound( refreshCurrentRowPlan.sql, idValues );
             }
          }
       }
       catch( Throwable th ) {
-         throw new DataSetException(
-                 Tags.PRODUCT_LABEL
-                         + "Error refreshing the current record from DB",
-                 th
-         );
+         throw new DataSetException( Tags.PRODUCT_LABEL + "Error refreshing the current record from DB", th );
       }
    }
 
+
+   /** */
    @Override
    public void refreshCurrentRowFromDB( boolean refreshDependentData ) throws DataSetException {
       refreshCurrentRowFromDB(refreshDependentData, null);
@@ -1691,31 +1555,34 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          fireRowEvent( REFRESH, curRow, curRow, getCurrentRowNum(), 1 );
    }
 
+   /** */
    private ISQLDataReader<P> detachDataReader() {
       ISQLDataReader<P> reader = dataReader;
       dataReader = null;
       return reader;
    }
 
+   /** */
    private void closeDataReader() throws DataSetException {
       ISQLDataReader<P> reader = detachDataReader();
-
       if( reader != null )
          reader.close();
    }
 
-   private void closeDataReaderAfterFailure( Throwable failure ) {
+   /** */
+   private void closeDataReaderAfterFailure( Throwable failure )
+   {
       ISQLDataReader<P> reader = detachDataReader();
 
       if( reader == null )
-         return;
+          return;
 
       try {
          reader.close();
       }
       catch( Throwable closeError ) {
          if( failure != closeError )
-            failure.addSuppressed(closeError);
+             failure.addSuppressed(closeError);
       }
    }
 
