@@ -1,5 +1,7 @@
 package ru.inversion.dataset.parser.lexer;
 
+import ru.inversion.utils.Checks;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -42,7 +44,7 @@ public abstract class SqlScanner {
         // Конструирование токенов доступно только внутри пакета сканнера.
         public Token( Kind kind, int start, int end )
         {
-            this.kind = Objects.requireNonNull( kind, "kind" );
+            this.kind = Checks.Require.object( kind, "kind" );
 
             if( start < 0 || end <= start )
                 throw new IllegalArgumentException("Invalid token range: " + start + ".." + end);
@@ -64,7 +66,7 @@ public abstract class SqlScanner {
             return kind == Kind.WORD && end - start == expected.length() && source.regionMatches(true, start, expected, 0, expected.length());
         }
 
-        /** Parser-level classification for WORD tokens. */
+        /** */
         public SqlKeyword keyword(String source) {
             return kind == Kind.WORD ? SqlKeyword.of(source, start, end) : null;
         }
@@ -85,9 +87,10 @@ public abstract class SqlScanner {
        this.recognizers = recognizers;
     }
 
+    /** */
     public final List<Token> scan( String sql )
     {
-       Objects.requireNonNull(sql, "sql");
+       Checks.Require.text(sql, "sql");
 
         List<Token> result = new ArrayList<>();
 

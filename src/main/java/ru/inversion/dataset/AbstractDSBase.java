@@ -175,6 +175,7 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
 
     /**
      * Сначала ищет значение во внутреннем наборе, затем во внешнем callback.
+     * <p>
      * Значение {@code null} считается заданным. {@link IParameters#NO_PARAMETER_VALUE}
      * означает отсутствие значения и допускает поиск в callback.
      *
@@ -183,13 +184,15 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
     public Object getParameterValue( int index ) throws DataSetParameterException {
 
         Object value = getParameterOrDefault(index, NO_PARAMETER_VALUE);
-        if (value == NO_PARAMETER_VALUE) {
+
+        if (value == NO_PARAMETER_VALUE)
+        {
             IParameters callback = getCallbackParameters();
             if (callback != null)
                 value = callback.getParameterOrDefault(index, NO_PARAMETER_VALUE);
         }
 
-        if (value == NO_PARAMETER_VALUE)
+        if( value == NO_PARAMETER_VALUE )
             DataSetParameterException.throwNoSetParameterValue(index);
 
         return value;
@@ -204,13 +207,15 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
     public Object getParameterValue( String name ) throws DataSetParameterException {
 
         Object value = getParameterOrDefault(name, NO_PARAMETER_VALUE);
-        if (value == NO_PARAMETER_VALUE) {
+
+        if( value == NO_PARAMETER_VALUE )
+        {
             IParameters callback = getCallbackParameters();
             if (callback != null)
                 value = callback.getParameterOrDefault(name, NO_PARAMETER_VALUE);
         }
 
-        if (value == NO_PARAMETER_VALUE)
+        if( value == NO_PARAMETER_VALUE )
             DataSetParameterException.throwNoSetParameterValue(name);
 
         return value;

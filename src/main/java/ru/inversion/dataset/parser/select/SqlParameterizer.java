@@ -4,13 +4,16 @@ import ru.inversion.dataset.parser.jdbc.Parameter;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.lexer.SqlKeyword;
 import ru.inversion.dataset.parser.lexer.SqlScanner;
+import ru.inversion.utils.Checks;
+import ru.inversion.utils.U;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
+
+
 
 import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.*;
 import static ru.inversion.dataset.parser.lexer.SqlKeyword.*;
@@ -30,52 +33,63 @@ public final class SqlParameterizer {
             List<SqlScanner.Token> tokens,
             boolean oracle
     ) {
-        this.source = Objects.requireNonNull(source, "source");
-        this.tokens = Objects.requireNonNull(tokens, "tokens");
+        this.source = Checks.Require.object(source, "source");
+        this.tokens = Checks.Require.object(tokens, "tokens");
         this.oracle = oracle;
     }
 
-    /**
-     * Parameterizes supported SQL/JDBC text using the supplied dialect scanner.
-     * Unlike {@link SqlSelect}, this entry point does not require a SELECT and
-     * performs no structural changes.
-     */
     public static PreparedSql prepare(String source, SqlScanner scanner) {
-        Objects.requireNonNull(scanner, "scanner");
+        Checks.Require.object( scanner, "scanner");
         return prepare(
-                source,
-                scanner.scan(source),
-                scanner instanceof ru.inversion.dataset.parser.lexer.OracleSqlScanner
+            source,
+            scanner.scan(source),
+            scanner instanceof ru.inversion.dataset.parser.lexer.OracleSqlScanner
         );
     }
 
-    static PreparedSql prepare(
-            String source,
-            List<SqlScanner.Token> tokens,
-            boolean oracle
-    ) {
+    static PreparedSql prepare (
+        String source,
+        List<SqlScanner.Token> tokens,
+        boolean oracle
+    )
+    {
         return prepare(source, tokens, oracle, Collections.emptyList());
     }
 
-    static PreparedSql prepare(String source, List<SqlScanner.Token> tokens, boolean oracle,
-                               List<NamedSourceRange> namedSources) {
+
+    /** */
+    static PreparedSql prepare(
+        String source, List<SqlScanner.Token> tokens,
+        boolean oracle,
+        List<NamedSourceRange> namedSources
+    )
+    {
         return prepare(source, tokens, oracle, namedSources, null);
     }
 
+    /** */
     static PreparedSql prepare(String source, List<SqlScanner.Token> tokens, boolean oracle,
                                List<NamedSourceRange> namedSources, OrderOffsets order) {
         return new SqlParameterizer(source, tokens, oracle).compile(namedSources, order);
     }
 
     /** Директивы и старые маркеры могут связывать параметризацию соседних фрагментов. */
-    static boolean mayChangeParameterization(String source, SqlScanner.Token token) {
+    static boolean mayChangeParameterization(String source, SqlScanner.Token token)
+    {
         SqlScanner.Kind kind = token.kind();
-        return kind == PARAMETERIZE_ON || kind == PARAMETERIZE_OFF
-                || ((kind == OPERATOR || kind == SYMBOL)
-                    && (source.charAt(token.start()) == '~' || source.charAt(token.end() - 1) == '~'));
+
+        return kind == PARAMETERIZE_ON
+            || kind == PARAMETERIZE_OFF
+            || (
+                 ( kind == OPERATOR || kind == SYMBOL )
+                 &&
+                 ( source.charAt(token.start()) == '~' || source.charAt(token.end() - 1) == '~' )
+        );
     }
 
-    private PreparedSql compile(List<NamedSourceRange> namedSources, OrderOffsets order) {
+    /** */
+    private PreparedSql compile( List<NamedSourceRange> namedSources, OrderOffsets order )
+    {
         StringBuilder sql = new StringBuilder();
         List<Parameter> parameters = new ArrayList<>();
         int namedSourceIndex = 0;
@@ -93,67 +107,70 @@ public final class SqlParameterizer {
             SqlScanner.Token token = tokens.get(i);
             SqlScanner.Kind kind = token.kind();
 
-            if (order != null && order.reusable) {
+            if (order != null && order.reusable)
+            {
                 order.reusable = !mayChangeParameterization(source, token);
-                order.capture(token.start(), token.end(), kind == WHITESPACE, sql.length(), parameters.size());
+
+                order.capture( token.start(), token.end(), kind == WHITESPACE, sql.length(), parameters.size());
+
                 if (!order.hasTail && token.start() >= order.end && !isTrivia(kind)) {
                     order.hasTail = true;
                     order.reusable &= isOrderTerminator(i);
                 }
             }
 
-            if (kind == PARAMETERIZE_OFF)
+            if( kind == PARAMETERIZE_OFF )
                 parameterize = false;
             else if (kind == PARAMETERIZE_ON)
                 parameterize = true;
 
-            if (i == legacyClose) {
+            if (i == legacyClose)
+            {
                 legacyClose = -1;
                 continue;
             }
 
-            if (i == legacyConcatClose) {
+            if (i == legacyConcatClose)
+            {
                 legacyConcatClose = -1;
                 sql.append("||");
                 continue;
             }
 
-            if (legacyClose < 0 && tilde(token)) {
+            if( legacyClose < 0 && tilde(token))
+            {
                 int close = oracle
                         ? nextTilde(i + 1)
                         : legacyOpening(i)
                             ? nextLegacyClosingTilde(i + 1)
                             : -1;
 
-                if (oracle && close < 0) {
-                    throw new IllegalArgumentException(
-                            "Unpaired Oracle legacy ~ marker at offset "
-                                    + token.start());
-                }
+                if( oracle && close < 0 )
+                    throw new IllegalArgumentException( "Unpaired Oracle legacy ~ marker at offset " + token.start());
 
-                if (close >= 0) {
+                if( close >= 0 )
+                {
                     legacyClose = close;
                     continue;
                 }
             }
 
-            if (!oracle
-                    && legacyConcatClose < 0
-                    && symbol(token, "~||")) {
+            if (!oracle && legacyConcatClose < 0 && symbol(token, "~||"))
+            {
                 int close = nextSymbol(i + 1, "||~");
 
-                if (close >= 0) {
+                if (close >= 0)
+                {
                     legacyConcatClose = close;
                     sql.append("||");
                     continue;
                 }
             }
 
-            if (symbol(token, ")")) {
-                if (depth == 0)
-                    throw new IllegalArgumentException(
-                            "Unbalanced SQL parentheses at offset "
-                                    + token.start());
+            if (symbol(token, ")"))
+            {
+                if( depth == 0 )
+                    throw new IllegalArgumentException( "Unbalanced SQL parentheses at offset " + token.start());
 
                 if (typeDepth == depth)
                     typeDepth = -1;
@@ -167,13 +184,11 @@ public final class SqlParameterizer {
             if (orderDepth == depth && isOrderTerminator(i))
                 orderDepth = -1;
 
-            if (orderDepth < 0
-                    && keyword(token, ORDER)
-                    && isOrderStart(i)) {
+            if (orderDepth < 0 && keyword(token, ORDER) && isOrderStart(i))
                 orderDepth = depth;
-            }
 
-            if (symbol(token, "(")) {
+            if (symbol(token, "("))
+            {
                 int previous = previousSignificant(i - 1);
 
                 if (unsupportedPrecisionCall(previous)) {
@@ -295,8 +310,7 @@ public final class SqlParameterizer {
             return number;
         }
         catch (NumberFormatException ex) {
-            throw new IllegalArgumentException(
-                    "Invalid numbered parameter: " + text, ex);
+            throw new IllegalArgumentException( "Invalid numbered parameter: " + text, ex);
         }
     }
 
@@ -327,17 +341,16 @@ public final class SqlParameterizer {
                 ));
     }
 
-    /**
-     * '(' starts SQL type arguments only when the type belongs to CAST(... AS ...)
-     * or PostgreSQL ::type(...). Qualified and multi-word type names are allowed.
-     */
-    private boolean isTypeArgumentsStart(int typeName) {
-        if (typeName < 0 || !isIdentifier(tokens.get(typeName)))
+    /** */
+    private boolean isTypeArgumentsStart(int typeName)
+    {
+        if( typeName < 0 || !isIdentifier(tokens.get(typeName)) )
             return false;
 
         int i = previousSignificant(typeName - 1);
 
-        while (i >= 0) {
+        while (i >= 0)
+        {
             SqlScanner.Token token = tokens.get(i);
 
             if (symbol(token, "::") || keyword(token, AS))
@@ -355,10 +368,9 @@ public final class SqlParameterizer {
     }
 
     /**
-     * Precision on SQL current-time expressions is valid SQL grammar, not
-     * an application value. It is outside the intentionally small contract.
      */
-    private boolean unsupportedPrecisionCall(int name) {
+    private boolean unsupportedPrecisionCall(int name)
+    {
         return in(
                 keywordAt(name),
                 CURRENT_TIME,
@@ -369,18 +381,18 @@ public final class SqlParameterizer {
     }
 
     private boolean isIdentifier(SqlScanner.Token token) {
-        return token.kind() == WORD
-                || token.kind() == QUOTED_IDENTIFIER;
+        return token.kind() == WORD || token.kind() == QUOTED_IDENTIFIER;
     }
 
-    private static Object literalValue(
-            SqlScanner.Kind kind,
-            String text
-    ) {
-        if (kind == STRING) {
-            return text.substring(1, text.length() - 1)
-                    .replace("''", "'");
-        }
+    /** */
+    private static Object literalValue
+    (
+        SqlScanner.Kind kind,
+        String text
+    )
+    {
+        if (kind == STRING)
+            return text.substring(1, text.length() - 1).replace("''", "'");
 
         try {
             return text.indexOf('.') >= 0
@@ -416,15 +428,12 @@ public final class SqlParameterizer {
     }
 
     private SqlKeyword keyword(SqlScanner.Token token) {
-        return token == null
-                ? null
-                : token.keyword(source);
+        return token == null ? null : token.keyword(source);
     }
 
-    private SqlKeyword keywordAt(int i) {
-        return i >= 0 && i < tokens.size()
-                ? keyword(tokens.get(i))
-                : null;
+    private SqlKeyword keywordAt(int i)
+    {
+        return i >= 0 && i < tokens.size() ? keyword(tokens.get(i)) : null;
     }
 
     private boolean keywordAt(int i, SqlKeyword expected) {
@@ -433,28 +442,25 @@ public final class SqlParameterizer {
                 && keyword(tokens.get(i), expected);
     }
 
-    private static boolean isTrivia(SqlScanner.Kind kind) {
-        return kind == WHITESPACE
-                || kind == COMMENT
-                || kind == HINT
-                || kind == PARAMETERIZE_OFF
-                || kind == PARAMETERIZE_ON;
+    /** */
+    private static boolean isTrivia( SqlScanner.Kind kind)
+    {
+        return U.in( kind,  WHITESPACE, COMMENT, HINT, PARAMETERIZE_OFF,  PARAMETERIZE_ON );
     }
 
-    /**
-     * Find the matching marker only when a candidate opening is encountered.
-     * This keeps real PostgreSQL ~ operators untouched unless a full legacy
-     * pair is confirmed.
-     */
-    private int nextTilde(int from) {
-        for (int i = from; i < tokens.size(); i++) {
-            if (tilde(tokens.get(i)))
+    /** */
+    private int nextTilde(int from)
+    {
+        for( int i = from; i < tokens.size(); i++ )
+        {
+            if( tilde(tokens.get(i)) )
                 return i;
         }
 
         return -1;
     }
 
+    /** */
     private int nextLegacyClosingTilde(int from) {
         for (int i = from; i < tokens.size(); i++) {
             if (tilde(tokens.get(i)) && legacyClosing(i))
@@ -523,17 +529,14 @@ public final class SqlParameterizer {
                 );
     }
 
-    private boolean keyword(
-            SqlScanner.Token token,
-            SqlKeyword expected
-    ) {
+    /** */
+    private boolean keyword( SqlScanner.Token token, SqlKeyword expected )
+    {
         return token.isKeyword(source, expected);
     }
 
-    private boolean symbol(
-            SqlScanner.Token token,
-            String expected
-    ) {
+    private boolean symbol( SqlScanner.Token token, String expected )
+    {
         SqlScanner.Kind kind = token.kind();
 
         return (kind == SYMBOL || kind == OPERATOR)

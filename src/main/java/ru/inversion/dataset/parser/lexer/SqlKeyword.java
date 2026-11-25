@@ -66,9 +66,21 @@ public enum SqlKeyword {
 
     private static final TreeMap<String,SqlKeyword> BY_NAME = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
 
+    private static final int MAX_LENGTH;
+
     static {
-        for( SqlKeyword keyword : values() )
+
+        int l = 0;
+
+        for( SqlKeyword keyword : values() ) {
              BY_NAME.put(keyword.name(), keyword);
+
+             if( keyword.name().length() > l )
+                 l = keyword.name().length();
+        }
+
+        MAX_LENGTH = l;
+
     }
 
     public static boolean in( SqlKeyword keyword, SqlKeyword ... values )
@@ -83,17 +95,29 @@ public enum SqlKeyword {
     /** */
     boolean matches( String source, int start, int end)
     {
-        String text = name();
-        return end - start == text.length() && source.regionMatches( true, start, text, 0, text.length() );
+        return matches(this, source, start, end );
     }
 
     /** */
-    static SqlKeyword of(String source, int start, int end) {
-        return BY_NAME.get( source.substring(start, end) );
+    private static boolean matches( SqlKeyword k, String source, int start, int end)
+    {
+        int l = end - start;
+
+        if( l > MAX_LENGTH )
+            return false;
+
+        final String text = k.name();
+
+        return l == text.length() && source.regionMatches( true, start, text, 0, l );
+    }
+
+    /** */
+    static SqlKeyword of( String source, int start, int end ) {
+        return end - start <= MAX_LENGTH ? null : BY_NAME.get( source.substring(start, end) );
     }
 
     /** */
     public static SqlKeyword of(String text) {
-        return text == null ? null : BY_NAME.get(text);
+        return text == null || text.isEmpty() || text.length() > MAX_LENGTH ? null : BY_NAME.get(text);
     }
 }
