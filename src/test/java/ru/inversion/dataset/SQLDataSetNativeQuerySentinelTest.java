@@ -2,8 +2,11 @@ package ru.inversion.dataset;
 
 import org.junit.Test;
 import ru.inversion.dataset.impl.DataSetSelectBuilder;
+import ru.inversion.dataset.mark.MarkColumns;
+import ru.inversion.dataset.mark.RowIDMarkable;
 import ru.inversion.dataset.parser.jdbc.Parameter;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.db.dialect.SqlDialectFactory;
 import ru.inversion.tc.TaskContext;
 
 import javax.persistence.Column;
@@ -16,6 +19,7 @@ import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -278,6 +282,43 @@ public class SQLDataSetNativeQuerySentinelTest {
         assertTrue(sql, sql.indexOf("b.name = :name") >= 0 && sql.indexOf("b.name = :name") < sql.indexOf(") qrslt"));
         assertFalse(sql, sql.contains("<w>"));
         assertFalse(sql, sql.contains(";"));
+    }
+
+    @Test
+    public void rowIdMarkReadsRowIdFromDataSetScope() throws Exception {
+        XXIDataSet<MarkedRow> ds = new XXIDataSet<>(MarkedRow.class);
+        ds.setTaskContext(oracleTaskContext());
+        ds.setMarkerID(17L);
+        ds.setSQL("select bsnu.rowid, kodbsnu from bsnu where typenu = :type order by typenu, kodbsnu");
+
+        PreparedSql prepared = ds.prepareDataQuery();
+        String sql = prepared.getSql();
+        assertTrue(sql, sql.contains("CASE WHEN ROWID in ( select a$.RMRKROWID from v_jf_mrk a$"));
+        assertTrue(sql, sql.contains("a$.IMRKMARKERID = ?"));
+        assertTrue(sql, sql.contains("AS MARK"));
+    }
+
+    @Test
+    public void rowIdMarkFiltersKeepTheWrappedSourceAlias() throws Exception {
+        XXIDataSet<MarkedRow> ds = new XXIDataSet<>(MarkedRow.class);
+        ds.setTaskContext(oracleTaskContext());
+        ds.setMarkerID(17L);
+        ds.setSQL("select bsnu.rowid, bsnu.kodbsnu from bsnu join bsdv on bsdv.kodbsdv = bsnu.kodbsdv");
+        ds.setQueryAlias("items");
+
+        String expected = "items.ROWID in ( select a$.RMRKROWID from v_jf_mrk a$";
+        String iterator = ds.createMarkedRSIteratorBuilder(false).buildSql();
+        assertTrue(iterator, iterator.contains(expected));
+        String aggregate = ds.createMarkedAggregateSourceBuilder(Collections.emptyList(), SqlDialectFactory.ORACLE).buildSql();
+        assertTrue(aggregate, aggregate.contains(expected));
+    }
+
+    @MarkColumns(columns = {"ROWID"})
+    public static final class MarkedRow extends RowIDMarkable {
+        @Override
+        public String getMarkRowID() {
+            return null;
+        }
     }
 
     private static TaskContext oracleTaskContext() throws Exception {

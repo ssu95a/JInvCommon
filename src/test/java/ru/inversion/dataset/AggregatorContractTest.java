@@ -216,7 +216,7 @@ public class AggregatorContractTest {
         ds.setRowClass(MarkRow.class);
 
         Method method = XXIDataSet.class.getDeclaredMethod(
-                "markExistsPredicate",
+                "markedRowPredicate",
                 String.class
         );
         method.setAccessible(true);

@@ -448,21 +448,16 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 		this.enableAutoFilter = enableAutoFilter;
 	}
 
-    /**
-     * EXISTS predicate for the current mark mode.
-     * prefix qualifies DataSet key columns when the predicate is used
-     * against an aggregate table.
-     */
-    private String markExistsPredicate(String prefix) {
+    /** Предикат отбора отмеченных строк. Префикс относится к ключу внешней выборки. */
+    private String markedRowPredicate(String prefix) {
         String actualPrefix = prefix == null ? "" : prefix;
         String[] key = markDescriptor.getMarkKeyColumns();
 
         switch( markDescriptor.getMarkMode() ) {
             case MRK:
-                return "exists ( select NULL from v_jf_mrk a$ "
-                        + "where a$.IMRKMARKERID = :jinv_marker_id "
-                        + "and a$.RMRKROWID = "
-                        + actualPrefix + key[0] + ")";
+                // ROWID должен разрешаться во внешней выборке, где находится строка DataSet.
+                return actualPrefix + key[0] + " in ( select a$.RMRKROWID from v_jf_mrk a$ "
+                        + "where a$.IMRKMARKERID = :jinv_marker_id)";
 
             case MRK_ID:
                 return "exists ( select NULL from v_jf_mrk_id a$ "
@@ -512,8 +507,12 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         if( !isSupportMark() || getMarkerID() == null )
             return null;
 
+        String predicate = markedRowPredicate("");
+        if( markDescriptor.getMarkMode() == MRK )
+            return "CASE WHEN " + predicate + " THEN 1 ELSE 0 END";
+
         return "nvl((select 1 from dual where "
-                + markExistsPredicate("")
+                + predicate
                 + "),0) ";
     }
 
@@ -874,7 +873,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
         builder.mark("1");
 
-        builder.addPredicate(markExistsPredicate(builder.predicateQualifier()));
+        builder.addPredicate(markedRowPredicate(builder.predicateQualifier()));
 
         return builder;
     }
@@ -911,7 +910,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         for( String predicate : predicates )
             source.addPredicate(predicate);
 
-        source.addPredicate(markExistsPredicate(source.predicateQualifier()));
+        source.addPredicate(markedRowPredicate(source.predicateQualifier()));
 
         return source;
     }
@@ -1078,7 +1077,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 
                 predicates.addAll(predicatList);
                 predicates.add(
-                        markExistsPredicate(aggrTable + ".")
+                        markedRowPredicate(aggrTable + ".")
                 );
 
                 preparedSql = prepareAggregateTableSql(
