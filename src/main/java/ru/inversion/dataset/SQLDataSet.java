@@ -1661,7 +1661,15 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
          if( dataReader != null && !dataReader.isEOF() ) {
 
-            List< P > data = dataReader.getNextPage(nRowCount);
+            int rowsToRead = nRowCount;
+            if( maxFetchSize > 0 ) {
+               long remaining = Math.max(0L, maxFetchSize - rows().size());
+               // Одной строки сверх лимита достаточно, чтобы обнаружить превышение.
+               if( remaining < Integer.MAX_VALUE && (rowsToRead < 0 || rowsToRead > remaining) )
+                  rowsToRead = (int) remaining + 1;
+            }
+
+            List< P > data = dataReader.getNextPage(rowsToRead);
 
             final int realRowCount = data.size();
 
@@ -1672,7 +1680,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
                // Добавить проверку на MAXIMUM_RECORDS_FETCHED
                if( maxFetchSize > 0 ) {
 
-                  if( rows().size() + realRowCount > maxFetchSize ) {
+                  if( (long) rowIndex + realRowCount > maxFetchSize ) {
 
                      IllegalStateException failure =
                              new IllegalStateException(

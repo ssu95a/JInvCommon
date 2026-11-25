@@ -519,6 +519,36 @@ class SQLDataSetLifecycleTest {
     }
 
     @Test
+    void fullFetchReadsAtMostOneRowBeyondLimit() throws DataSetException {
+        String property = "ru.inversion.db.maximum_records_fetched";
+        String previous = System.getProperty(property);
+        try {
+            System.setProperty(property, "3");
+            TestDataSet ds = new TestDataSet();
+            Reader reader = new Reader() {
+                @Override
+                public List<String> getNextPage(int pageSize) {
+                    assertEquals(4, pageSize);
+                    return Arrays.asList("one", "two", "three", "extra");
+                }
+            };
+            ds.useReader(reader);
+
+            DataSetException failure = assertThrows(DataSetException.class, () -> ds.swappingData(true));
+            assertTrue(failure.getCause().getMessage().contains("Max fetch size: 3"));
+            assertTrue(ds.getRows().isEmpty());
+            assertNull(ds.reader());
+            assertEquals(1, reader.closeCount);
+        }
+        finally {
+            if (previous == null)
+                System.clearProperty(property);
+            else
+                System.setProperty(property, previous);
+        }
+    }
+
+    @Test
     void maximumFetchFailureRemainsPrimaryWhenCloseAlsoFails() {
         String property =
                 "ru.inversion.db.maximum_records_fetched";
