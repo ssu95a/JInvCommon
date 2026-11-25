@@ -924,10 +924,11 @@ public final class SqlSelect {
     }
 
     private boolean rowLockClauseAt(int i) {
-        return keywords(i, FOR, UPDATE)
-                || keywords(i, FOR, SHARE)
-                || keywords(i, FOR, KEY)
-                || keywords(i, FOR, NO);
+        if (!keyword(i, FOR))
+            return false;
+
+        SqlKeyword next = keyword(nextSignificant(i + 1));
+        return next == UPDATE || next == SHARE || next == KEY || next == NO;
     }
 
     private boolean tailAt(int i) {
@@ -935,17 +936,15 @@ public final class SqlSelect {
                 || rowLockClauseAt(i);
     }
 
-    private boolean keywords(int i, SqlKeyword ... keywords) {
-        int index = i;
+    private boolean keywords(int i, SqlKeyword first, SqlKeyword second) {
+        return keyword(i, first) && keyword(nextSignificant(i + 1), second);
+    }
 
-        for( SqlKeyword keyword : keywords ) {
-            if( !keyword(index, keyword) )
-                return false;
+    private boolean keywords(int i, SqlKeyword first, SqlKeyword second, SqlKeyword third) {
+        if (!keyword(i, first))
+            return false;
 
-            index = nextSignificant(index + 1);
-        }
-
-        return true;
+        return keywords(nextSignificant(i + 1), second, third);
     }
 
     private SqlKeyword keyword(int i) {
@@ -1001,7 +1000,8 @@ public final class SqlSelect {
     }
 
     private static boolean symbol(String sql, SqlScanner.Token token, String value) {
-        return token.kind() == SYMBOL && token.text(sql).equals(value);
+        return token.kind() == SYMBOL && token.end() - token.start() == value.length()
+                && sql.startsWith(value, token.start());
     }
 
     public static final class DataSetSource {

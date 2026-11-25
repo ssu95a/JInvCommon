@@ -92,7 +92,6 @@ public final class SqlParameterizer {
         for (int i = 0; i < tokens.size(); i++) {
             SqlScanner.Token token = tokens.get(i);
             SqlScanner.Kind kind = token.kind();
-            String text = token.text(source);
 
             if (order != null && order.reusable) {
                 order.reusable = !mayChangeParameterization(source, token);
@@ -207,13 +206,13 @@ public final class SqlParameterizer {
                             sourceId = range.sourceId;
                     }
                     sql.append('?');
-                    parameters.add(Parameter.named(text.substring(1), sourceId));
+                    parameters.add(Parameter.named(source.substring(offset + 1, token.end()), sourceId));
                     break;
 
                 case NUMBERED_PARAMETER:
                     sql.append('?');
                     parameters.add(Parameter.numbered(
-                            parseNumberedPosition(text)));
+                            parseNumberedPosition(token.text(source))));
                     break;
 
                 case STRING:
@@ -227,15 +226,15 @@ public final class SqlParameterizer {
                             && orderDepth < 0) {
                         sql.append('?');
                         parameters.add(Parameter.literal(
-                                literalValue(kind, text)));
+                                literalValue(kind, token.text(source))));
                     }
                     else {
-                        sql.append(text);
+                        sql.append(source, token.start(), token.end());
                     }
                     break;
 
                 default:
-                    sql.append(text);
+                    sql.append(source, token.start(), token.end());
             }
         }
 
@@ -538,6 +537,7 @@ public final class SqlParameterizer {
         SqlScanner.Kind kind = token.kind();
 
         return (kind == SYMBOL || kind == OPERATOR)
-                && token.text(source).equals(expected);
+                && token.end() - token.start() == expected.length()
+                && source.startsWith(expected, token.start());
     }
 }
