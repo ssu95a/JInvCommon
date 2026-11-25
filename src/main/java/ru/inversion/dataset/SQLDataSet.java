@@ -129,14 +129,20 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
         @Override public boolean hasParameter(String name)
         {
+            if (SQLDataSet.this.hasParameter(name))
+                return true;
+
             IParameters callback = SQLDataSet.this.getCallbackParameters();
-            return ( callback != null && callback.hasParameter(name) ) || SQLDataSet.this.hasParameter(name);
+            return callback != null && callback.hasParameter(name);
         }
 
         @Override public boolean hasParameter(int index)
         {
+            if (SQLDataSet.this.hasParameter(index))
+                return true;
+
             IParameters callback = SQLDataSet.this.getCallbackParameters();
-            return (callback != null && callback.hasParameter(index)) || SQLDataSet.this.hasParameter(index);
+            return callback != null && callback.hasParameter(index);
         }
    };
 

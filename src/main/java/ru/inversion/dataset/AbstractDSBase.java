@@ -174,23 +174,20 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
     }
 
     /**
-     * Возвращает значение параметра: сначала callback, затем собственные параметры.
-     * Значение {@code null} считается заданным; {@link IParameters#NO_PARAMETER_VALUE}
-     * означает отсутствие значения и допускает fallback.
+     * Сначала ищет значение во внутреннем наборе, затем во внешнем callback.
+     * Значение {@code null} считается заданным. {@link IParameters#NO_PARAMETER_VALUE}
+     * означает отсутствие значения и допускает поиск в callback.
      *
      * @throws DataSetParameterException если параметр не задан
      */
     public Object getParameterValue( int index ) throws DataSetParameterException {
 
-        IParameters callback = getCallbackParameters();
-
-        Object value = callback == null
-                ? NO_PARAMETER_VALUE
-                : callback.getParameterOrDefault(index, NO_PARAMETER_VALUE);
-
-        // null считается заданным значением. Только sentinel разрешает fallback.
-        if (value == NO_PARAMETER_VALUE)
-            value = getParameterOrDefault(index, NO_PARAMETER_VALUE);
+        Object value = getParameterOrDefault(index, NO_PARAMETER_VALUE);
+        if (value == NO_PARAMETER_VALUE) {
+            IParameters callback = getCallbackParameters();
+            if (callback != null)
+                value = callback.getParameterOrDefault(index, NO_PARAMETER_VALUE);
+        }
 
         if (value == NO_PARAMETER_VALUE)
             DataSetParameterException.throwNoSetParameterValue(index);
@@ -206,15 +203,12 @@ public abstract class AbstractDSBase<P> implements IDSBase<P> {
      */
     public Object getParameterValue( String name ) throws DataSetParameterException {
 
-        IParameters callback = getCallbackParameters();
-
-        Object value = callback == null
-                ? NO_PARAMETER_VALUE
-                : callback.getParameterOrDefault(name, NO_PARAMETER_VALUE);
-
-        // null считается заданным значением. Только sentinel разрешает fallback.
-        if (value == NO_PARAMETER_VALUE)
-            value = getParameterOrDefault(name, NO_PARAMETER_VALUE);
+        Object value = getParameterOrDefault(name, NO_PARAMETER_VALUE);
+        if (value == NO_PARAMETER_VALUE) {
+            IParameters callback = getCallbackParameters();
+            if (callback != null)
+                value = callback.getParameterOrDefault(name, NO_PARAMETER_VALUE);
+        }
 
         if (value == NO_PARAMETER_VALUE)
             DataSetParameterException.throwNoSetParameterValue(name);

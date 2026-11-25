@@ -10,8 +10,10 @@ import javax.persistence.Table;
 import java.util.Map;
 
 import ru.inversion.db.dialect.SqlDialectFactory;
+import ru.inversion.dataset.IParameters;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.select.SqlSelect;
+import ru.inversion.utils.ParametersValues;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -69,6 +71,24 @@ class SQLTreeDataSetLifecycleTest {
         Object parameter(int index) {
             return getParameterValue(index);
         }
+    }
+
+    @Test
+    void treeDataSetValuesOverrideCallbackIncludingExplicitNull() {
+        SQLTreeDataSet<Object> ds = new SQLTreeDataSet<>();
+        ParametersValues callback = new ParametersValues();
+        callback.setParameter("branch", 17);
+        callback.setParameter(0, null);
+        ds.setCallbackParameters(callback);
+
+        IParameters parameters = ds.getParameters();
+        assertEquals(17, parameters.getParameter("branch"));
+        assertNull(parameters.getParameter(0));
+
+        ds.setParameter("branch", null);
+        ds.setParameter(0, 29);
+        assertNull(parameters.getParameter("branch"));
+        assertEquals(29, parameters.getParameter(0));
     }
 
     @Test

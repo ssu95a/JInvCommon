@@ -827,7 +827,7 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
     /**
      * Возвращает значение индексированного параметра.
      * <p>
-     * SQLDataSet различает ситуацию когда параметр установлен в {@code null} и когда параметр отсутствует.
+     * Явно заданное значение TreeDataSet, включая {@code null}, имеет приоритет над callback.
      * При отсутствии параметра выбрасывается исключение.
      *
      * @param index
@@ -840,15 +840,15 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
      */
     protected Object getParameterValue( int index ) {
 
-        IParameters cp = getCallbackParameters();
-
-        Object value = cp == null
+        Object value = dataSetParameters == null
                 ? NO_PARAMETER_VALUE
-                : cp.getParameterOrDefault(index, NO_PARAMETER_VALUE);
+                : dataSetParameters.getParameterOrDefault(index, NO_PARAMETER_VALUE);
 
-        if( value == NO_PARAMETER_VALUE && dataSetParameters != null )
-            value = dataSetParameters.getParameterOrDefault(
-                    index, NO_PARAMETER_VALUE);
+        if (value == NO_PARAMETER_VALUE) {
+            IParameters callback = getCallbackParameters();
+            if (callback != null)
+                value = callback.getParameterOrDefault(index, NO_PARAMETER_VALUE);
+        }
 
         if( value == NO_PARAMETER_VALUE )
             throw new TreeDataSetException(
@@ -864,7 +864,7 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
     /**
      * Возвращает значение именованного параметра.
      * <p>
-     * SQLDataSet различает ситуацию когда параметр установлен в {@code null} и когда параметр отсутствует.
+     * Приоритет источников тот же, что у {@link #getParameterValue(int)}.
      * При отсутствии параметра выбрасывается исключение.
      *
      * @param name
@@ -877,15 +877,15 @@ public class SQLTreeDataSet<P> extends AbstractTreeDataSet<P> {
      */
     protected Object getParameterValue( String name ) {
 
-        IParameters cp = getCallbackParameters();
-
-        Object value = cp == null
+        Object value = dataSetParameters == null
                 ? NO_PARAMETER_VALUE
-                : cp.getParameterOrDefault(name, NO_PARAMETER_VALUE);
+                : dataSetParameters.getParameterOrDefault(name, NO_PARAMETER_VALUE);
 
-        if( value == NO_PARAMETER_VALUE && dataSetParameters != null )
-            value = dataSetParameters.getParameterOrDefault(
-                    name, NO_PARAMETER_VALUE);
+        if (value == NO_PARAMETER_VALUE) {
+            IParameters callback = getCallbackParameters();
+            if (callback != null)
+                value = callback.getParameterOrDefault(name, NO_PARAMETER_VALUE);
+        }
 
         if( value == NO_PARAMETER_VALUE )
             throw new TreeDataSetException( Tags.PRODUCT_LABEL + "No parameter value for '" + name +"'");

@@ -7,10 +7,12 @@ import ru.inversion.dataset.parser.jdbc.Parameter;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
 import ru.inversion.dataset.parser.lexer.PostgresSqlScanner;
+import ru.inversion.utils.ParametersValues;
 
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
 
@@ -128,34 +130,48 @@ public class SQLDataSetSparserIntegrationTest {
         assertTrue(prepared.getSql().contains("branch = ?"));
         assertEquals(
                 Collections.<Object>singletonList(9),
-                builder.values(values(ds))
+                builder.values(ds.mainSqlParameters)
         );
 
         ds.setParameter("branch", null);
         assertEquals(
                 Collections.<Object>singletonList(null),
-                builder.values(values(ds))
+                builder.values(ds.mainSqlParameters)
         );
     }
 
     @Test
-    public void callbackNullOverridesDatasetAndExpression() throws Exception {
+    public void datasetValuesOverrideCallbackIncludingExplicitNull() {
         SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
-        ds.setParameter("branch", 12);
-        SQLExpression expr = new SQLExpression("branch = :branch");
-        expr.setParameter("branch", 17);
-        int id = ds.setFilter(expr, true, false);
-        ds.setCallbackParameters(new ParametersByName() {
-            @Override public Object getParameter(String name) { return null; }
-            @Override public boolean hasParameter(String name) { return "branch".equals(name); }
-        });
+        AtomicInteger callbackChecks = new AtomicInteger();
+        ParametersValues callback = new ParametersValues() {
+            @Override public boolean hasParameter(String name) {
+                callbackChecks.incrementAndGet();
+                return super.hasParameter(name);
+            }
 
-        DataSetSelectBuilder builder = new DataSetSelectBuilder("select id from client", SqlDialectFactory.POSTGRES);
-        builder.addPredicate(ds.predicates().get(id).getExpression());
-        assertEquals(
-                Collections.<Object>singletonList(null),
-                builder.values(values(ds))
-        );
+            @Override public boolean hasParameter(int index) {
+                callbackChecks.incrementAndGet();
+                return super.hasParameter(index);
+            }
+        };
+        callback.setParameter("branch", null);
+        callback.setParameter(0, 23);
+        ds.setCallbackParameters(callback);
+
+        DataSetSelectBuilder builder = new DataSetSelectBuilder(
+                "select id from client where branch = :branch and region = ?", SqlDialectFactory.POSTGRES);
+        assertEquals(Arrays.asList(null, 23), builder.values(ds.mainSqlParameters));
+
+        callbackChecks.set(0);
+        ds.setParameter("branch", 12);
+        ds.setParameter(0, null);
+        assertEquals(Arrays.asList(12, null), builder.values(ds.mainSqlParameters));
+        assertEquals(0, callbackChecks.get());
+
+        ds.setParameter("branch", IParameters.NO_PARAMETER_VALUE);
+        ds.setParameter(0, IParameters.NO_PARAMETER_VALUE);
+        assertEquals(Arrays.asList(null, 23), builder.values(ds.mainSqlParameters));
     }
 
     @Test
@@ -333,18 +349,4 @@ public class SQLDataSetSparserIntegrationTest {
         );
     }
 
-    private static IParameters values(SQLDataSet<?> ds) {
-        return new IParameters() {
-            @Override public Object getParameter(String name) { return ds.getParameterValue(name); }
-            @Override public Object getParameter(int index) { return ds.getParameterValue(index); }
-            @Override public boolean hasParameter(String name) {
-                IParameters callback = ds.getCallbackParameters();
-                return (callback != null && callback.hasParameter(name)) || ds.hasParameter(name);
-            }
-            @Override public boolean hasParameter(int index) {
-                IParameters callback = ds.getCallbackParameters();
-                return (callback != null && callback.hasParameter(index)) || ds.hasParameter(index);
-            }
-        };
-    }
 }
