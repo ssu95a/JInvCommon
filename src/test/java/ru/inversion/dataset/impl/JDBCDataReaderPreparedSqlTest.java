@@ -60,6 +60,30 @@ public class JDBCDataReaderPreparedSqlTest {
     }
 
     @Test
+    public void readsJdbcFetchSizeFromSystemProperty() throws Exception {
+        String property = "ru.inversion.db.dataset.fetch_size";
+        String previous = System.getProperty(property);
+        try {
+            RecordingJdbc jdbc = new RecordingJdbc();
+            try (JDBCDataReader<Object> reader = reader(jdbc, prepared("select id from t"))) {
+                System.setProperty(property, "256");
+                reader.executeQuery(Collections.emptyList());
+                assertEquals(256, jdbc.statements.get(0).fetchSize);
+
+                System.setProperty(property, "-1");
+                reader.executeQuery(Collections.emptyList());
+                assertEquals(60, jdbc.statements.get(1).fetchSize);
+            }
+        }
+        finally {
+            if (previous == null)
+                System.clearProperty(property);
+            else
+                System.setProperty(property, previous);
+        }
+    }
+
+    @Test
     public void executesAlreadyResolvedJdbcValuesWithoutParameterInterpretation() throws Exception {
         RecordingJdbc jdbc = new RecordingJdbc();
         PreparedSql sql = prepared(

@@ -17,6 +17,8 @@ import java.util.*;
 
 /**
  *
+ * Размер JDBC-пакета задаётся положительным системным свойством
+ * {@code ru.inversion.db.dataset.fetch_size}, по умолчанию 60.
  * @author ssu @
  */
 public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
@@ -42,7 +44,8 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
         }
     }
 
-    static private final int currentPageSize = 60;
+    private static final int DEFAULT_FETCH_SIZE = 60;
+    private static final String FETCH_SIZE_PROPERTY = "ru.inversion.db.dataset.fetch_size";
 
     private ResultSet rowSet;
     private PreparedStatement statement;
@@ -119,7 +122,8 @@ public class JDBCDataReader<T> implements ISQLDataReader<T>, AutoCloseable {
                 for( Object value : pv )
                      statement.setObject( nIndex++, value );
 
-                statement.setFetchSize(currentPageSize);
+                int fetchSize = Integer.getInteger(FETCH_SIZE_PROPERTY, DEFAULT_FETCH_SIZE);
+                statement.setFetchSize(fetchSize > 0 ? fetchSize : DEFAULT_FETCH_SIZE);
 
                 rowSet = statement.executeQuery();
             }
