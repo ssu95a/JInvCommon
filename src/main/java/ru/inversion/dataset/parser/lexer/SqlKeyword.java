@@ -113,7 +113,7 @@ public enum SqlKeyword {
 
     /** */
     static SqlKeyword of( String source, int start, int end ) {
-        return end - start <= MAX_LENGTH ? null : BY_NAME.get( source.substring(start, end) );
+        return end - start > MAX_LENGTH ? null : BY_NAME.get( source.substring(start, end) );
     }
 
     /** */
