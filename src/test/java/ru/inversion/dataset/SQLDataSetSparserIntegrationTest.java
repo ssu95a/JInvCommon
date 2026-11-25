@@ -221,6 +221,34 @@ public class SQLDataSetSparserIntegrationTest {
     }
 
     @Test
+    public void sameNamedParameterInTwoFiltersHasLocalValuesUnlessDatasetDefinesIt() throws Exception {
+        SQLDataSet<Object[]> ds = new SQLDataSet<>(null, Object[].class);
+        SQLExpression first = new SQLExpression("kind = :cat");
+        SQLExpression second = new SQLExpression("group_id = :cat");
+        first.setParameter("cat", 10);
+        second.setParameter("cat", null);
+        ds.setFilter(first, true, true);
+        ds.setFilter(second, false, true);
+
+        assertFalse(ds.hasParameter("cat"));
+        assertTrue(second.hasParameter("cat"));
+        String local = ds.renderCompletedWherePredicate(SqlDialectFactory.POSTGRES);
+        assertTrue(local, local.contains("kind = 10"));
+        assertTrue(local, local.contains("group_id =  NULL "));
+
+        ds.setParameter("cat", 30);
+        String overridden = ds.renderCompletedWherePredicate(SqlDialectFactory.POSTGRES);
+        assertTrue(overridden, overridden.contains("kind = 30"));
+        assertTrue(overridden, overridden.contains("group_id = 30"));
+
+        ds.setParameter("cat", null);
+        assertTrue(ds.hasParameter("cat"));
+        String explicitNull = ds.renderCompletedWherePredicate(SqlDialectFactory.POSTGRES);
+        assertTrue(explicitNull, explicitNull.contains("kind =  NULL "));
+        assertTrue(explicitNull, explicitNull.contains("group_id =  NULL "));
+    }
+
+    @Test
     public void completedSqlRenderingUsesPreparedParameterPlan() {
         PreparedSql prepared = new PreparedSql(
                 "select '?' as literal_text, ? from client where owner_id = ? and amount = ?",

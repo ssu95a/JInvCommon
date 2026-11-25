@@ -10,12 +10,7 @@ import java.util.Objects;
  */
 public final class Parameter {
 
-    /**
-     * Compatibility value from the former fragment-ownership model.
-     *
-     * @deprecated current execution has one global parameter namespace.
-     */
-    @Deprecated
+    /** Параметр без локального SQL-фрагмента. */
     public static final int GLOBAL_SOURCE = -1;
 
     public enum Kind {
@@ -70,10 +65,7 @@ public final class Parameter {
         return named(name, GLOBAL_SOURCE);
     }
 
-    /**
-     * @deprecated source ownership is ignored by the current execution model.
-     */
-    @Deprecated
+    /** Именованный параметр с индексом исходного SQL-фрагмента. */
     public static Parameter named(String name, int sourceId) {
         Objects.requireNonNull(name, "name");
         if (name.isEmpty() || name.charAt(0) == ':') {
@@ -143,12 +135,7 @@ public final class Parameter {
         return value;
     }
 
-    /**
-     * Compatibility origin from the former fragment-ownership model.
-     *
-     * @deprecated current parameter resolution does not inspect sourceId.
-     */
-    @Deprecated
+    /** Индекс исходного SQL-фрагмента или {@link #GLOBAL_SOURCE}. */
     public int getSourceId() {
         return sourceId;
     }

@@ -37,12 +37,25 @@ public class DataSetSelectBuilderTest {
         @Override public boolean hasParameter(int index){return params.hasParameter(index);}
     }
 
-    @Test public void duplicatedNamedParameterWithoutDatasetThrows() {
-        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t", SqlDialectFactory.POSTGRES);
+    @Test public void namedParameterOutsideExpressionsWithMultipleSourcesThrows() {
+        DataSetSelectBuilder b = new DataSetSelectBuilder("select id from t where root = :id", SqlDialectFactory.POSTGRES);
         b.addPredicate(new Expr("a = :id").set("id",10));
         b.addPredicate(new Expr("b = :id").set("id",20));
         try {b.values(new Params()); fail("Missing conflict");}
         catch (IllegalStateException e) {assertTrue(e.getMessage().contains("Conflicting SQL parameter :id"));}
+    }
+
+    @Test public void repeatedNamedParameterUsesItsOwnExpression() {
+        DataSetSelectBuilder b = DataSetSelectBuilder.forDataSet(
+                "select id from t union all select id from u", SqlDialectFactory.POSTGRES);
+        Expr first = new Expr("id >= :cat or id = :cat").set("cat", 10);
+        b.addPredicate(first);
+        b.addPredicate(new Expr(first.getSQL()).set("cat", 20));
+        b.orderBy(new Expr("case when id = :cat then 0 else 1 end").set("cat", 30));
+
+        assertEquals(Arrays.asList(10, 10, 20, 20, 30), b.values(new Params()));
+        first.set("cat", 40);
+        assertEquals(Arrays.asList(40, 40, 20, 20, 30), b.values(new Params()));
     }
 
     @Test public void explicitNullDatasetOverridesBothExpressions() {

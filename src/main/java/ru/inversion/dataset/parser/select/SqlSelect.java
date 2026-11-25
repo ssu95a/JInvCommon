@@ -6,6 +6,7 @@ import ru.inversion.dataset.parser.SqlScannerFactory;
 import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
+import ru.inversion.dataset.parser.select.SqlParameterizer.NamedSourceRange;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,6 +14,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.IntPredicate;
 
 import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.*;
 import static ru.inversion.dataset.parser.lexer.SqlKeyword.*;
@@ -317,13 +319,18 @@ public final class SqlSelect {
 
     /** Исходная строка возвращается byte-for-byte, пока не задано изменений. */
     public String buildSql() {
-        if (builtSql != null) return builtSql;
+        if (builtSql == null)
+            builtSql = renderSql(null, false, null);
+        return builtSql;
+    }
+
+    private String renderSql(IntPredicate localPredicate, boolean localOrderBy, List<NamedSourceRange> namedSources) {
         if (predicates.isEmpty() && orderBy == null && afterOrderBy == null && rowLimit == null
                 && markExpression == null && layout.legacyWhereMarkerStart < 0) {
-            return builtSql = source;
+            return source;
         }
 
-        List<Edit> edits = edits();
+        List<Edit> edits = edits(localPredicate, localOrderBy);
         StringBuilder result = new StringBuilder(source.length() + 128);
         int copiedUntil = 0;
         for (Edit edit : edits) {
@@ -331,12 +338,17 @@ public final class SqlSelect {
                 throw new IllegalStateException("Overlapping SQL edits at " + edit.start);
             }
             result.append(source, copiedUntil, edit.start);
+            if (!edit.namedSources.isEmpty()) {
+                int base = result.length();
+                for (NamedSourceRange range : edit.namedSources)
+                    namedSources.add(new NamedSourceRange(base + range.start, base + range.end, range.sourceId));
+            }
             result.append(edit.replacement);
             copiedUntil = edit.end;
         }
 
         result.append(source, copiedUntil, source.length());
-        return builtSql = result.toString();
+        return result.toString();
     }
 
     /**
@@ -356,13 +368,24 @@ public final class SqlSelect {
         return preparedSql;
     }
 
+    /**
+     * Готовит SQL с источниками значений именованных параметров.
+     * Источник предиката обозначен его индексом, источник сортировки — числом предикатов.
+     * {@code localPredicate == null} означает, что у предикатов нет локальных источников.
+     */
+    public PreparedSql prepare(IntPredicate localPredicate, boolean localOrderBy) {
+        List<NamedSourceRange> namedSources = new ArrayList<>();
+        String sql = renderSql(localPredicate, localOrderBy, namedSources);
+        return SqlParameterizer.prepare(sql, scanner.scan(sql), scanner instanceof OracleSqlScanner, namedSources);
+    }
+
     private void invalidate() {
         builtSql = null;
         preparedSql = null;
     }
 
     /** Структурные изменения исходного SQL. */
-    private List<Edit> edits() {
+    private List<Edit> edits(IntPredicate localPredicate, boolean localOrderBy) {
         List<Edit> edits = new ArrayList<>(5);
 
         if (markExpression != null) {
@@ -375,22 +398,18 @@ public final class SqlSelect {
         }
 
         if (layout.legacyWhereMarkerStart >= 0) {
-            edits.add(new Edit(
+            edits.add(predicateEdit(
                     layout.legacyWhereMarkerStart,
                     layout.legacyWhereMarkerEnd,
-                    predicates.isEmpty() ? "" : joinLegacyWherePredicates(),
-                    10
+                    "", "", true, localPredicate
             ));
         }
         else if (!predicates.isEmpty()) {
-            String joined = joinPredicates();
-
             if (layout.whereWordEnd >= 0) {
-                edits.add(new Edit(
+                edits.add(predicateEdit(
                         layout.whereWordEnd,
                         layout.whereWordEnd,
-                        " (" + joined + ") AND (",
-                        10
+                        " (", ") AND (", false, localPredicate
                 ));
 
                 edits.add(new Edit(
@@ -401,35 +420,24 @@ public final class SqlSelect {
                 ));
             }
             else {
-                edits.add(new Edit(
+                edits.add(predicateEdit(
                         layout.whereInsertion,
                         layout.whereInsertion,
-                        " WHERE (" + joined + ")\n",
-                        10
+                        " WHERE (", ")\n", false, localPredicate
                 ));
             }
         }
 
         if (orderBy != null) {
-            String clause = (layout.orderStart >= 0 ? "ORDER BY " : " ORDER BY ")
-                    + orderBy + "\n";
-
-            if (layout.orderStart >= 0) {
-                edits.add(new Edit(
-                        layout.orderStart,
-                        layout.orderEnd,
-                        clause,
-                        20
-                ));
-            }
-            else {
-                edits.add(new Edit(
-                        layout.orderInsertion,
-                        layout.orderInsertion,
-                        clause,
-                        20
-                ));
-            }
+            boolean replace = layout.orderStart >= 0;
+            String prefix = replace ? "ORDER BY " : " ORDER BY ";
+            List<NamedSourceRange> namedSources = localOrderBy
+                    ? Collections.singletonList(new NamedSourceRange(prefix.length(),
+                            prefix.length() + orderBy.length(), predicates.size()))
+                    : Collections.emptyList();
+            edits.add(new Edit(replace ? layout.orderStart : layout.orderInsertion,
+                    replace ? layout.orderEnd : layout.orderInsertion,
+                    prefix + orderBy + "\n", 20, namedSources));
         }
 
         if( rowLimit != null ) {
@@ -472,32 +480,24 @@ public final class SqlSelect {
                 : "LIMIT " + value;
     }
 
-    private String joinPredicates() {
-        StringBuilder result = new StringBuilder();
+    private Edit predicateEdit(int start, int end, String prefix, String suffix,
+                               boolean legacy, IntPredicate localPredicate) {
+        StringBuilder result = new StringBuilder(prefix);
+        List<NamedSourceRange> namedSources = localPredicate == null
+                ? Collections.emptyList() : new ArrayList<>();
 
         for (int i = 0; i < predicates.size(); i++) {
-            if (i > 0)
+            if (legacy || i > 0)
                 result.append(" AND ");
 
-            result.append("(")
-                  .append(predicates.get(i))
-                  .append("\n)");
+            String predicate = predicates.get(i);
+            result.append('(');
+            if (localPredicate != null && localPredicate.test(i))
+                namedSources.add(new NamedSourceRange(result.length(), result.length() + predicate.length(), i));
+            result.append(predicate).append("\n)");
         }
 
-        return result.toString();
-    }
-
-    /** Legacy <w> replacement used by former SQLSelectBuilder. */
-    private String joinLegacyWherePredicates() {
-        StringBuilder result = new StringBuilder();
-
-        for (String predicate : predicates) {
-            result.append(" AND (")
-                  .append(predicate)
-                  .append("\n)");
-        }
-
-        return result.toString();
+        return new Edit(start, end, result.append(suffix).toString(), 10, namedSources);
     }
 
     private void requireSimple(String action) {
@@ -946,12 +946,20 @@ public final class SqlSelect {
 
       final int priority;
 
+      final List<NamedSourceRange> namedSources;
+
         Edit( int start, int end, String replacement, int priority )
+        {
+            this(start, end, replacement, priority, Collections.emptyList());
+        }
+
+        Edit(int start, int end, String replacement, int priority, List<NamedSourceRange> namedSources)
         {
             this.start = start;
             this.end = end;
             this.replacement = replacement;
             this.priority = priority;
+            this.namedSources = namedSources;
         }
     }
 

@@ -189,8 +189,14 @@ public class DataSetSelectBuilder {
      * Значения IParameters считываются только при выполнении запроса.
      */
     public PreparedSql prepare() {
-        if (prepared == null)
-            prepared = createSelect().prepare();
+        if (prepared == null) {
+            SqlSelect select = createSelect();
+            boolean localOrderBy = sorting != null && sorting.expression != null;
+            boolean localPredicate = predicates.stream().anyMatch(part -> part.expression != null);
+            prepared = localPredicate || localOrderBy
+                    ? select.prepare(localPredicate ? i -> predicates.get(i).expression != null : null, localOrderBy)
+                    : select.prepare();
+        }
         return prepared;
     }
 
@@ -231,7 +237,7 @@ public class DataSetSelectBuilder {
                     value = resolveNamed(
                             primary,
                             fallbacks,
-                            parameter.getName()
+                            parameter
                     );
                     break;
 
@@ -411,10 +417,18 @@ public class DataSetSelectBuilder {
     }
 
     /** */
-    private static Object resolveNamed ( IParameters primary, List<ISQLExpression> fallbacks, String name )
+    private Object resolveNamed(IParameters primary, List<ISQLExpression> fallbacks, Parameter parameter)
     {
+        String name = parameter.getName();
         if( primary.hasParameter(name) )
             return primary.getParameter(name);
+
+        int sourceId = parameter.getSourceId();
+        if (sourceId >= 0 && sourceId <= predicates.size()) {
+            Part source = sourceId == predicates.size() ? sorting : predicates.get(sourceId);
+            if (source != null && source.expression != null && source.expression.hasParameter(name))
+                return source.expression.getParameter(name);
+        }
 
         boolean found = false;
         Object value = null;

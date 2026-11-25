@@ -8,6 +8,7 @@ import ru.inversion.dataset.parser.lexer.SqlScanner;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -53,12 +54,18 @@ public final class SqlParameterizer {
             List<SqlScanner.Token> tokens,
             boolean oracle
     ) {
-        return new SqlParameterizer(source, tokens, oracle).compile();
+        return prepare(source, tokens, oracle, Collections.emptyList());
     }
 
-    private PreparedSql compile() {
+    static PreparedSql prepare(String source, List<SqlScanner.Token> tokens, boolean oracle,
+                               List<NamedSourceRange> namedSources) {
+        return new SqlParameterizer(source, tokens, oracle).compile(namedSources);
+    }
+
+    private PreparedSql compile(List<NamedSourceRange> namedSources) {
         StringBuilder sql = new StringBuilder();
         List<Parameter> parameters = new ArrayList<>();
+        int namedSourceIndex = 0;
 
         boolean parameterize = true;
 
@@ -167,8 +174,18 @@ public final class SqlParameterizer {
                     break;
 
                 case NAMED_PARAMETER:
+                    int offset = token.start();
+                    while (namedSourceIndex < namedSources.size()
+                            && namedSources.get(namedSourceIndex).end <= offset)
+                        namedSourceIndex++;
+                    int sourceId = Parameter.GLOBAL_SOURCE;
+                    if (namedSourceIndex < namedSources.size()) {
+                        NamedSourceRange range = namedSources.get(namedSourceIndex);
+                        if (range.start <= offset)
+                            sourceId = range.sourceId;
+                    }
                     sql.append('?');
-                    parameters.add(Parameter.named(text.substring(1)));
+                    parameters.add(Parameter.named(text.substring(1), sourceId));
                     break;
 
                 case NUMBERED_PARAMETER:
@@ -204,6 +221,19 @@ public final class SqlParameterizer {
             throw new IllegalArgumentException("Unbalanced SQL parentheses");
 
         return new PreparedSql(sql.toString(), parameters);
+    }
+
+    /** Диапазон исходного фрагмента до преобразования SQL в JDBC-текст. */
+    static final class NamedSourceRange {
+        final int start;
+        final int end;
+        final int sourceId;
+
+        NamedSourceRange(int start, int end, int sourceId) {
+            this.start = start;
+            this.end = end;
+            this.sourceId = sourceId;
+        }
     }
 
     private static int parseNumberedPosition(String text) {
