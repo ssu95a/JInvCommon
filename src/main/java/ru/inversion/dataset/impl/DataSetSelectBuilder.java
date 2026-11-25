@@ -39,6 +39,8 @@ public class DataSetSelectBuilder {
 
     private Part sorting;
 
+    private String afterOrderBy;
+
     private Integer rowLimit;
 
     private String mark;
@@ -146,6 +148,14 @@ public class DataSetSelectBuilder {
             return orderBy((String) null);
         String sql = Checks.Require.text( expression.getSQL(), "orderBy.sql");
         sorting = new Part(sql, expression);
+        invalidate();
+        return this;
+    }
+
+    /** Задаёт окончание SELECT после сортировки вместо ограничения rowLimit. */
+    public DataSetSelectBuilder afterOrderBy(String sql) {
+        String fragment = sql == null ? null : sql.trim();
+        afterOrderBy = S.isNullOrEmpty(fragment) ? null : fragment;
         invalidate();
         return this;
     }
@@ -313,7 +323,8 @@ public class DataSetSelectBuilder {
 
         select.setPredicates(predicatesSql);
         select.setOrderBy(sorting == null ? null : sorting.sql);
-        select.setRowLimit(rowLimit);
+        select.setRowLimit(afterOrderBy == null ? rowLimit : null);
+        select.setAfterOrderBy(afterOrderBy);
 
         if( mark != null )
             select.setMark(mark, "MARK");

@@ -61,6 +61,14 @@ public class SqlSelectTest {
         assertTrue(sql, sql.indexOf("ORDER BY") < sql.indexOf("limit 10"));
     }
 
+    @Test public void addsAfterOrderByBeforeTerminatorWithoutSorting() {
+        SqlSelect select = ora("select id from t -- исходный комментарий\n; -- конец");
+        select.setAfterOrderBy("FOR UPDATE NOWAIT");
+        assertEquals("select id from t\nFOR UPDATE NOWAIT\n -- исходный комментарий\n; -- конец",
+                select.prepare().getSql());
+        assertThrows(IllegalArgumentException.class, () -> select.setAfterOrderBy("FOR UPDATE; SELECT 1"));
+    }
+
 
     @Test public void addsPostgresRowLimitBeforeOffset() {
         SqlSelect select = pg("select id from t order by id offset 20");

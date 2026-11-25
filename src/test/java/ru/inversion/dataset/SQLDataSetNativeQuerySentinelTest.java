@@ -167,6 +167,40 @@ public class SQLDataSetNativeQuerySentinelTest {
     }
 
     @Test
+    public void afterOrderByAddsSqlAndTakesPrecedenceOverRowLimit() throws Exception {
+        SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
+        ds.setTaskContext(oracleTaskContext());
+        ds.setSQL("select ID from NATIVE_SOURCE where ID > :minimum");
+        ds.setOrderBy("ID DESC");
+        ds.setRowLimit(5);
+        ds.needReCreateReader.setValue(false);
+        ds.setAfterOrderBy("  OFFSET :skip ROWS FETCH NEXT :take ROWS ONLY  ");
+        assertTrue(ds.needReCreateReader.getValue());
+        assertEquals("OFFSET :skip ROWS FETCH NEXT :take ROWS ONLY", ds.getAfterOrderBy());
+
+        PreparedSql prepared = ds.prepareDataQuery();
+        String sql = prepared.getSql();
+        assertTrue(sql, sql.contains("ORDER BY ID DESC"));
+        assertTrue(sql, sql.indexOf("ORDER BY ID DESC") < sql.indexOf("OFFSET ? ROWS FETCH NEXT ? ROWS ONLY"));
+        assertFalse(sql, sql.contains("FETCH FIRST"));
+        assertEquals(3, prepared.getParameters().size());
+        assertEquals("minimum", prepared.getParameters().get(0).getName());
+        assertEquals("skip", prepared.getParameters().get(1).getName());
+        assertEquals("take", prepared.getParameters().get(2).getName());
+        assertTrue(ds.createAggregateSourceBuilder(false).prepare().getSql().contains("ORDER BY ID DESC"));
+
+        ds.needReCreateReader.setValue(false);
+        ds.setAfterOrderBy(ds.getAfterOrderBy());
+        assertFalse(ds.needReCreateReader.getValue());
+        ds.setAfterOrderBy(" ");
+        assertTrue(ds.needReCreateReader.getValue());
+        assertNull(ds.getAfterOrderBy());
+        String cleared = ds.prepareDataQuery().getSql();
+        assertTrue(cleared, cleared.contains("FETCH FIRST ? ROWS ONLY"));
+        assertFalse(cleared, cleared.contains("OFFSET"));
+    }
+
+    @Test
     public void legacyOrderByPreservesDateLiterals() throws Exception {
         SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
         ds.setTaskContext(oracleTaskContext());

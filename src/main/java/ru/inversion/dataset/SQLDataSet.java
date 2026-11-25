@@ -65,6 +65,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    private   String        orderBYExpression;
 
+   private String afterOrderBy;
+
    /**
     * Ограничение количества строк внешнего SELECT.
     * null означает отсутствие runtime override.
@@ -834,6 +836,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       addPredicates(builder, ignoreFilters);
       builder.orderBy(getOrderBy());
       builder.rowLimit(getRowLimit());
+      builder.afterOrderBy(getAfterOrderBy());
 
       if (isSupportMark()) {
          String mark = getMarkSQLPart();
@@ -1095,6 +1098,23 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    @Override
    public String getOrderBy( ) {
       return orderBYExpression;
+   }
+
+   /** Возвращает фрагмент SQL после сортировки или null. */
+   public String getAfterOrderBy() {
+      return afterOrderBy;
+   }
+
+   /** Задаёт фрагмент SQL после сортировки вместо ограничения из setRowLimit. */
+   public void setAfterOrderBy(String value) {
+      String fragment = value == null ? null : value.trim();
+      if (S.isNullOrEmpty(fragment))
+         fragment = null;
+
+      if (!Objects.equals(afterOrderBy, fragment)) {
+         afterOrderBy = fragment;
+         needReCreateReader();
+      }
    }
 
 
@@ -2249,9 +2269,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       DataSetSelectBuilder source = createDataSetSelectBuilder(ignoreFilter);
       source.mark(null);
 
-      // ORDER BY only affects aggregate membership when a runtime row limit
-      // is active. Otherwise keep the aggregate source free of runtime sort.
-      if( getRowLimit() == null )
+      // Сортировка определяет состав строк при ограничении выборки.
+      if( getRowLimit() == null && getAfterOrderBy() == null )
           source.orderBy( (String)null );
 
       return source;

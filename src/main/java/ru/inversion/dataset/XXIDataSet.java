@@ -304,12 +304,8 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         DataSetSelectBuilder builder = createDataSetSelectBuilder(false);
         builder.mark(null);
 
-        /*
-         * Sorting is irrelevant for an unbounded bulk operation and may be
-         * expensive. With runtime rowLimit it defines which rows belong to
-         * the DataSet and must therefore be preserved.
-         */
-        if( getRowLimit() == null )
+        // Сохраняем порядок, если ограничение выборки может зависеть от сортировки.
+        if( getRowLimit() == null && getAfterOrderBy() == null )
             builder.orderBy((String)null);
 
         return builder;

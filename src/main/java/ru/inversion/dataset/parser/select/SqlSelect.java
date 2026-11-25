@@ -39,6 +39,8 @@ public final class SqlSelect {
 
     private String orderBy;
 
+    private String afterOrderBy;
+
     private Integer rowLimit;
 
     private String markExpression;
@@ -259,6 +261,15 @@ public final class SqlSelect {
         setOrderBy(expression);
     }
 
+    /** Добавляет фрагмент в конец внешнего SELECT перед завершающей точкой с запятой. */
+    public void setAfterOrderBy(String expression) {
+        String value = optionalFragment(expression);
+        if (value != null)
+            checkFragment(value);
+        afterOrderBy = value;
+        invalidate();
+    }
+
     /**
      * Ограничить количество строк внешнего SELECT.
      * null снимает override и сохраняет row limit исходного SQL.
@@ -307,7 +318,7 @@ public final class SqlSelect {
     /** Исходная строка возвращается byte-for-byte, пока не задано изменений. */
     public String buildSql() {
         if (builtSql != null) return builtSql;
-        if (predicates.isEmpty() && orderBy == null && rowLimit == null
+        if (predicates.isEmpty() && orderBy == null && afterOrderBy == null && rowLimit == null
                 && markExpression == null && layout.legacyWhereMarkerStart < 0) {
             return builtSql = source;
         }
@@ -440,6 +451,11 @@ public final class SqlSelect {
                         30
                 ));
             }
+        }
+
+        if (afterOrderBy != null) {
+            edits.add(new Edit(layout.statementContentEnd, layout.statementContentEnd,
+                    "\n" + afterOrderBy + "\n", 40));
         }
 
         edits.sort(
@@ -639,6 +655,7 @@ public final class SqlSelect {
         }
 
         int mainContentEnd = lastSignificantEnd(selectIndex + 1, statementEndIndex);
+        result.statementContentEnd = mainContentEnd;
 
         if (where >= 0) {
             int afterWhere = nextSignificant(where + 1);
@@ -890,6 +907,7 @@ public final class SqlSelect {
 
         boolean compound;
         int statementEnd;
+        int statementContentEnd;
         boolean hasRowSelection;
         boolean orderSiblings;
 
