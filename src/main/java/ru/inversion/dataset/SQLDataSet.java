@@ -104,8 +104,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** Актуальный PreparedSql обычного data-query. */
    private PreparedSql preparedDataQuery;
 
-   /** Resolver fallback-значений, если PreparedSql построен нашим builder. */
-   private DataSetSelectBuilder preparedSelectBuilder;
+   /** Подготовленные части запроса и источники актуальных bind-значений. */
+   private DataSetSelectBuilder.PreparedQuery preparedQuery;
 
    /** Актуальное представление параметров DataSet. Явный null имеет приоритет. */
    protected final IParameters mainSqlParameters = new IParameters() {
@@ -849,9 +849,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       try
       {
-         PreparedSql sql = builder.prepare();
-         preparedSelectBuilder = builder;
-         return sql;
+         preparedQuery = builder.prepareQuery(preparedQuery);
+         return preparedQuery.sql();
       }
       catch( RuntimeException ex ) {
          String message = Tags.PRODUCT_LABEL + "Error preparing DataSet query\nSource SQL\n" + builder.sourceSql();
@@ -888,13 +887,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
             if( dataReader == null || needReCreateReader.getValue() )
             {
+               DataSetSelectBuilder.PreparedQuery previous = preparedQuery;
                if( dataReader != null )
                    closeDataReader();
 
-               preparedDataQuery = null;
-               preparedSelectBuilder = null;
-
+               preparedQuery = previous;
                PreparedSql sql = prepareDataQuery();
+               if( preparedQuery != null && (preparedQuery == previous || preparedQuery.sql() != sql) )
+                   preparedQuery = null;
                preparedDataQuery = sql;
 
                dataReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), sql, getRowMapper(), getRowClass(), isSupportMark());
@@ -924,9 +924,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
             needReCreateReader();
 
             // Не оставляем открытый курсор/PreparedStatement после неудачной загрузки.
-            preparedDataQuery = null;
-            preparedSelectBuilder = null;
-
             closeDataReaderAfterFailure(th);
 
             throw th;
@@ -959,8 +956,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
       List<Object> jdbcValues;
 
-      if( preparedSelectBuilder != null && preparedSelectBuilder.prepare() == preparedDataQuery )
-         jdbcValues = preparedSelectBuilder.jdbcValues(mainSqlParameters);
+      if( preparedQuery != null && preparedQuery.sql() == preparedDataQuery )
+         jdbcValues = preparedQuery.jdbcValues(mainSqlParameters);
       else
          jdbcValues = PreparedSqlValues.jdbc( preparedDataQuery, mainSqlParameters );
 
@@ -1572,6 +1569,8 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    private ISQLDataReader<P> detachDataReader() {
       ISQLDataReader<P> reader = dataReader;
       dataReader = null;
+      preparedDataQuery = null;
+      preparedQuery = null;
       return reader;
    }
 
@@ -1605,6 +1604,9 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     */
    @Override
    public void close( ) throws DataSetException {
+
+      if( dataReader == null )
+          detachDataReader();
 
       if( dataReader != null ) {
          try {

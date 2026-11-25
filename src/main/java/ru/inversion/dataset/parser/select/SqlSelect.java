@@ -5,8 +5,10 @@ import ru.inversion.dataset.parser.lexer.SqlScanner;
 import ru.inversion.dataset.parser.SqlScannerFactory;
 import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
 import ru.inversion.db.dialect.SqlDialect;
+import ru.inversion.dataset.parser.jdbc.Parameter;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.select.SqlParameterizer.NamedSourceRange;
+import ru.inversion.dataset.parser.select.SqlParameterizer.OrderOffsets;
 import ru.inversion.utils.Checks;
 
 import java.util.ArrayList;
@@ -29,6 +31,7 @@ import static ru.inversion.dataset.parser.lexer.SqlKeyword.*;
 public final class SqlSelect {
 
     private static final String DEFAULT_SUBQUERY_ALIAS = "qrslt";
+    private static final int ORDER_PRIORITY = 20;
 
     private final String source;
 
@@ -77,6 +80,11 @@ public final class SqlSelect {
             return source;
 
         return wrapCompoundSource( DEFAULT_SUBQUERY_ALIAS, replaceOrderBy );
+    }
+
+    /** У составного запроса замена сортировки может добавить внешнюю обёртку. */
+    public boolean isCompound() {
+        return layout.compound;
     }
 
     /** */
@@ -324,17 +332,18 @@ public final class SqlSelect {
     /** Исходная строка возвращается byte-for-byte, пока не задано изменений. */
     public String buildSql() {
         if (builtSql == null)
-            builtSql = renderSql(null, false, null);
+            builtSql = renderSql(null, false, null, null);
         return builtSql;
     }
 
-    private String renderSql(IntPredicate localPredicate, boolean localOrderBy, List<NamedSourceRange> namedSources) {
-        if (predicates.isEmpty() && orderBy == null && afterOrderBy == null && rowLimit == null
+    private String renderSql(IntPredicate localPredicate, boolean localOrderBy, List<NamedSourceRange> namedSources,
+                             OrderOffsets order) {
+        if (order == null && predicates.isEmpty() && orderBy == null && afterOrderBy == null && rowLimit == null
                 && markExpression == null && layout.legacyWhereMarkerStart < 0) {
             return source;
         }
 
-        List<Edit> edits = edits(localPredicate, localOrderBy);
+        List<Edit> edits = edits(localPredicate, localOrderBy, order != null);
         StringBuilder result = new StringBuilder(source.length() + 128);
         int copiedUntil = 0;
         for (Edit edit : edits) {
@@ -342,6 +351,10 @@ public final class SqlSelect {
                 throw new IllegalStateException("Overlapping SQL edits at " + edit.start);
             }
             result.append(source, copiedUntil, edit.start);
+            if (order != null && edit.priority == ORDER_PRIORITY) {
+                order.start = result.length();
+                order.end = order.start + edit.replacement.length();
+            }
             if (!edit.namedSources.isEmpty()) {
                 int base = result.length();
                 for (NamedSourceRange range : edit.namedSources)
@@ -379,8 +392,103 @@ public final class SqlSelect {
      */
     public PreparedSql prepare(IntPredicate localPredicate, boolean localOrderBy) {
         List<NamedSourceRange> namedSources = new ArrayList<>();
-        String sql = renderSql(localPredicate, localOrderBy, namedSources);
+        String sql = renderSql(localPredicate, localOrderBy, namedSources, null);
         return SqlParameterizer.prepare(sql, scanner.scan(sql), scanner instanceof OracleSqlScanner, namedSources);
+    }
+
+    /** Готовит запрос с исходной сортировкой и запоминает её границы. */
+    public PreparedOrderBy prepareOrderBy(IntPredicate localPredicate) {
+        if (layout.compound || layout.orderSiblings)
+            return null;
+
+        OrderOffsets order = new OrderOffsets();
+        List<NamedSourceRange> namedSources = new ArrayList<>();
+        String sql = renderSql(localPredicate, false, namedSources, order);
+        PreparedSql prepared = SqlParameterizer.prepare(sql, scanner.scan(sql),
+                scanner instanceof OracleSqlScanner, namedSources, order);
+        boolean reusable = order.reusable && order.sqlStart >= 0 && order.sqlEnd >= order.sqlStart;
+        PreparedSql originalSort = reusable && order.sqlStart != order.sqlEnd
+                ? new PreparedSql(prepared.getSql().substring(order.sqlStart, order.sqlEnd),
+                        prepared.getParameters().subList(order.firstParameter, order.afterLastParameter))
+                : null;
+        return new PreparedOrderBy(prepared, originalSort, true, layout.orderStart >= 0,
+                reusable ? order.sqlStart : -1, order.sqlEnd, order.firstParameter, order.afterLastParameter);
+    }
+
+    /** Подготовленный запрос с диапазоном сортировки в JDBC-тексте и параметрах. */
+    public static final class PreparedOrderBy {
+        private final PreparedSql sql;
+        private final PreparedSql originalSort;
+        private final boolean original;
+        private final boolean replacesOriginal;
+        private final int start;
+        private final int end;
+        private final int firstParameter;
+        private final int afterLastParameter;
+
+        private PreparedOrderBy(PreparedSql sql, PreparedSql originalSort, boolean original, boolean replacesOriginal,
+                                int start, int end, int firstParameter, int afterLastParameter) {
+            this.sql = sql;
+            this.originalSort = originalSort;
+            this.original = original;
+            this.replacesOriginal = replacesOriginal;
+            this.start = start;
+            this.end = end;
+            this.firstParameter = firstParameter;
+            this.afterLastParameter = afterLastParameter;
+        }
+
+        public PreparedSql sql() {
+            return sql;
+        }
+
+        public boolean canReplace() {
+            return start >= 0;
+        }
+
+        /** Возвращает null, если для новой сортировки нужен полный разбор запроса. */
+        public PreparedOrderBy withOrderBy(String expression, SqlScanner scanner, int sourceId) {
+            if (expression == null && original)
+                return this;
+            if (!canReplace())
+                return null;
+
+            PreparedSql sort = expression == null ? originalSort : prepareSort(expression, scanner, sourceId);
+            if (expression != null && sort == null)
+                return null;
+
+            String sortSql = sort == null ? "" : sort.getSql();
+            List<Parameter> sortParameters = sort == null ? Collections.emptyList() : sort.getParameters();
+            String currentSql = sql.getSql();
+            String result = new StringBuilder(currentSql.length() - (end - start) + sortSql.length())
+                    .append(currentSql, 0, start)
+                    .append(sortSql)
+                    .append(currentSql, end, currentSql.length())
+                    .toString();
+            List<Parameter> currentParameters = sql.getParameters();
+            List<Parameter> parameters = new ArrayList<>(
+                    currentParameters.size() - (afterLastParameter - firstParameter) + sortParameters.size());
+            parameters.addAll(currentParameters.subList(0, firstParameter));
+            parameters.addAll(sortParameters);
+            parameters.addAll(currentParameters.subList(afterLastParameter, currentParameters.size()));
+            return new PreparedOrderBy(new PreparedSql(result, parameters), originalSort, expression == null,
+                    replacesOriginal, start, start + sortSql.length(),
+                    firstParameter, firstParameter + sortParameters.size());
+        }
+
+        private PreparedSql prepareSort(String expression, SqlScanner scanner, int sourceId) {
+            String fragment = orderByClause(expression, replacesOriginal);
+            List<SqlScanner.Token> tokens = scanner.scan(fragment);
+            checkFragment(fragment, tokens);
+            for (SqlScanner.Token token : tokens) {
+                if (SqlParameterizer.mayChangeParameterization(fragment, token))
+                    return null;
+            }
+            List<NamedSourceRange> sources = sourceId == Parameter.GLOBAL_SOURCE
+                    ? Collections.emptyList()
+                    : Collections.singletonList(new NamedSourceRange(0, fragment.length(), sourceId));
+            return SqlParameterizer.prepare(fragment, tokens, scanner instanceof OracleSqlScanner, sources);
+        }
     }
 
     private void invalidate() {
@@ -389,7 +497,7 @@ public final class SqlSelect {
     }
 
     /** Структурные изменения исходного SQL. */
-    private List<Edit> edits(IntPredicate localPredicate, boolean localOrderBy) {
+    private List<Edit> edits(IntPredicate localPredicate, boolean localOrderBy, boolean captureOriginalOrder) {
         List<Edit> edits = new ArrayList<>(5);
 
         if (markExpression != null) {
@@ -432,7 +540,12 @@ public final class SqlSelect {
             }
         }
 
-        if (orderBy != null) {
+        if (captureOriginalOrder) {
+            int start = layout.orderStart >= 0 ? layout.orderStart : layout.orderInsertion;
+            int end = layout.orderEnd >= 0 ? layout.orderEnd : start;
+            edits.add(new Edit(start, end, source.substring(start, end), ORDER_PRIORITY));
+        }
+        else if (orderBy != null) {
             boolean replace = layout.orderStart >= 0;
             String prefix = replace ? "ORDER BY " : " ORDER BY ";
             List<NamedSourceRange> namedSources = localOrderBy
@@ -441,7 +554,7 @@ public final class SqlSelect {
                     : Collections.emptyList();
             edits.add(new Edit(replace ? layout.orderStart : layout.orderInsertion,
                     replace ? layout.orderEnd : layout.orderInsertion,
-                    prefix + orderBy + "\n", 20, namedSources));
+                    orderByClause(orderBy, replace), ORDER_PRIORITY, namedSources));
         }
 
         if( rowLimit != null ) {
@@ -476,6 +589,10 @@ public final class SqlSelect {
         );
 
         return edits;
+    }
+
+    private static String orderByClause(String expression, boolean replace) {
+        return (replace ? "ORDER BY " : " ORDER BY ") + expression + "\n";
     }
 
     private String rowLimitClause(int value) {
@@ -513,7 +630,10 @@ public final class SqlSelect {
 
     /** Не допускаем второй statement в пользовательском фрагменте. */
     private void checkFragment(String fragment) {
-        List<SqlScanner.Token> tokens = scanner.scan(fragment);
+        checkFragment(fragment, scanner.scan(fragment));
+    }
+
+    private static void checkFragment(String fragment, List<SqlScanner.Token> tokens) {
         int depth = 0;
         for (SqlScanner.Token token : tokens) {
             if (symbol(fragment, token, "(")) depth++;

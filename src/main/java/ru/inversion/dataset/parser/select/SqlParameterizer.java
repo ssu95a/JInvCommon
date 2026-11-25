@@ -59,10 +59,23 @@ public final class SqlParameterizer {
 
     static PreparedSql prepare(String source, List<SqlScanner.Token> tokens, boolean oracle,
                                List<NamedSourceRange> namedSources) {
-        return new SqlParameterizer(source, tokens, oracle).compile(namedSources);
+        return prepare(source, tokens, oracle, namedSources, null);
     }
 
-    private PreparedSql compile(List<NamedSourceRange> namedSources) {
+    static PreparedSql prepare(String source, List<SqlScanner.Token> tokens, boolean oracle,
+                               List<NamedSourceRange> namedSources, OrderOffsets order) {
+        return new SqlParameterizer(source, tokens, oracle).compile(namedSources, order);
+    }
+
+    /** Директивы и старые маркеры могут связывать параметризацию соседних фрагментов. */
+    static boolean mayChangeParameterization(String source, SqlScanner.Token token) {
+        SqlScanner.Kind kind = token.kind();
+        return kind == PARAMETERIZE_ON || kind == PARAMETERIZE_OFF
+                || ((kind == OPERATOR || kind == SYMBOL)
+                    && (source.charAt(token.start()) == '~' || source.charAt(token.end() - 1) == '~'));
+    }
+
+    private PreparedSql compile(List<NamedSourceRange> namedSources, OrderOffsets order) {
         StringBuilder sql = new StringBuilder();
         List<Parameter> parameters = new ArrayList<>();
         int namedSourceIndex = 0;
@@ -80,6 +93,15 @@ public final class SqlParameterizer {
             SqlScanner.Token token = tokens.get(i);
             SqlScanner.Kind kind = token.kind();
             String text = token.text(source);
+
+            if (order != null && order.reusable) {
+                order.reusable = !mayChangeParameterization(source, token);
+                order.capture(token.start(), token.end(), kind == WHITESPACE, sql.length(), parameters.size());
+                if (!order.hasTail && token.start() >= order.end && !isTrivia(kind)) {
+                    order.hasTail = true;
+                    order.reusable &= isOrderTerminator(i);
+                }
+            }
 
             if (kind == PARAMETERIZE_OFF)
                 parameterize = false;
@@ -220,7 +242,35 @@ public final class SqlParameterizer {
         if (depth != 0)
             throw new IllegalArgumentException("Unbalanced SQL parentheses");
 
+        if (order != null)
+            order.capture(source.length(), source.length() + 1, false, sql.length(), parameters.size());
+
         return new PreparedSql(sql.toString(), parameters);
+    }
+
+    /** Границы сортировки в исходном SQL, JDBC-тексте и списке параметров. */
+    static final class OrderOffsets {
+        int start;
+        int end;
+        int sqlStart = -1;
+        int sqlEnd = -1;
+        int firstParameter;
+        int afterLastParameter;
+        boolean reusable = true;
+        private boolean hasTail;
+
+        void capture(int from, int to, boolean whitespace, int sqlLength, int parameterCount) {
+            if (start >= from && start < to) {
+                reusable &= start == from || whitespace;
+                sqlStart = sqlLength + start - from;
+                firstParameter = parameterCount;
+            }
+            if (end >= from && end < to) {
+                reusable &= end == from || whitespace;
+                sqlEnd = sqlLength + end - from;
+                afterLastParameter = parameterCount;
+            }
+        }
     }
 
     /** Диапазон исходного фрагмента до преобразования SQL в JDBC-текст. */

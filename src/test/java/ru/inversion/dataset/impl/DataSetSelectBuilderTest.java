@@ -303,6 +303,45 @@ public class DataSetSelectBuilderTest {
         assertEquals(Parameter.Kind.NAMED, b.prepare().getParameters().get(0).getKind());
     }
 
+    @Test public void preparedSortingCanBeInsertedBeforeLimitAndReadsLiveValues() {
+        DataSetSelectBuilder b = DataSetSelectBuilder.forDataSet(
+                "select id from t where id >= :base limit ?", SqlDialectFactory.POSTGRES);
+        Expr filter = new Expr("rank >= :arg").set("arg", 5);
+        b.addPredicate(filter);
+        DataSetSelectBuilder.PreparedQuery original = b.prepareQuery(null);
+
+        Expr sort = new Expr("case when id = :arg then 1 else 2 end, ? DESC").set("arg", 8);
+        b.orderBy(sort);
+        DataSetSelectBuilder.PreparedQuery sorted = b.prepareQuery(original);
+        PreparedSql full = b.prepare();
+
+        assertEquals(full.getSql(), sorted.sql().getSql());
+        assertSame(original.sql().getParameters().get(0), sorted.sql().getParameters().get(0));
+        assertSame(original.sql().getParameters().get(2), sorted.sql().getParameters().get(4));
+        assertEquals(b.jdbcValues(new Params().set("base", 10).set(0, 11).set(1, 12)),
+                sorted.jdbcValues(new Params().set("base", 10).set(0, 11).set(1, 12)));
+        filter.set("arg", 13);
+        assertEquals(Arrays.asList(13, 10, 8, 11, 12),
+                sorted.jdbcValues(new Params().set("base", 10).set(0, 11).set(1, 12)));
+    }
+
+    @Test public void sortDirectiveCanReparameterizeTheTail() {
+        DataSetSelectBuilder b = DataSetSelectBuilder.forDataSet(
+                "select id from t where id >= :base order by id limit 25", SqlDialectFactory.POSTGRES);
+        DataSetSelectBuilder.PreparedQuery original = b.prepareQuery(null);
+        assertEquals(2, original.sql().getParameters().size());
+
+        b.orderBy("id DESC /* @parameterize:off */");
+        PreparedSql sorted = b.prepareQuery(original).sql();
+        assertEquals(b.prepare().getSql(), sorted.getSql());
+        assertTrue(sorted.getSql(), sorted.getSql().contains("limit 25"));
+        assertEquals(1, sorted.getParameters().size());
+
+        b.orderBy("id ASC");
+        PreparedSql ascending = b.prepareQuery(original).sql();
+        assertSame(original.sql().getParameters().get(1), ascending.getParameters().get(1));
+    }
+
     @Test public void markComesAfterOriginalSelectItems() {
         DataSetSelectBuilder b = new DataSetSelectBuilder("select x, y from t order by 1", SqlDialectFactory.ORACLE);
         b.mark("0");

@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.IntPredicate;
 
 /**
  * Основной builder одного SELECT для DataSet.
@@ -190,14 +191,65 @@ public class DataSetSelectBuilder {
      */
     public PreparedSql prepare() {
         if (prepared == null) {
-            SqlSelect select = createSelect();
-            boolean localOrderBy = sorting != null && sorting.expression != null;
-            boolean localPredicate = predicates.stream().anyMatch(part -> part.expression != null);
-            prepared = localPredicate || localOrderBy
-                    ? select.prepare(localPredicate ? i -> predicates.get(i).expression != null : null, localOrderBy)
-                    : select.prepare();
+            prepared = prepare(createSelect(), localPredicates(), localOrderBy());
         }
         return prepared;
+    }
+
+    private IntPredicate localPredicates() {
+        return predicates.stream().anyMatch(part -> part.expression != null)
+                ? index -> predicates.get(index).expression != null : null;
+    }
+
+    private boolean localOrderBy() {
+        return sorting != null && sorting.expression != null;
+    }
+
+    private static PreparedSql prepare(SqlSelect select, IntPredicate localPredicate, boolean localOrderBy) {
+        return localPredicate != null || localOrderBy
+                ? select.prepare(localPredicate, localOrderBy) : select.prepare();
+    }
+
+    /** Готовит запрос reader с возможностью переиспользовать тело при смене сортировки. */
+    public PreparedQuery prepareQuery(PreparedQuery previous) {
+        if (getClass() != DataSetSelectBuilder.class)
+            return new PreparedQuery(prepare(), null, null, null, this);
+
+        OrderCache cached = previous == null ? null : previous.orderCache;
+        String expression = sorting == null ? null : sorting.sql.trim();
+        if (S.isNullOrEmpty(expression))
+            expression = null;
+        boolean localOrderBy = localOrderBy();
+        int orderSourceId = localOrderBy ? predicates.size() : Parameter.GLOBAL_SOURCE;
+
+        if (cached != null && cached.matches(this)) {
+            SqlSelect.PreparedOrderBy order = cached.order.withOrderBy(expression, scanner, orderSourceId);
+            if (order == null)
+                return new PreparedQuery(prepare(), cached.predicates, sorting, null, null);
+            OrderCache next = order == cached.order ? cached : new OrderCache(this, order, cached.predicates);
+            return new PreparedQuery(order.sql(), cached.predicates, sorting, next, null);
+        }
+
+        IntPredicate localPredicate = localPredicates();
+        List<Part> parts = predicates.isEmpty() ? Collections.emptyList() : new ArrayList<>(predicates);
+        SqlSelect select = createSelect(true);
+        if (select == null)
+            return new PreparedQuery(prepare(), parts, sorting, null, null);
+
+        SqlSelect.PreparedOrderBy order;
+        try {
+            order = select.prepareOrderBy(localPredicate);
+        } catch (IllegalArgumentException ex) {
+            if (expression == null)
+                throw ex;
+            // Новая сортировка может заменить фрагмент, который не проходит параметризацию.
+            order = null;
+        }
+        if (order != null)
+            order = order.withOrderBy(expression, scanner, orderSourceId);
+        OrderCache cache = order != null && order.canReplace() ? new OrderCache(this, order, parts) : null;
+        PreparedSql sql = order == null ? prepare(select, localPredicate, localOrderBy) : order.sql();
+        return new PreparedQuery(sql, parts, sorting, cache, null);
     }
 
     /** */
@@ -214,12 +266,16 @@ public class DataSetSelectBuilder {
      */
     public List<Object> values( IParameters primary, int positionalOffset )
     {
+        return values(prepare(), predicates, sorting, primary, positionalOffset);
+    }
+
+    private static List<Object> values(PreparedSql plan, List<Part> predicates, Part sorting,
+                                       IParameters primary, int positionalOffset)
+    {
         Checks.Require.object( primary, "primary");
         Checks.Numeric.positiveOrZero(positionalOffset,"positionalOffset");
 
-        PreparedSql plan = prepare();
-
-        List<ISQLExpression> fallbacks = fallbacks();
+        List<ISQLExpression> fallbacks = fallbacks(predicates, sorting);
 
         List<Object> values = new ArrayList<>(plan.getParameters().size());
         int positionalIndex = 0;
@@ -237,7 +293,9 @@ public class DataSetSelectBuilder {
                     value = resolveNamed(
                             primary,
                             fallbacks,
-                            parameter
+                            parameter,
+                            predicates,
+                            sorting
                     );
                     break;
 
@@ -302,6 +360,11 @@ public class DataSetSelectBuilder {
     /** */
     private SqlSelect createSelect()
     {
+        return createSelect(false);
+    }
+
+    private SqlSelect createSelect(boolean reuseOrder)
+    {
         String source;
         String sql;
         SqlSelect select;
@@ -315,6 +378,8 @@ public class DataSetSelectBuilder {
             source = queryAlias == null ? sourceSql
                     : "SELECT " + queryAlias + ".* FROM (\n" + sourceSql + "\n) " + queryAlias;
             select = new SqlSelect(source, dialect);
+            if (reuseOrder && select.isCompound())
+                return null;
             sql = select.wrapCompoundForOuterClauses(!predicates.isEmpty(), sorting != null);
         }
         if (optimizerHint != null)
@@ -390,7 +455,7 @@ public class DataSetSelectBuilder {
     }
 
     /** */
-    private List<ISQLExpression> fallbacks() {
+    private static List<ISQLExpression> fallbacks(List<Part> predicates, Part sorting) {
 
         List<ISQLExpression> result = new ArrayList<>();
 
@@ -417,7 +482,8 @@ public class DataSetSelectBuilder {
     }
 
     /** */
-    private Object resolveNamed(IParameters primary, List<ISQLExpression> fallbacks, Parameter parameter)
+    private static Object resolveNamed(IParameters primary, List<ISQLExpression> fallbacks, Parameter parameter,
+                                       List<Part> predicates, Part sorting)
     {
         String name = parameter.getName();
         if( primary.hasParameter(name) )
@@ -501,6 +567,81 @@ public class DataSetSelectBuilder {
 
     private void invalidate() {
         prepared = null;
+    }
+
+    /** План reader и источники актуальных значений параметров. */
+    public static final class PreparedQuery {
+        private final PreparedSql sql;
+        private final List<Part> predicates;
+        private final Part sorting;
+        private final OrderCache orderCache;
+        private final DataSetSelectBuilder customBuilder;
+
+        private PreparedQuery(PreparedSql sql, List<Part> predicates, Part sorting, OrderCache orderCache,
+                              DataSetSelectBuilder customBuilder) {
+            this.sql = sql;
+            this.predicates = predicates;
+            this.sorting = sorting;
+            this.orderCache = orderCache;
+            this.customBuilder = customBuilder;
+        }
+
+        public PreparedSql sql() {
+            return sql;
+        }
+
+        public List<Object> jdbcValues(IParameters primary) {
+            if (customBuilder != null)
+                return customBuilder.prepare() == sql
+                        ? customBuilder.jdbcValues(primary) : PreparedSqlValues.jdbc(sql, primary);
+            return PreparedSqlValues.jdbc(sql, values(sql, predicates, sorting, primary, 0));
+        }
+    }
+
+    /** Настройки, от которых зависит подготовленный SQL вне сортировки. */
+    private static final class OrderCache {
+        final SqlSelect.PreparedOrderBy order;
+        final List<Part> predicates;
+        final String source;
+        final SqlDialect dialect;
+        final boolean legacyShape;
+        final String tableAlias;
+        final String queryAlias;
+        final String hint;
+        final String mark;
+        final String afterOrderBy;
+        final Integer rowLimit;
+
+        OrderCache(DataSetSelectBuilder builder, SqlSelect.PreparedOrderBy order, List<Part> predicates) {
+            this.order = order;
+            this.predicates = predicates;
+            source = builder.sourceSql;
+            dialect = builder.dialect;
+            legacyShape = builder.useLegacySourceShape;
+            tableAlias = builder.tableAlias;
+            queryAlias = builder.queryAlias;
+            hint = builder.optimizerHint;
+            mark = builder.mark;
+            afterOrderBy = builder.afterOrderBy;
+            rowLimit = builder.rowLimit;
+        }
+
+        boolean matches(DataSetSelectBuilder builder) {
+            if (dialect != builder.dialect || legacyShape != builder.useLegacySourceShape
+                    || !source.equals(builder.sourceSql) || !Objects.equals(tableAlias, builder.tableAlias)
+                    || !Objects.equals(queryAlias, builder.queryAlias) || !Objects.equals(hint, builder.optimizerHint)
+                    || !Objects.equals(mark, builder.mark) || !Objects.equals(afterOrderBy, builder.afterOrderBy)
+                    || !Objects.equals(rowLimit, builder.rowLimit) || predicates.size() != builder.predicates.size())
+                return false;
+
+            for (int i = 0; i < predicates.size(); i++) {
+                Part cached = predicates.get(i);
+                Part current = builder.predicates.get(i);
+                if (cached.expression != current.expression || !cached.sql.equals(current.sql))
+                    return false;
+            }
+            return true;
+        }
     }
 
     private static final class Part {

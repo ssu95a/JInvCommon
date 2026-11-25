@@ -205,6 +205,38 @@ public class SQLDataSetNativeQuerySentinelTest {
     }
 
     @Test
+    public void changingOrderReusesPreparedBodyAndRestoresSourceOrder() throws Exception {
+        SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
+        ds.setTaskContext(oracleTaskContext());
+        ds.setSQL("select id from items where category = :category "
+                + "order by case when id = :original then 1 else 2 end "
+                + "offset :skip rows fetch next :take rows only");
+
+        PreparedSql original = ds.prepareDataQuery();
+        ds.setOrderBy("1, case when id = :replacement then 2 else 1 end");
+        PreparedSql sorted = ds.prepareDataQuery();
+
+        assertTrue(sorted.getSql(), sorted.getSql().contains("ORDER BY 1, case when id = ? then 2 else 1 end"));
+        assertEquals(4, sorted.getParameters().size());
+        assertSame(original.getParameters().get(0), sorted.getParameters().get(0));
+        assertEquals("replacement", sorted.getParameters().get(1).getName());
+        assertSame(original.getParameters().get(2), sorted.getParameters().get(2));
+        assertSame(original.getParameters().get(3), sorted.getParameters().get(3));
+
+        ds.setOrderBy(null);
+        PreparedSql restored = ds.prepareDataQuery();
+        assertEquals(original.getSql(), restored.getSql());
+        assertEquals(original.getParameters(), restored.getParameters());
+
+        ds.setWherePredicat("id <> :excluded");
+        ds.setOrderBy("id DESC");
+        PreparedSql filtered = ds.prepareDataQuery();
+        assertEquals("excluded", filtered.getParameters().get(0).getName());
+        assertEquals("category", filtered.getParameters().get(1).getName());
+        assertNotSame(original.getParameters().get(0), filtered.getParameters().get(1));
+    }
+
+    @Test
     public void legacyOrderByPreservesDateLiterals() throws Exception {
         SQLDataSet<Row> ds = new SQLDataSet<>(Row.class);
         ds.setTaskContext(oracleTaskContext());
