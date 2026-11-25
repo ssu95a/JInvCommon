@@ -372,6 +372,23 @@ class SQLDataSetLifecycleTest {
     }
 
     @Test
+    @SuppressWarnings("deprecation")
+    void legacyLimitRowsSetsAndClearsRowLimit() {
+        TestDataSet ds = new TestDataSet();
+        Reader reader = new Reader();
+        ds.useReader(reader);
+
+        ds.setLimitRows(10);
+        assertEquals(Integer.valueOf(10), ds.getRowLimit());
+        assertTrue(ds.readerNeedsRecreation());
+
+        ds.useReader(reader);
+        ds.setLimitRows(0);
+        assertNull(ds.getRowLimit());
+        assertTrue(ds.readerNeedsRecreation());
+    }
+
+    @Test
     void negativeRowLimitIsRejectedWithoutChangingState() {
         TestDataSet ds = new TestDataSet();
         Reader reader = new Reader();

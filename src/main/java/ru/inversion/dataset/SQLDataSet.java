@@ -416,6 +416,14 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       }
    }
 
+   /**
+    * @deprecated Используйте {@link #setRowLimit(Integer)}. Значение 0 снимает ограничение DataSet.
+    */
+   @Deprecated
+   public void setLimitRows( int limit ) {
+      setRowLimit(limit == 0 ? null : limit);
+   }
+
 
    /** Возвращает runtime row limit или null, если override не задан. */
    public Integer getRowLimit() {
