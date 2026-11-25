@@ -196,7 +196,7 @@ public final class SqlSelect {
 
     private boolean endOfDataSetFrom(int index) {
         return index >= sourceTokens.size()
-                || sourceTokens.get(index).start() >= layout.statementEnd
+                || sourceTokens.get(index).start() >= layout.statementContentEnd
                 || sourceTokens.get(index).start() == layout.legacyWhereMarkerStart
                 || in(keyword(index), WHERE, HAVING, WINDOW, QUALIFY, MODEL)
                 || keywords(index, GROUP, BY) || orderClauseAt(index) || tailAt(index)
@@ -544,6 +544,10 @@ public final class SqlSelect {
         int statementEndIndex = sourceTokens.size();
         int selectIndex = -1;
         int firstSignificant = nextSignificant(0);
+        int openingMarker = legacyTilde(firstSignificant) ? firstSignificant : -1;
+        if (openingMarker >= 0)
+            firstSignificant = nextSignificant(openingMarker + 1);
+
         if (firstSignificant >= sourceTokens.size() ||
                 (!keyword(firstSignificant, SELECT) && !keyword(firstSignificant, WITH))) {
             throw new IllegalArgumentException("Expected SELECT or WITH");
@@ -571,6 +575,17 @@ public final class SqlSelect {
         // Убрали отбор до SELECT: прочие начальные варианты сейчас не поддерживаем.
         if (selectIndex != firstSignificant && !keyword(firstSignificant, WITH)) {
             throw new IllegalArgumentException("Unsupported SELECT prefix");
+        }
+
+        int statementEnd = statementEndIndex < sourceTokens.size()
+                ? sourceTokens.get(statementEndIndex).start() : source.length();
+        if (openingMarker >= 0) {
+            // Маркеры остаются в исходном SQL до параметризации.
+            int closingMarker = lastSignificant(firstSignificant + 1, statementEndIndex);
+            if (!legacyTilde(closingMarker))
+                throw new IllegalArgumentException("Unpaired legacy ~ marker at offset "
+                        + sourceTokens.get(openingMarker).start());
+            statementEndIndex = closingMarker;
         }
 
         int where = -1, order = -1, tail = -1;
@@ -644,8 +659,7 @@ public final class SqlSelect {
         result.compound = compoundQuery;
         result.orderSiblings = siblings;
         result.markRestriction = markRestriction;
-        result.statementEnd = statementEndIndex < sourceTokens.size()
-                ? sourceTokens.get(statementEndIndex).start() : source.length();
+        result.statementEnd = statementEnd;
         result.hasRowSelection = limit >= 0 || offset >= 0 || fetch >= 0;
 
         int[] legacyWhereMarker = findLegacyWhereMarker();
@@ -852,6 +866,14 @@ public final class SqlSelect {
         int i = lastSignificant(first, exclusiveEnd);
         if (i < 0) throw new IllegalArgumentException("Missing SQL expression");
         return sourceTokens.get(i).end();
+    }
+
+    private boolean legacyTilde(int index) {
+        if (index < 0 || index >= sourceTokens.size())
+            return false;
+        SqlScanner.Token token = sourceTokens.get(index);
+        return (token.kind() == SYMBOL || token.kind() == OPERATOR)
+                && token.end() == token.start() + 1 && source.charAt(token.start()) == '~';
     }
 
     private static boolean symbol(String sql, SqlScanner.Token token, String value) {

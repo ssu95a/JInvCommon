@@ -312,6 +312,26 @@ public class DataSetSelectBuilderTest {
         assertTrue(sql.getSql().contains("q.id = ?"));
     }
 
+    @Test public void dataSetWrapsLegacyMarkedReportSelect() {
+        String source = "select repid, to_char(to_date(SUBSTR(to_char(repid),4),'DDMMYY'),'DD.MM.YY') crep, "
+                + "to_date(SUBSTR(to_char(repid),4),'DDMMYY') drep from "
+                + "(Select distinct to_number_n(concat('102',TO_CHAR(c.Df102Store,'ddmmyy'))) repid "
+                + "from F102_OBT_S_STORE c ) as vers  order by 3 desc";
+        DataSetSelectBuilder b = DataSetSelectBuilder.forDataSet("~" + source + "~", SqlDialectFactory.POSTGRES);
+
+        PreparedSql sql = b.prepare();
+
+        assertEquals("SELECT qrslt.* FROM (\n" + source + "\n) qrslt", sql.getSql());
+        assertTrue(sql.getParameters().isEmpty());
+    }
+
+    @Test public void dataSetAliasesTableAtEndOfLegacyMarkedSelect() {
+        DataSetSelectBuilder b = DataSetSelectBuilder.forDataSet("~select id from t~", SqlDialectFactory.POSTGRES);
+        b.queryAlias("q");
+
+        assertEquals("select id from t q", b.prepare().getSql());
+    }
+
     @Test public void compoundSourceUsesOuterFilterAndSort() {
         String source = "select name, id from a where kind = :kind"
                 + " union all select name, -id from b where kind = :extra;";

@@ -320,6 +320,29 @@ public class SqlSelectPrepareTest {
         assertEquals(new BigInteger("100"), p.getParameters().get(0).getValue());
     }
 
+    @Test public void legacyTildeProtectsWholeSelectDuringStructuralEdits() {
+        String source = "/* начало */ ~with q as (select 'A' code from t) "
+                + "select code from q where id = :id order by code desc~; -- конец";
+        for (SqlSelect select : Arrays.asList(pg(source), ora(source))) {
+            select.setOrderBy("case when code = 'B' then 1 else 2 end");
+            select.setAfterOrderBy("FOR UPDATE");
+
+            PreparedSql sql = select.prepare();
+
+            assertEquals("/* начало */ with q as (select 'A' code from t) "
+                    + "select code from q where id = ? ORDER BY case when code = 'B' then 1 else 2 end\n"
+                    + "\nFOR UPDATE\n; -- конец", sql.getSql());
+            assertParameterKinds(sql, Parameter.Kind.NAMED);
+            assertEquals("id", sql.getParameters().get(0).getName());
+        }
+    }
+
+    @Test public void legacyTildeStillRequiresOneSelectAndBothMarkers() {
+        assertRejected(() -> pg("~select id from t").prepare());
+        assertRejected(() -> pg("~select 1; select 2~").prepare());
+        assertRejected(() -> pg("~update t set id = 1~").prepare());
+    }
+
     @Test public void legacyWhereMarkerIsPredicateInsertionPoint() {
         SqlSelect select = pg(
                 "select * from t where (TRUE <w>) order by id"
