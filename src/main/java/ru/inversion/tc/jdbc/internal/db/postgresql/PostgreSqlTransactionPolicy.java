@@ -1,5 +1,7 @@
 package ru.inversion.tc.jdbc.internal.db.postgresql;
 
+import org.postgresql.core.BaseConnection;
+import org.postgresql.core.TransactionState;
 import ru.inversion.tc.jdbc.internal.transaction.JdbcTransactionPolicy;
 
 import java.sql.Connection;
@@ -17,6 +19,10 @@ public final class PostgreSqlTransactionPolicy implements JdbcTransactionPolicy
    public boolean canCommitIdleTransaction(Connection connection )
            throws SQLException
    {
+      if( connection.isWrapperFor(BaseConnection.class)
+              && connection.unwrap(BaseConnection.class).getTransactionState() == TransactionState.IDLE )
+          return false;
+
       if( connection.getTransactionIsolation() != Connection.TRANSACTION_READ_COMMITTED )
           return false;
 
