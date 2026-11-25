@@ -2568,7 +2568,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          dataReader = new JDBCDataReader<>(
             getTaskContextForUse().getConnection(),
             preparedSql,
-            AggrRSMapper.instance,
+            AggrRSMapper.forAggregates(aggrList),
             null,
             false
          );
