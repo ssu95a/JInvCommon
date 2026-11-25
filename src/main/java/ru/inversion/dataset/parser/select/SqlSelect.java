@@ -7,6 +7,7 @@ import ru.inversion.dataset.parser.lexer.OracleSqlScanner;
 import ru.inversion.db.dialect.SqlDialect;
 import ru.inversion.dataset.parser.jdbc.PreparedSql;
 import ru.inversion.dataset.parser.select.SqlParameterizer.NamedSourceRange;
+import ru.inversion.utils.Checks;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -20,10 +21,9 @@ import static ru.inversion.dataset.parser.lexer.SqlScanner.Kind.*;
 import static ru.inversion.dataset.parser.lexer.SqlKeyword.*;
 
 /**
- * Структурные изменения одного внешнего SELECT без дополнительной SQL-обёртки.
- *
- * Структура исходного SELECT разбирается при создании. Изменённый SQL
- * и PreparedSql кешируются до следующей структурной правки.
+ * Структура исходного SELECT, разбирается при создании.
+ * <p>
+ * Изменённый SQL и PreparedSql кешируются до следующей структурной правки.
  * prepare() повторно сканирует собранный SQL только при сбросе кеша.
  */
 public final class SqlSelect {
@@ -31,6 +31,7 @@ public final class SqlSelect {
     private static final String DEFAULT_SUBQUERY_ALIAS = "qrslt";
 
     private final String source;
+
     private final SqlScanner scanner;
 
     private final List<SqlScanner.Token> sourceTokens;
@@ -61,25 +62,24 @@ public final class SqlSelect {
     /** Совместимость с прежним внутренним API. */
     @Deprecated
     public SqlSelect(String sql, SqlScanner scanner) {
-        source = Objects.requireNonNull(sql, "sql");
-        this.scanner = Objects.requireNonNull(scanner, "scanner");
-        sourceTokens = scanner.scan(sql);
+
+        this.source  = Checks.Require.text(sql, "sql");
+        this.scanner = Checks.Require.object(scanner, "scanner");
+
+        this.sourceTokens = scanner.scan(sql);
         this.layout = inspect();
     }
 
     /** Возвращает SQL с внешним SELECT, если составному запросу нужны фильтр или сортировка. */
-    public String wrapCompoundForOuterClauses(boolean hasPredicates, boolean replaceOrderBy) {
+    public String wrapCompoundForOuterClauses( boolean hasPredicates, boolean replaceOrderBy )
+    {
         if (!layout.compound || (!replaceOrderBy && (!hasPredicates || layout.legacyWhereMarkerStart >= 0)))
             return source;
 
-        return wrapCompoundSource(DEFAULT_SUBQUERY_ALIAS, replaceOrderBy);
+        return wrapCompoundSource( DEFAULT_SUBQUERY_ALIAS, replaceOrderBy );
     }
 
-    /** Готовит источник строк текстового запроса DataSet. */
-    public String wrapLegacyDataSetSource(String queryAlias, boolean replaceOrderBy) {
-        return dataSetSource(queryAlias, replaceOrderBy).sql();
-    }
-
+    /** */
     public DataSetSource dataSetSource(String queryAlias, boolean replaceOrderBy) {
         String alias = queryAlias == null ? DEFAULT_SUBQUERY_ALIAS : queryAlias;
         // Предикаты при <w> вставляются в исходный запрос, где внешнего алиаса нет.
@@ -166,18 +166,22 @@ public final class SqlSelect {
     }
 
     /** Алиас скрывает прежнее имя таблицы. Ссылки внутри исходного SQL сохраняем. */
-    private void checkTableReferences(int table, String alias) {
+    private void checkTableReferences(int table, String alias)
+    {
         String tableName = identifierName(sourceTokens.get(table).text(source));
         boolean sameName = tableName.equals(identifierName(alias));
-        for (int i = 0, previous = -1; i < sourceTokens.size(); i = nextSignificant(i + 1)) {
-            if (i != table && identifier(i) && tableName.equals(identifierName(sourceTokens.get(i).text(source)))) {
+
+        for( int i = 0, previous = -1; i < sourceTokens.size(); i = nextSignificant(i + 1) )
+        {
+            if( i != table && identifier(i) && tableName.equals(identifierName(sourceTokens.get(i).text(source))))
+            {
                 boolean schemaQualified = previous >= 0 && symbol(source, sourceTokens.get(previous), ".");
                 int next = nextSignificant(i + 1);
+
                 boolean qualifier = next < sourceTokens.size() && symbol(source, sourceTokens.get(next), ".");
+
                 if (schemaQualified || !sameName && (qualifier || !(scanner instanceof OracleSqlScanner)))
-                    throw new IllegalArgumentException("queryAlias " + alias
-                            + " would hide SQL source name " + sourceTokens.get(table).text(source)
-                            + ". Declare the alias in the source SQL.");
+                    throw new IllegalArgumentException("queryAlias " + alias + " would hide SQL source name " + sourceTokens.get(table).text(source) + ". Declare the alias in the source SQL.");
             }
             previous = i;
         }
@@ -207,7 +211,7 @@ public final class SqlSelect {
 
     /** */
     public void setPredicates( List<String> values ) {
-        Objects.requireNonNull(values, "values");
+        Checks.Require.object(values, "values");
 
         List<String> copy = new ArrayList<>(values.size());
 
@@ -230,7 +234,7 @@ public final class SqlSelect {
      */
     @Deprecated
     public void setPredicates(List<String> values, List<Integer> sourceIds) {
-        Objects.requireNonNull(values, "values");
+        Checks.Require.object(values, "values");
 
         if (sourceIds != null && sourceIds.size() != values.size())
             throw new IllegalArgumentException("predicate sourceIds size mismatch");

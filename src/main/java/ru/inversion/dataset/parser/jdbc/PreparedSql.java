@@ -7,11 +7,11 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Immutable JDBC SQL plan.
+ * Неизменяемый план SQL запроса в формате JDBC.
  * <p>
- * Parameter at index {@code i} describes JDBC placeholder {@code i + 1}.
- * The list is a physical placeholder order only; it carries no fragment
- * ownership. Runtime values are resolved immediately before execution.
+ * Параметр с индексом {@code i} описывает JDBC параметр {@code i + 1}.
+ * Список представляет собой только физический порядок заполнителей;
+ * он не связан с фрагментами.
  */
 public final class PreparedSql {
 
@@ -37,9 +37,7 @@ public final class PreparedSql {
         return sql;
     }
 
-    /**
-     * Immutable snapshot of parameters in physical JDBC placeholder order.
-     */
+    /** Неизменяемый снимок параметров в физическом порядке заполнителей JDBC. */
     public List<Parameter> getParameters() {
         return parameters;
     }

@@ -269,23 +269,22 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
     }
 
 
-    static String renderExplainPlanSql(
-            PreparedSql preparedSql,
-            SqlScanner scanner
-    ) {
+    /** */
+    static String renderExplainPlanSql( PreparedSql preparedSql, SqlScanner scanner )
+    {
         String sql = preparedSql.getSql();
         StringBuilder result = new StringBuilder(sql.length() + 32);
 
         int copiedUntil = 0;
         int parameterIndex = 0;
 
-        for( SqlScanner.Token token : scanner.scan(sql) ) {
+        for( SqlScanner.Token token : scanner.scan(sql) )
+        {
             if( token.kind() != SqlScanner.Kind.POSITIONAL_PARAMETER )
                 continue;
 
             if( parameterIndex >= preparedSql.getParameters().size() )
-                throw new IllegalStateException(
-                        "PreparedSql has more JDBC placeholders than parameters");
+                throw new IllegalStateException( Tags.PRODUCT_LABEL + "PreparedSql has more JDBC placeholders than parameters");
 
             result.append(sql, copiedUntil, token.start());
             result.append(":p").append(++parameterIndex).append(' ');
@@ -293,14 +292,17 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         }
 
         if( parameterIndex != preparedSql.getParameters().size() )
-            throw new IllegalStateException(
-                    "PreparedSql has fewer JDBC placeholders than parameters");
+            throw new IllegalStateException( Tags.PRODUCT_LABEL + "PreparedSql has fewer JDBC placeholders than parameters");
 
         result.append(sql, copiedUntil, sql.length());
+
         return result.toString();
     }
 
-    private DataSetSelectBuilder createMarkSourceBuilder() {
+
+    /** */
+    private DataSetSelectBuilder createMarkSourceBuilder()
+    {
         DataSetSelectBuilder builder = createDataSetSelectBuilder(false);
         builder.mark(null);
 
@@ -311,7 +313,9 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         return builder;
     }
 
+    /** */
     private PreparedSql prepareMarkInsertSql( PreparedSql source ) {
+
         String[] key = markDescriptor.getMarkKeyColumns();
         StringBuilder sql = new StringBuilder("insert into ");
 
@@ -393,21 +397,20 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         return new PreparedSql( sql.toString(), parameters );
     }
 
-    /**
-     * Bind order of prepareMarkInsertSql:
-     * marker id, source SELECT values, marker id.
-     */
-    static List<Object> markInsertJdbcValues(
-            PreparedSql markSql,
-            Long markerID,
-            List<?> sourceValues
-    ) {
-        Objects.requireNonNull(markSql, "markSql");
-        Objects.requireNonNull(markerID, "markerID");
-        Objects.requireNonNull(sourceValues, "sourceValues");
 
-        List<Object> rawValues =
-                new ArrayList<>(sourceValues.size() + 2);
+    /** */
+    static List<Object> markInsertJdbcValues
+    (
+        PreparedSql markSql,
+        Long markerID,
+        List<?> sourceValues
+    )
+    {
+        Checks.Require.object( markSql, "markSql");
+        Checks.Require.object( markerID, "markerID");
+        Checks.Require.object( sourceValues, "sourceValues");
+
+        List<Object> rawValues = new ArrayList<>(sourceValues.size() + 2);
 
         rawValues.add(markerID);
         rawValues.addAll(sourceValues);
@@ -416,18 +419,16 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         return PreparedSqlValues.jdbc(markSql, rawValues);
     }
 
-    /**
-     * Bind order of prepareMarkClearSql:
-     * marker id, source SELECT values.
-     */
-    static List<Object> markClearJdbcValues(
+    /** */
+    static List<Object> markClearJdbcValues
+    (
             PreparedSql markSql,
             Long markerID,
             List<?> sourceValues
     ) {
-        Objects.requireNonNull(markSql, "markSql");
-        Objects.requireNonNull(markerID, "markerID");
-        Objects.requireNonNull(sourceValues, "sourceValues");
+        Checks.Require.object(markSql, "markSql");
+        Checks.Require.object(markerID, "markerID");
+        Checks.Require.object(sourceValues, "sourceValues");
 
         List<Object> rawValues =
                 new ArrayList<>(sourceValues.size() + 1);
@@ -449,7 +450,8 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
 	}
 
     /** Предикат отбора отмеченных строк. Префикс относится к ключу внешней выборки. */
-    private String markedRowPredicate(String prefix) {
+    private String markedRowPredicate(String prefix)
+    {
         String actualPrefix = prefix == null ? "" : prefix;
         String[] key = markDescriptor.getMarkKeyColumns();
 
@@ -480,9 +482,7 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                         + actualPrefix + key[0] + ")";
 
             default:
-                // Compatibility: marked aggregator historically tolerated
-                // a DataSet without mark support by producing no predicate.
-                return "";
+                return S.EMPTY_STRING;
         }
     }
 
@@ -507,13 +507,12 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
         if( !isSupportMark() || getMarkerID() == null )
             return null;
 
-        String predicate = markedRowPredicate("");
+        String predicate = markedRowPredicate(S.EMPTY_STRING);
+
         if( markDescriptor.getMarkMode() == MRK )
             return "CASE WHEN " + predicate + " THEN 1 ELSE 0 END";
 
-        return "nvl((select 1 from dual where "
-                + predicate
-                + "),0) ";
+        return "nvl((select 1 from dual where " + predicate + "),0) ";
     }
 
     /** {@inheritDoc} */
@@ -865,11 +864,10 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
             return rows( ).stream( ).filter( mrkprdkt.and(predicate) ).iterator();
 	}
 
-    DataSetSelectBuilder createMarkedRSIteratorBuilder(
-            boolean ignoreFilter
-    ) {
-        DataSetSelectBuilder builder =
-                createDataSetSelectBuilder(ignoreFilter);
+    /** */
+    DataSetSelectBuilder createMarkedRSIteratorBuilder( boolean ignoreFilter )
+    {
+        DataSetSelectBuilder builder = createDataSetSelectBuilder(ignoreFilter);
 
         builder.mark("1");
 
@@ -1071,30 +1069,23 @@ public class XXIDataSet<T> extends SQLDataSet<T> implements IXXIDataSet<T> {
                         getTaskContextForUse().dialect()
                 );
             }
-            else {
-                List<String> predicates =
-                        new ArrayList<>(predicatList.size() + 1);
+            else
+            {
+                List<String> predicates = new ArrayList<>(predicatList.size() + 1);
 
                 predicates.addAll(predicatList);
-                predicates.add(
-                        markedRowPredicate(aggrTable + ".")
-                );
+
+                predicates.add( markedRowPredicate(aggrTable + ".") );
 
                 preparedSql = prepareAggregateTableSql(
-                        aggrList,
-                        aggrTable,
-                        predicates,
-                        getTaskContextForUse().dialect()
+                    aggrList,
+                    aggrTable,
+                    predicates,
+                    getTaskContextForUse().dialect()
                 );
             }
 
-            dataReader = new JDBCDataReader<>(
-                    getTaskContextForUse().getConnection(),
-                    preparedSql,
-                    AggrRSMapper.forAggregates(aggrList),
-                    null,
-                    false
-            );
+            dataReader = new JDBCDataReader<>( getTaskContextForUse().getConnection(), preparedSql, AggrRSMapper.forAggregates(aggrList), null, false );
         }
 
         /** */

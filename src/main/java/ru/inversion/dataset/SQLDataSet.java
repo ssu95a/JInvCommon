@@ -91,12 +91,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /**
     * Коллекция предикатов
     */
-   protected Map<Integer,PredicateItem> predicates = new ObservableMap<>( new TreeMap<>(), new IObservableMap.IChangeMapListener() {
-      @Override
-      public void onChanged( IObservableMap.MapChangeEvent change ) {
-         needReCreateReader();
-      }
-   });
+   protected Map<Integer,PredicateItem> predicates = new ObservableMap<>( new TreeMap<>(), change -> needReCreateReader());
 
    @Override
    final public Map< Integer, PredicateItem > predicates() {
@@ -112,7 +107,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** Resolver fallback-значений, если PreparedSql построен нашим builder. */
    private DataSetSelectBuilder preparedSelectBuilder;
 
-   /** Живое представление параметров DataSet. Явный null имеет приоритет. */
+   /** Актуальное представление параметров DataSet. Явный null имеет приоритет. */
    protected final IParameters mainSqlParameters = new IParameters() {
 
         @Override
@@ -129,7 +124,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
         @Override public boolean hasParameter(String name)
         {
-            if (SQLDataSet.this.hasParameter(name))
+            if( SQLDataSet.this.hasParameter(name) )
                 return true;
 
             IParameters callback = SQLDataSet.this.getCallbackParameters();
@@ -138,7 +133,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
         @Override public boolean hasParameter(int index)
         {
-            if (SQLDataSet.this.hasParameter(index))
+            if( SQLDataSet.this.hasParameter(index) )
                 return true;
 
             IParameters callback = SQLDataSet.this.getCallbackParameters();
@@ -347,8 +342,10 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
       setPageSize(pageSize); return this;
    }
 
+
    /**
     * Устанавливает alias таблицы или результата подзапроса.
+    * <p>
     * Для простого текстового запроса заданный alias должен совпадать
     * с alias, уже объявленным в его FROM.
     */
@@ -477,7 +474,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
     * <p>
     * Используется методами DataSet для уведомления о том, что SQL выражение было изменено
     * и при запросе данных и необходимо пересоздать источник данных.
-    *
+    * <p>
     * (для внутреннего использования)
     */
    protected void needReCreateReader() {
@@ -659,7 +656,6 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
 
-
    /**
     * Возвращает часть SQL выражения в части 'SELECT' отвечающая за пометку.
     * <p>
@@ -670,6 +666,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    protected String getMarkSQLPart( ) {
       return null;
    }
+
 
    /** Отбор столбцов для селекта */
    public final static Predicate<Method> methodFilter = new Predicate< Method >() {
@@ -747,18 +744,18 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
 
-   /** */
+   /** Запрос на одной таблице */
    private static String tableSelect( Class<?> rowClass, Table table, String alias, SqlDialect dialect )
    {
       String from = " FROM " + table.name();
 
       if( alias != null )
-         from += " " + alias;
+          from += " " + alias;
 
       return Arrays.stream(rowClass.getMethods())
                 .filter(methodFilter)
                     .map(method -> columnMapper.apply(method, alias, dialect))
-                .collect(Collectors.joining(",", "SELECT ", from));
+                        .collect(Collectors.joining(",", "SELECT ", from));
    }
 
 
@@ -771,7 +768,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    /** */
    private int incrementCounter() throws DataSetException {
 
-      Integer execute_count = U.nvl( (Integer)getProperty("ds.execute_count"), Integer.valueOf(0) ) + 1;
+      Integer execute_count = U.nvl( getProperty("ds.execute_count"), 0 ) + 1;
 
       setProperty ( "ds.execute_count", execute_count );
 
@@ -779,7 +776,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
    }
 
 
-   /**  Canonical SELECT builder hook. */
+   /** Canonical SELECT builder */
    protected DataSetSelectBuilder createDataSetSelectBuilder( boolean ignoreFilters )
    {
         SqlDialect dialect = getTaskContextForUse().dialect();
@@ -787,7 +784,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
         builder.optimizerHint(getOptimizerHint());
 
-        addPredicates(builder, ignoreFilters);
+        addPredicates( builder, ignoreFilters);
 
         builder.orderBy(getOrderBy());
         builder.rowLimit(getRowLimit());
@@ -862,7 +859,7 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
          if( orderBy != null )
              message += "\nORDER BY fragment\n" + orderBy;
 
-         throw new DataSetException(message, ex);
+         throw new DataSetException( message, ex );
       }
    }
 
@@ -951,10 +948,12 @@ public class SQLDataSet<P> extends AbstractDataSetBase<P> implements ISQLDataSet
 
 
    /** */
-   private void executePreparedDataQuery() throws DataSetException {
+   private void executePreparedDataQuery() throws DataSetException
+   {
 
-      if( preparedDataQuery == null ) {
-          dataReader.executeQuery(mainSqlParameters);
+      if( preparedDataQuery == null )
+      {
+          dataReader.executeQuery( mainSqlParameters );
           return;
       }
 
